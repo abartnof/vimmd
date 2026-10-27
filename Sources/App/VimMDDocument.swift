@@ -2,10 +2,16 @@ import AppKit
 import Engine
 import Views
 
+@objc(VimMDDocument)
 open class VimMDDocument: NSDocument {
     public var session: VimSession?
     public var textView: VimMDTextView?
     public var isClosed: Bool = false
+
+    override public init() {
+        self.session = VimSession(initialText: "")
+        super.init()
+    }
 
     override open class var autosavesInPlace: Bool {
         return true

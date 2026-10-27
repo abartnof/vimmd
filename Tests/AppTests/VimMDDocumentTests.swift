@@ -211,6 +211,26 @@ func testAppDelegateMenuBarSetup() throws {
     }
 }
 
+func testDefaultInitHasSession() throws {
+    let doc = VimMDDocument()
+    guard doc.session != nil else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected VimMDDocument() default init to have a non-nil session"])
+    }
+}
+
+func testObjCRuntimeClassName() throws {
+    guard NSClassFromString("VimMDDocument") != nil else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected NSClassFromString(\"VimMDDocument\") to resolve without mangling"])
+    }
+}
+
+func testAppDelegateShouldOpenUntitledFile() throws {
+    let appDelegate = AppDelegate()
+    guard appDelegate.applicationShouldOpenUntitledFile(NSApplication.shared) == false else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected applicationShouldOpenUntitledFile to return false"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -223,7 +243,10 @@ let tests: [(String, () throws -> Void)] = [
     ("testDocumentWindowControllerSetup", testDocumentWindowControllerSetup),
     ("testDocumentAtomicWriteAndClearDirty", testDocumentAtomicWriteAndClearDirty),
     ("testAppDelegateTerminationPolicy", testAppDelegateTerminationPolicy),
-    ("testAppDelegateMenuBarSetup", testAppDelegateMenuBarSetup)
+    ("testAppDelegateMenuBarSetup", testAppDelegateMenuBarSetup),
+    ("testDefaultInitHasSession", testDefaultInitHasSession),
+    ("testObjCRuntimeClassName", testObjCRuntimeClassName),
+    ("testAppDelegateShouldOpenUntitledFile", testAppDelegateShouldOpenUntitledFile)
 ]
 
 for (name, test) in tests {

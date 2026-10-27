@@ -5,8 +5,20 @@ open class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    public func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
+    public func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        NSDocumentController.shared.openDocument(nil)
+        return true
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
+        if NSDocumentController.shared.documents.isEmpty {
+            NSDocumentController.shared.openDocument(nil)
+        }
     }
 
     public func setupMainMenu() {
