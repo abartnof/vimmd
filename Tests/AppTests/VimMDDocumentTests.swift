@@ -231,6 +231,71 @@ func testAppDelegateShouldOpenUntitledFile() throws {
     }
 }
 
+func testDocumentExSaveAndQuitActions() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+    let fileURL = tempDir.appendingPathComponent("ex_test_\(UUID().uuidString).md")
+    defer {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    // 1. :w triggers save and clears dirty
+    try "Original File".write(to: fileURL, atomically: true, encoding: .utf8)
+    let doc = try VimMDDocument(contentsOf: fileURL, ofType: "public.plain-text")
+    doc.makeWindowControllers()
+    doc.session?.feedKeys("iMutated \u{1b}")
+    guard doc.isDocumentEdited else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Document should be edited"])
+    }
+    doc.session?.feedKeys(":w\r")
+    guard !doc.isDocumentEdited else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: ":w should save and clear dirty"])
+    }
+    let diskContentAfterW = try String(contentsOf: fileURL, encoding: .utf8)
+    guard diskContentAfterW.hasPrefix("Mutated Original") else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected disk content to update after :w, got \(diskContentAfterW)"])
+    }
+
+    // 2. :q refuses to close dirty document
+    doc.session?.feedKeys("iMoreChanges\u{1b}")
+    guard doc.isDocumentEdited else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Document should be edited again"])
+    }
+    doc.session?.feedKeys(":q\r")
+    guard !doc.isClosed else {
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: ":q must not close a dirty document!"])
+    }
+
+    // 3. :q! closes dirty document without saving
+    doc.session?.feedKeys(":q!\r")
+    guard doc.isClosed else {
+        throw NSError(domain: "AppTests", code: 6, userInfo: [NSLocalizedDescriptionKey: ":q! should close dirty document"])
+    }
+    let diskContentAfterQBang = try String(contentsOf: fileURL, encoding: .utf8)
+    guard !diskContentAfterQBang.contains("MoreChanges") else {
+        throw NSError(domain: "AppTests", code: 7, userInfo: [NSLocalizedDescriptionKey: ":q! should NOT save changes to disk"])
+    }
+
+    // 4. :e! reloads disk contents
+    let doc2 = try VimMDDocument(contentsOf: fileURL, ofType: "public.plain-text")
+    doc2.makeWindowControllers()
+    try "Externally Modified Disk Content".write(to: fileURL, atomically: true, encoding: .utf8)
+    doc2.session?.feedKeys(":e!\r")
+    guard doc2.session?.serializeBuffer() == "Externally Modified Disk Content" else {
+        throw NSError(domain: "AppTests", code: 8, userInfo: [NSLocalizedDescriptionKey: ":e! should reload contents from disk"])
+    }
+
+    // 5. :wq saves then closes
+    doc2.session?.feedKeys("iNewText \u{1b}")
+    doc2.session?.feedKeys(":wq\r")
+    guard doc2.isClosed else {
+        throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: ":wq should close document"])
+    }
+    let diskContentAfterWQ = try String(contentsOf: fileURL, encoding: .utf8)
+    guard diskContentAfterWQ.hasPrefix("NewText ") else {
+        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: ":wq should save before closing"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -246,7 +311,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testAppDelegateMenuBarSetup", testAppDelegateMenuBarSetup),
     ("testDefaultInitHasSession", testDefaultInitHasSession),
     ("testObjCRuntimeClassName", testObjCRuntimeClassName),
-    ("testAppDelegateShouldOpenUntitledFile", testAppDelegateShouldOpenUntitledFile)
+    ("testAppDelegateShouldOpenUntitledFile", testAppDelegateShouldOpenUntitledFile),
+    ("testDocumentExSaveAndQuitActions", testDocumentExSaveAndQuitActions)
 ]
 
 for (name, test) in tests {

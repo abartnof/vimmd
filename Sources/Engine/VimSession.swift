@@ -36,6 +36,9 @@ public final class VimSession {
     /// Callback providing pre-calculated characterRange for TextKit 2 synchronization per DESIGN.md §3.5
     public var onLineDeltaWithRange: ((Int, Int, [String], NSRange) -> Void)?
 
+    /// Callback invoked when a system action (:w, :q, :wq, etc.) is emitted by the Vim engine.
+    public var onSystemAction: ((VimSystemAction) -> Void)?
+
     internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
         let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
         lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
@@ -99,11 +102,36 @@ public final class VimSession {
         return vim_context_is_dirty(ctx)
     }
 
+    public var pendingAction: VimSystemAction {
+        guard let ctx = context else { return VIM_ACTION_NONE }
+        return vim_context_get_pending_action(ctx)
+    }
+
+    public func clearPendingAction() {
+        guard let ctx = context else { return }
+        vim_context_clear_pending_action(ctx)
+    }
+
+    public var lastError: String? {
+        guard let ctx = context else { return nil }
+        guard let cStr = vim_context_get_last_error(ctx) else { return nil }
+        let str = String(cString: cStr)
+        return str.isEmpty ? nil : str
+    }
+
+    private func checkAndDispatchPendingAction() {
+        let action = pendingAction
+        if action != VIM_ACTION_NONE {
+            onSystemAction?(action)
+        }
+    }
+
     public func feedKeys(_ keys: String) {
         guard let ctx = context else { return }
         keys.withCString { cKeys in
             vim_context_feed_keys(ctx, cKeys)
         }
+        checkAndDispatchPendingAction()
     }
 
     public func executeEx(_ command: String) {
@@ -111,6 +139,7 @@ public final class VimSession {
         command.withCString { cCmd in
             vim_context_execute_ex(ctx, cCmd)
         }
+        checkAndDispatchPendingAction()
     }
 
     public func clearDirty() {

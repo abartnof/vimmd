@@ -64,7 +64,7 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        if session.mode == VIM_MODE_NORMAL || session.mode == VIM_MODE_VISUAL {
+        if session.mode == VIM_MODE_NORMAL || session.mode == VIM_MODE_VISUAL || session.mode == VIM_MODE_COMMAND {
             if let chars = event.characters {
                 session.feedKeys(chars)
                 synchronizeCaretWithSession()

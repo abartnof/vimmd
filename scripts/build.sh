@@ -74,6 +74,9 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 rm -rf "${APP_BUNDLE}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BUILD_DIR}/VimMD" "${MACOS_DIR}/VimMD"
+rm -f "${BUILD_DIR}/VimMD"
+
+echo -n "APPL????" > "${CONTENTS_DIR}/PkgInfo"
 
 if [ "${OPTIMIZE_SIZE}" = "1" ]; then
     echo "[BUILD] Stripping debug and local symbols from ${MACOS_DIR}/VimMD..."

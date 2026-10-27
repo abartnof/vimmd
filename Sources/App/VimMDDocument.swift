@@ -1,6 +1,7 @@
 import AppKit
 import Engine
 import Views
+import CBridge
 
 @objc(VimMDDocument)
 open class VimMDDocument: NSDocument {
@@ -9,8 +10,16 @@ open class VimMDDocument: NSDocument {
     public var isClosed: Bool = false
 
     override public init() {
-        self.session = VimSession(initialText: "")
+        let s = VimSession(initialText: "")
+        self.session = s
         super.init()
+        bindSessionSystemAction(s)
+    }
+
+    private func bindSessionSystemAction(_ s: VimSession) {
+        s.onSystemAction = { [weak self] action in
+            self?.handleSystemAction(action)
+        }
     }
 
     override open class var autosavesInPlace: Bool {
@@ -38,6 +47,7 @@ open class VimMDDocument: NSDocument {
         }
         let newSession = VimSession(initialText: string)
         self.session = newSession
+        bindSessionSystemAction(newSession)
         if let tv = self.textView {
             tv.session = newSession
         }
@@ -73,7 +83,9 @@ open class VimMDDocument: NSDocument {
         tv.textContainer?.widthTracksTextView = true
 
         if self.session == nil {
-            self.session = VimSession(initialText: "")
+            let s = VimSession(initialText: "")
+            self.session = s
+            bindSessionSystemAction(s)
         }
         tv.session = self.session
         tv.onQuitRequested = { [weak self] in
@@ -90,15 +102,90 @@ open class VimMDDocument: NSDocument {
     }
 
     override open func close() {
+        guard !self.isClosed else { return }
         self.isClosed = true
         super.close()
     }
 
-    public func handleQuitTrigger() {
-        guard let session = session, session.shouldQuit else { return }
-        if !session.isDirty && self.fileURL != nil {
-            self.save(self)
+    public func handleSystemAction(_ action: VimSystemAction) {
+        guard let session = session else { return }
+        defer { session.clearPendingAction() }
+        switch action {
+        case VIM_ACTION_SAVE, VIM_ACTION_SAVE_FORCE:
+            if let url = self.fileURL {
+                do {
+                    try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
+                    self.updateChangeCount(.changeCleared)
+                    session.clearDirty()
+                } catch {
+                    NSLog("Failed to save document: %@", error.localizedDescription)
+                }
+            } else if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
+                self.save(self)
+            }
+
+        case VIM_ACTION_SAVE_ALL:
+            NSDocumentController.shared.saveAllDocuments(self)
+
+        case VIM_ACTION_SAVE_AND_QUIT:
+            if let url = self.fileURL {
+                do {
+                    try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
+                    self.updateChangeCount(.changeCleared)
+                    session.clearDirty()
+                } catch {
+                    NSLog("Failed to save document: %@", error.localizedDescription)
+                }
+            } else if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
+                self.save(self)
+            }
+            self.close()
+
+        case VIM_ACTION_QUIT:
+            if !session.isDirty {
+                self.close()
+            }
+
+        case VIM_ACTION_QUIT_FORCE:
+            self.close()
+
+        case VIM_ACTION_QUIT_ALL:
+            let allDocs = NSDocumentController.shared.documents
+            let anyDirty = allDocs.contains { ($0 as? VimMDDocument)?.isDocumentEdited == true }
+            if !anyDirty {
+                NSApplication.shared.terminate(nil)
+            }
+
+        case VIM_ACTION_QUIT_ALL_FORCE:
+            NSApplication.shared.terminate(nil)
+
+        case VIM_ACTION_RELOAD_FORCE:
+            if let url = self.fileURL {
+                do {
+                    let data = try Data(contentsOf: url)
+                    try self.read(from: data, ofType: self.fileType ?? "public.plain-text")
+                    self.textView?.session = self.session
+                    self.updateChangeCount(.changeCleared)
+                } catch {
+                    NSLog("Failed to reload document: %@", error.localizedDescription)
+                }
+            }
+
+        default:
+            break
         }
-        self.close()
+    }
+
+    public func handleQuitTrigger() {
+        guard !self.isClosed else { return }
+        guard let session = session else { return }
+        let action = session.pendingAction
+        if action != VIM_ACTION_NONE {
+            handleSystemAction(action)
+        } else if session.shouldQuit {
+            if !session.isDirty {
+                self.close()
+            }
+        }
     }
 }

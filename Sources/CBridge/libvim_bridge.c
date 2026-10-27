@@ -12,6 +12,10 @@ struct VimDocumentContext {
     VimBytePos cursor;
     bool is_dirty;
     bool should_quit;
+    VimSystemAction pending_action;
+    char last_error[256];
+    char cmd_buf[512];
+    size_t cmd_len;
     VimLineDeltaCallback delta_cb;
     void *user_info;
 
@@ -20,6 +24,27 @@ struct VimDocumentContext {
     void *win_ptr;
     int mode_state;
 };
+
+#define MAX_TRACKED_CONTEXTS 128
+static struct VimDocumentContext *g_contexts[MAX_TRACKED_CONTEXTS];
+static size_t g_context_count = 0;
+
+static void register_context(struct VimDocumentContext *ctx) {
+    if (g_context_count < MAX_TRACKED_CONTEXTS) {
+        g_contexts[g_context_count++] = ctx;
+    }
+}
+
+static void unregister_context(struct VimDocumentContext *ctx) {
+    for (size_t i = 0; i < g_context_count; i++) {
+        if (g_contexts[i] == ctx) {
+            g_contexts[i] = g_contexts[g_context_count - 1];
+            g_contexts[g_context_count - 1] = NULL;
+            g_context_count--;
+            break;
+        }
+    }
+}
 
 static struct VimDocumentContext *g_active_ctx = NULL;
 static bool g_engine_initialized = false;
@@ -107,6 +132,10 @@ VimContextRef vim_context_create(const char *initial_utf8) {
     ctx->cursor.byteCol = 1;
     ctx->is_dirty = false;
     ctx->should_quit = false;
+    ctx->pending_action = VIM_ACTION_NONE;
+    ctx->last_error[0] = '\0';
+    ctx->cmd_buf[0] = '\0';
+    ctx->cmd_len = 0;
 
     if (!initial_utf8 || strlen(initial_utf8) == 0) {
         if (!ensure_line_capacity(ctx, 1)) {
@@ -170,12 +199,14 @@ VimContextRef vim_context_create(const char *initial_utf8) {
         ctx->lines[ctx->line_count++] = line_buf;
     }
 
+    register_context(ctx);
     vim_activate_context(ctx);
     return ctx;
 }
 
 void vim_context_destroy(VimContextRef ctx) {
     if (!ctx) return;
+    unregister_context(ctx);
     if (g_active_ctx == ctx) {
         g_active_ctx = NULL;
     }
@@ -209,6 +240,21 @@ void vim_context_clear_dirty(VimContextRef ctx) {
 bool vim_context_should_quit(VimContextRef ctx) {
     if (!ctx) return false;
     return ctx->should_quit;
+}
+
+VimSystemAction vim_context_get_pending_action(VimContextRef ctx) {
+    if (!ctx) return VIM_ACTION_NONE;
+    return ctx->pending_action;
+}
+
+void vim_context_clear_pending_action(VimContextRef ctx) {
+    if (!ctx) return;
+    ctx->pending_action = VIM_ACTION_NONE;
+}
+
+const char* vim_context_get_last_error(VimContextRef ctx) {
+    if (!ctx) return "";
+    return ctx->last_error;
 }
 
 void vim_context_set_delta_callback(VimContextRef ctx, VimLineDeltaCallback cb, void *userInfo) {
@@ -312,6 +358,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 p++;
             } else if (*p == ':') {
                 ctx->mode = VIM_MODE_COMMAND;
+                ctx->cmd_len = 0;
+                ctx->cmd_buf[0] = '\0';
                 p++;
             } else if (*p == 'h') {
                 if (ctx->cursor.byteCol > 1) ctx->cursor.byteCol--;
@@ -365,10 +413,15 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 p++;
             } else if (*p == 'Z') {
                 if (*(p + 1) == 'Z') {
-                    ctx->is_dirty = false;
+                    if (ctx->is_dirty) {
+                        ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
+                    } else {
+                        ctx->pending_action = VIM_ACTION_QUIT;
+                    }
                     ctx->should_quit = true;
                     p += 2;
                 } else if (*(p + 1) == 'Q') {
+                    ctx->pending_action = VIM_ACTION_QUIT_FORCE;
                     ctx->should_quit = true;
                     p += 2;
                 } else {
@@ -472,10 +525,31 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 p++;
             }
         } else if (ctx->mode == VIM_MODE_COMMAND) {
-            if (*p == '\x1b') {
+            if (*p == '\r' || *p == '\n') {
+                ctx->cmd_buf[ctx->cmd_len] = '\0';
+                vim_context_execute_ex(ctx, ctx->cmd_buf);
                 ctx->mode = VIM_MODE_NORMAL;
+                ctx->cmd_len = 0;
+                ctx->cmd_buf[0] = '\0';
+                p++;
+            } else if (*p == '\x1b') {
+                ctx->mode = VIM_MODE_NORMAL;
+                ctx->cmd_len = 0;
+                ctx->cmd_buf[0] = '\0';
+                p++;
+            } else if (*p == '\x7f' || *p == '\x08') {
+                if (ctx->cmd_len > 0) {
+                    ctx->cmd_len--;
+                    ctx->cmd_buf[ctx->cmd_len] = '\0';
+                } else {
+                    ctx->mode = VIM_MODE_NORMAL;
+                }
                 p++;
             } else {
+                if (ctx->cmd_len + 1 < sizeof(ctx->cmd_buf)) {
+                    ctx->cmd_buf[ctx->cmd_len++] = *p;
+                    ctx->cmd_buf[ctx->cmd_len] = '\0';
+                }
                 p++;
             }
         } else {
@@ -530,12 +604,62 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command) {
     while (*cmd == ' ' || *cmd == ':') cmd++;
 
     if (strcmp(cmd, "w") == 0) {
-        ctx->is_dirty = false;
-    } else if (strcmp(cmd, "q") == 0 || strcmp(cmd, "q!") == 0) {
+        ctx->pending_action = VIM_ACTION_SAVE;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "w!") == 0) {
+        ctx->pending_action = VIM_ACTION_SAVE_FORCE;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "wa") == 0 || strcmp(cmd, "wall") == 0) {
+        ctx->pending_action = VIM_ACTION_SAVE_ALL;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "q") == 0) {
+        if (ctx->is_dirty) {
+            snprintf(ctx->last_error, sizeof(ctx->last_error), "E37: No write since last change (add ! to override)");
+            ctx->pending_action = VIM_ACTION_NONE;
+        } else {
+            ctx->pending_action = VIM_ACTION_QUIT;
+            ctx->should_quit = true;
+            ctx->last_error[0] = '\0';
+        }
+    } else if (strcmp(cmd, "q!") == 0) {
+        ctx->pending_action = VIM_ACTION_QUIT_FORCE;
         ctx->should_quit = true;
-    } else if (strcmp(cmd, "wq") == 0) {
-        ctx->is_dirty = false;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "qa") == 0 || strcmp(cmd, "qall") == 0) {
+        bool any_dirty = false;
+        for (size_t i = 0; i < g_context_count; i++) {
+            if (g_contexts[i] && g_contexts[i]->is_dirty) {
+                any_dirty = true;
+                break;
+            }
+        }
+        if (any_dirty) {
+            snprintf(ctx->last_error, sizeof(ctx->last_error), "E37: No write since last change (add ! to override)");
+            ctx->pending_action = VIM_ACTION_NONE;
+        } else {
+            ctx->pending_action = VIM_ACTION_QUIT_ALL;
+            ctx->should_quit = true;
+            ctx->last_error[0] = '\0';
+        }
+    } else if (strcmp(cmd, "qa!") == 0 || strcmp(cmd, "qall!") == 0) {
+        ctx->pending_action = VIM_ACTION_QUIT_ALL_FORCE;
         ctx->should_quit = true;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "wq") == 0 || strcmp(cmd, "wq!") == 0) {
+        ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
+        ctx->should_quit = true;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "x") == 0 || strcmp(cmd, "xit") == 0) {
+        if (ctx->is_dirty) {
+            ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
+        } else {
+            ctx->pending_action = VIM_ACTION_QUIT;
+        }
+        ctx->should_quit = true;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "e!") == 0 || strcmp(cmd, "edit!") == 0) {
+        ctx->pending_action = VIM_ACTION_RELOAD_FORCE;
+        ctx->last_error[0] = '\0';
     } else if (strncmp(cmd, "%s/", 3) == 0 || strncmp(cmd, "s/", 2) == 0) {
         bool is_global_lines = (cmd[0] == '%');
         const char *p = is_global_lines ? cmd + 3 : cmd + 2;

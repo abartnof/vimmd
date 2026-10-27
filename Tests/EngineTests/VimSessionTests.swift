@@ -267,16 +267,16 @@ func testVimSessionQuitVariations() throws {
         throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected s1 to be dirty"])
     }
     s1.executeEx(":wq")
-    guard s1.shouldQuit && !s1.isDirty else {
-        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: ":wq should set shouldQuit and clear dirty"])
+    guard s1.shouldQuit && s1.pendingAction == VIM_ACTION_SAVE_AND_QUIT else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: ":wq should set shouldQuit and VIM_ACTION_SAVE_AND_QUIT"])
     }
 
     // 2. Test ZZ
     let s2 = VimSession(initialText: "Session 2")
     s2.feedKeys("iEdit\u{1b}")
     s2.feedKeys("ZZ")
-    guard s2.shouldQuit && !s2.isDirty else {
-        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "ZZ should set shouldQuit and clear dirty"])
+    guard s2.shouldQuit && s2.pendingAction == VIM_ACTION_SAVE_AND_QUIT else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "ZZ should set shouldQuit and VIM_ACTION_SAVE_AND_QUIT"])
     }
 
     // 3. Test ZQ
@@ -285,6 +285,49 @@ func testVimSessionQuitVariations() throws {
     s3.feedKeys("ZQ")
     guard s3.shouldQuit && s3.isDirty else {
         throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "ZQ should set shouldQuit and preserve dirty"])
+    }
+}
+
+func testVimSessionSystemActionsAndErrors() throws {
+    let session = VimSession(initialText: "System Actions Test")
+
+    var dispatchedActions: [VimSystemAction] = []
+    session.onSystemAction = { action in
+        dispatchedActions.append(action)
+    }
+
+    // 1. :w sets VIM_ACTION_SAVE and calls onSystemAction
+    session.executeEx("w")
+    guard session.pendingAction == VIM_ACTION_SAVE else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected pendingAction VIM_ACTION_SAVE, got \(session.pendingAction)"])
+    }
+    guard dispatchedActions.count == 1 && dispatchedActions.first == VIM_ACTION_SAVE else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected dispatched action VIM_ACTION_SAVE"])
+    }
+
+    session.clearPendingAction()
+    guard session.pendingAction == VIM_ACTION_NONE else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_ACTION_NONE after clearPendingAction"])
+    }
+
+    // 2. :q on dirty session
+    session.feedKeys("iModified\u{1b}")
+    dispatchedActions.removeAll()
+    session.executeEx("q")
+    guard session.pendingAction == VIM_ACTION_NONE else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected no action on failed :q"])
+    }
+    guard let err = session.lastError, err.contains("E37") else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected E37 error on :q with dirty document"])
+    }
+    guard dispatchedActions.isEmpty else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected no dispatched actions on refused quit"])
+    }
+
+    // 3. :wq via feedKeys interactive
+    session.feedKeys(":wq\r")
+    guard dispatchedActions.contains(VIM_ACTION_SAVE_AND_QUIT) else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_ACTION_SAVE_AND_QUIT from :wq"])
     }
 }
 
@@ -306,7 +349,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionExSubstitutionAndDeltaSync", testVimSessionExSubstitutionAndDeltaSync),
     ("testVimSessionQuitState", testVimSessionQuitState),
     ("testVimSessionInsertModeLineMutations", testVimSessionInsertModeLineMutations),
-    ("testVimSessionQuitVariations", testVimSessionQuitVariations)
+    ("testVimSessionQuitVariations", testVimSessionQuitVariations),
+    ("testVimSessionSystemActionsAndErrors", testVimSessionSystemActionsAndErrors)
 ]
 
 for (name, test) in tests {

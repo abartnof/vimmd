@@ -358,14 +358,17 @@ static void test_ex_substitution(void) {
     assert(strcmp(serialized, "baz and qux\nqux bar") == 0);
     free(serialized);
 
-    // :w clears dirty
+    // :w sets pending action VIM_ACTION_SAVE (host clears dirty upon save)
     vim_context_execute_ex(ctx, ":w");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE);
+    vim_context_clear_dirty(ctx);
     assert(vim_context_is_dirty(ctx) == false);
 
-    // :q sets quit flag
+    // :q sets quit flag when clean
     assert(vim_context_should_quit(ctx) == false);
     vim_context_execute_ex(ctx, ":q");
     assert(vim_context_should_quit(ctx) == true);
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_QUIT);
 
     vim_context_destroy(ctx);
 }
@@ -407,24 +410,24 @@ static void test_multi_window_context_isolation(void) {
 }
 
 static void test_quit_commands(void) {
-    // 1. Test :wq: writes (clears dirty) and quits
+    // 1. Test :wq: sets should_quit and VIM_ACTION_SAVE_AND_QUIT
     VimContextRef ctx1 = vim_context_create("Testing :wq");
     vim_context_feed_keys(ctx1, "iEdited\x1b");
     assert(vim_context_is_dirty(ctx1) == true);
     assert(vim_context_should_quit(ctx1) == false);
     vim_context_execute_ex(ctx1, ":wq");
     assert(vim_context_should_quit(ctx1) == true);
-    assert(vim_context_is_dirty(ctx1) == false);
+    assert(vim_context_get_pending_action(ctx1) == VIM_ACTION_SAVE_AND_QUIT);
     vim_context_destroy(ctx1);
 
-    // 2. Test ZZ: writes (clears dirty) and quits
+    // 2. Test ZZ: sets should_quit and VIM_ACTION_SAVE_AND_QUIT
     VimContextRef ctx2 = vim_context_create("Testing ZZ");
     vim_context_feed_keys(ctx2, "iEdited\x1b");
     assert(vim_context_is_dirty(ctx2) == true);
     assert(vim_context_should_quit(ctx2) == false);
     vim_context_feed_keys(ctx2, "ZZ");
     assert(vim_context_should_quit(ctx2) == true);
-    assert(vim_context_is_dirty(ctx2) == false);
+    assert(vim_context_get_pending_action(ctx2) == VIM_ACTION_SAVE_AND_QUIT);
     vim_context_destroy(ctx2);
 
     // 3. Test ZQ: quits WITHOUT clearing dirty flag
@@ -434,6 +437,7 @@ static void test_quit_commands(void) {
     assert(vim_context_should_quit(ctx3) == false);
     vim_context_feed_keys(ctx3, "ZQ");
     assert(vim_context_should_quit(ctx3) == true);
+    assert(vim_context_get_pending_action(ctx3) == VIM_ACTION_QUIT_FORCE);
     assert(vim_context_is_dirty(ctx3) == true); // Must preserve dirty!
     vim_context_destroy(ctx3);
 }
@@ -470,6 +474,155 @@ static void test_open_line_deltas(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_system_actions(void) {
+    // 1. :w does NOT clear dirty, sets VIM_ACTION_SAVE
+    VimContextRef ctx = vim_context_create("Initial");
+    vim_context_feed_keys(ctx, "iMutated\x1b");
+    assert(vim_context_is_dirty(ctx) == true);
+    vim_context_execute_ex(ctx, "w");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE);
+    assert(vim_context_is_dirty(ctx) == true); // Must NOT clear dirty on :w!
+    vim_context_clear_pending_action(ctx);
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_NONE);
+
+    // 2. :w! sets VIM_ACTION_SAVE_FORCE
+    vim_context_execute_ex(ctx, "w!");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE_FORCE);
+    vim_context_clear_pending_action(ctx);
+
+    // 3. :wa / :wall sets VIM_ACTION_SAVE_ALL
+    vim_context_execute_ex(ctx, "wa");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE_ALL);
+    vim_context_clear_pending_action(ctx);
+    vim_context_execute_ex(ctx, "wall");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE_ALL);
+    vim_context_clear_pending_action(ctx);
+
+    // 4. :q on dirty context: must REFUSE quit, set last_error to E37
+    vim_context_execute_ex(ctx, "q");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_NONE);
+    assert(vim_context_should_quit(ctx) == false);
+    assert(strstr(vim_context_get_last_error(ctx), "E37") != NULL);
+
+    // 5. :q! on dirty context: forces quit
+    vim_context_execute_ex(ctx, "q!");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_QUIT_FORCE);
+    assert(vim_context_should_quit(ctx) == true);
+    vim_context_destroy(ctx);
+
+    // 6. :q on clean context: succeeds with VIM_ACTION_QUIT
+    VimContextRef ctxClean = vim_context_create("Clean document");
+    assert(vim_context_is_dirty(ctxClean) == false);
+    vim_context_execute_ex(ctxClean, "q");
+    assert(vim_context_get_pending_action(ctxClean) == VIM_ACTION_QUIT);
+    assert(vim_context_should_quit(ctxClean) == true);
+    vim_context_destroy(ctxClean);
+
+    // 7. :wq and :wq! set VIM_ACTION_SAVE_AND_QUIT
+    VimContextRef ctxWq = vim_context_create("WQ Test");
+    vim_context_feed_keys(ctxWq, "iMut\x1b");
+    vim_context_execute_ex(ctxWq, "wq");
+    assert(vim_context_get_pending_action(ctxWq) == VIM_ACTION_SAVE_AND_QUIT);
+    assert(vim_context_should_quit(ctxWq) == true);
+    vim_context_clear_pending_action(ctxWq);
+    vim_context_execute_ex(ctxWq, "wq!");
+    assert(vim_context_get_pending_action(ctxWq) == VIM_ACTION_SAVE_AND_QUIT);
+    vim_context_destroy(ctxWq);
+
+    // 8. :x and :xit: SAVE_AND_QUIT if dirty, QUIT if clean
+    VimContextRef ctxXDirty = vim_context_create("X Test");
+    vim_context_feed_keys(ctxXDirty, "iX\x1b");
+    vim_context_execute_ex(ctxXDirty, "x");
+    assert(vim_context_get_pending_action(ctxXDirty) == VIM_ACTION_SAVE_AND_QUIT);
+    assert(vim_context_should_quit(ctxXDirty) == true);
+    vim_context_destroy(ctxXDirty);
+
+    VimContextRef ctxXClean = vim_context_create("X Clean");
+    vim_context_execute_ex(ctxXClean, "xit");
+    assert(vim_context_get_pending_action(ctxXClean) == VIM_ACTION_QUIT);
+    assert(vim_context_should_quit(ctxXClean) == true);
+    vim_context_destroy(ctxXClean);
+
+    // 9. ZZ and ZQ in normal mode
+    VimContextRef ctxZZ = vim_context_create("ZZ Test");
+    vim_context_feed_keys(ctxZZ, "iZZ\x1b");
+    vim_context_feed_keys(ctxZZ, "ZZ");
+    assert(vim_context_get_pending_action(ctxZZ) == VIM_ACTION_SAVE_AND_QUIT);
+    assert(vim_context_should_quit(ctxZZ) == true);
+    vim_context_destroy(ctxZZ);
+
+    VimContextRef ctxZQ = vim_context_create("ZQ Test");
+    vim_context_feed_keys(ctxZQ, "iZQ\x1b");
+    vim_context_feed_keys(ctxZQ, "ZQ");
+    assert(vim_context_get_pending_action(ctxZQ) == VIM_ACTION_QUIT_FORCE);
+    assert(vim_context_should_quit(ctxZQ) == true);
+    vim_context_destroy(ctxZQ);
+
+    // 10. :e! and :edit! set VIM_ACTION_RELOAD_FORCE
+    VimContextRef ctxE = vim_context_create("Reload Test");
+    vim_context_execute_ex(ctxE, "e!");
+    assert(vim_context_get_pending_action(ctxE) == VIM_ACTION_RELOAD_FORCE);
+    vim_context_clear_pending_action(ctxE);
+    vim_context_execute_ex(ctxE, "edit!");
+    assert(vim_context_get_pending_action(ctxE) == VIM_ACTION_RELOAD_FORCE);
+    vim_context_destroy(ctxE);
+
+    // 11. :qa and :qa!
+    VimContextRef ctxQA1 = vim_context_create("Doc 1");
+    VimContextRef ctxQA2 = vim_context_create("Doc 2");
+    vim_context_feed_keys(ctxQA1, "iDirty\x1b");
+    vim_context_execute_ex(ctxQA2, "qa");
+    assert(vim_context_get_pending_action(ctxQA2) == VIM_ACTION_NONE);
+    assert(strstr(vim_context_get_last_error(ctxQA2), "E37") != NULL);
+
+    vim_context_execute_ex(ctxQA2, "qa!");
+    assert(vim_context_get_pending_action(ctxQA2) == VIM_ACTION_QUIT_ALL_FORCE);
+    assert(vim_context_should_quit(ctxQA2) == true);
+
+    vim_context_destroy(ctxQA1);
+    vim_context_destroy(ctxQA2);
+
+    VimContextRef ctxQAClean = vim_context_create("Doc Clean");
+    vim_context_execute_ex(ctxQAClean, "qa");
+    assert(vim_context_get_pending_action(ctxQAClean) == VIM_ACTION_QUIT_ALL);
+    assert(vim_context_should_quit(ctxQAClean) == true);
+    vim_context_destroy(ctxQAClean);
+}
+
+static void test_interactive_command_line(void) {
+    VimContextRef ctx = vim_context_create("Interactive Command Line Test");
+    assert(ctx != NULL);
+
+    // Type ':w' followed by '\r'
+    vim_context_feed_keys(ctx, ":");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_COMMAND);
+    vim_context_feed_keys(ctx, "w\r");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE);
+    vim_context_clear_pending_action(ctx);
+
+    // Type ':s/Line/Buffer/g' followed by '\n'
+    vim_context_feed_keys(ctx, ":s/Line/Buffer/g\n");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    size_t len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &len);
+    assert(strcmp(ser, "Interactive Command Buffer Test") == 0);
+    free(ser);
+
+    // Type ':' then Escape to cancel
+    vim_context_feed_keys(ctx, ":some_unknown_command");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_COMMAND);
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_NONE);
+
+    // Type ':' then backspace past start to cancel
+    vim_context_feed_keys(ctx, ":a\x7f\x7f");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -488,6 +641,8 @@ int main(void) {
     RUN_TEST(test_multi_window_context_isolation);
     RUN_TEST(test_quit_commands);
     RUN_TEST(test_open_line_deltas);
+    RUN_TEST(test_system_actions);
+    RUN_TEST(test_interactive_command_line);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

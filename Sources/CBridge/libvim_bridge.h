@@ -18,6 +18,19 @@ typedef enum {
     VIM_MODE_COMMAND
 } VimEngineMode;
 
+typedef enum {
+    VIM_ACTION_NONE = 0,
+    VIM_ACTION_SAVE,           // :w
+    VIM_ACTION_SAVE_FORCE,     // :w!
+    VIM_ACTION_SAVE_ALL,       // :wa, :wall
+    VIM_ACTION_QUIT,           // :q (must refuse if dirty!)
+    VIM_ACTION_QUIT_FORCE,     // :q!, ZQ
+    VIM_ACTION_SAVE_AND_QUIT,  // :wq, :wq!, :x, :xit, ZZ
+    VIM_ACTION_QUIT_ALL,       // :qa, :qall
+    VIM_ACTION_QUIT_ALL_FORCE, // :qa!, :qall!
+    VIM_ACTION_RELOAD_FORCE    // :e!, :edit!
+} VimSystemAction;
+
 typedef struct {
     int32_t line;    // 1-based line number
     int32_t byteCol; // 1-based UTF-8 byte offset
@@ -48,6 +61,11 @@ VimBytePos vim_context_get_cursor(VimContextRef ctx);
 bool vim_context_is_dirty(VimContextRef ctx);
 void vim_context_clear_dirty(VimContextRef ctx);
 bool vim_context_should_quit(VimContextRef ctx);
+
+// System Actions & Error State
+VimSystemAction vim_context_get_pending_action(VimContextRef ctx);
+void vim_context_clear_pending_action(VimContextRef ctx);
+const char* vim_context_get_last_error(VimContextRef ctx);
 
 // Delta mutation callback registration & dispatch
 void vim_context_set_delta_callback(VimContextRef ctx, VimLineDeltaCallback cb, void *userInfo);
