@@ -9,6 +9,9 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    /// Callback invoked when a Vim quit command (e.g. :q, :wq, ZZ, ZQ) is triggered.
+    public var onQuitRequested: (() -> Void)?
+
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
@@ -65,6 +68,9 @@ open class VimMDTextView: NSTextView {
             if let chars = event.characters {
                 session.feedKeys(chars)
                 synchronizeCaretWithSession()
+                if session.shouldQuit {
+                    onQuitRequested?()
+                }
             }
             return
         }

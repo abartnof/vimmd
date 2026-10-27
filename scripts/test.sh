@@ -65,6 +65,26 @@ for test_file in "${ROOT_DIR}"/Tests/ViewsTests/*Tests.swift; do
     echo ""
 done
 
+# 4. App Tests
+echo "[TEST] Building & running App unit tests..."
+for test_file in "${ROOT_DIR}"/Tests/AppTests/*Tests.swift; do
+    test_name="$(basename "${test_file}" .swift)"
+    bin_name="${BUILD_DIR}/${test_name}"
+    echo "[TEST] Compiling ${test_name}..."
+    swiftc -module-cache-path "${MODULE_CACHE}" \
+        -I "${ROOT_DIR}/Sources/CBridge" \
+        -I "${BUILD_DIR}" \
+        -L "${BUILD_DIR}" \
+        -lApp -lViews -lEngine -lCBridge \
+        "${test_file}" \
+        -o "${bin_name}"
+    
+    echo "[TEST] Executing ${test_name}..."
+    "${bin_name}"
+    echo "[TEST] ${test_name} passed."
+    echo ""
+done
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="

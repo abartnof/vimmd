@@ -26,13 +26,7 @@ views: engine
 		Sources/Views/*.swift
 
 app: views
-	@mkdir -p build /tmp/clang-module-cache
-	swiftc -module-cache-path /tmp/clang-module-cache \
-		-I Sources/CBridge -I build \
-		-L build \
-		-lViews -lEngine -lCBridge \
-		Sources/App/*.swift \
-		-o build/VimMD
+	./scripts/build.sh
 
 test:
 	./scripts/test.sh
