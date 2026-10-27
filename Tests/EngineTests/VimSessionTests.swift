@@ -126,6 +126,168 @@ func testVimSessionLoopStability() throws {
     }
 }
 
+func testVimSessionModalTransitions() throws {
+    let session = VimSession(initialText: "Normal mode start")
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected initial mode to be NORMAL"])
+    }
+
+    session.feedKeys("i")
+    guard session.mode == VIM_MODE_INSERT else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected mode to be INSERT after 'i'"])
+    }
+
+    session.feedKeys("\u{1b}")
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected mode to be NORMAL after Esc"])
+    }
+
+    session.feedKeys("v")
+    guard session.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected mode to be VISUAL after 'v'"])
+    }
+
+    session.feedKeys("\u{1b}")
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected mode to be NORMAL after Esc"])
+    }
+}
+
+func testVimSessionCursorOffsetSync() throws {
+    let session = VimSession(initialText: "Line 1 🚀\nLine 2 Content")
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Initial cursor pos mismatch"])
+    }
+    guard session.cursorUtf16Offset == 0 else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial cursor UTF-16 offset mismatch"])
+    }
+
+    // Move to end of line: '$'
+    session.feedKeys("$")
+    // In Normal mode, cursor rests ON the last character '🚀' (starts at UTF-16 offset 7)
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol >= 8 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cursor did not move to end of line, got \(session.cursorPosition)"])
+    }
+    guard session.cursorUtf16Offset == 7 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected cursorUtf16Offset 7 on '🚀', got \(session.cursorUtf16Offset)"])
+    }
+
+    // Entering insert append ('a') moves cursor to terminal position after '🚀' (offset 9)
+    session.feedKeys("a")
+    guard session.cursorUtf16Offset == 9 else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected cursorUtf16Offset 9 in insert append, got \(session.cursorUtf16Offset)"])
+    }
+    session.feedKeys("\u{1b}")
+
+    // Move down to Line 2: 'j'
+    session.feedKeys("j")
+    guard session.cursorPosition.line == 2 else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected cursor on line 2, got \(session.cursorPosition)"])
+    }
+}
+
+func testVimSessionExSubstitutionAndDeltaSync() throws {
+    let session = VimSession(initialText: "Old title\nOld subtitle")
+    var deltaReceived = false
+
+    session.onLineDelta = { startLine, deletedCount, newLines in
+        deltaReceived = true
+    }
+
+    session.executeEx(":%s/Old/New/g")
+    guard session.serializeBuffer() == "New title\nNew subtitle" else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Ex substitution buffer mismatch: \(session.serializeBuffer())"])
+    }
+    guard deltaReceived else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected delta callback to be dispatched"])
+    }
+    guard session.lineIndexTable.lineCount == 2 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable lineCount mismatch"])
+    }
+    let rangeLine1 = session.lineIndexTable.characterRange(startLine: 1, count: 1)
+    guard rangeLine1.length == "New title".utf16.count else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable character range not updated, expected 9, got \(rangeLine1.length)"])
+    }
+}
+
+func testVimSessionQuitState() throws {
+    let session = VimSession(initialText: "Quit test")
+    guard session.shouldQuit == false else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "shouldQuit should be false initially"])
+    }
+    session.executeEx(":q")
+    guard session.shouldQuit == true else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "shouldQuit should be true after :q"])
+    }
+}
+
+func testVimSessionInsertModeLineMutations() throws {
+    let session = VimSession(initialText: "Hello World")
+    guard session.lineIndexTable.lineCount == 1 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Initial lineCount mismatch"])
+    }
+
+    // 1. Newline splitting at cursor in insert mode
+    // Move to col 6 (' '), enter insert mode, insert '\n', return to normal
+    session.feedKeys("0lllll") // moves to col 6
+    session.feedKeys("i\n\u{1b}")
+
+    guard session.serializeBuffer() == "Hello\n World" else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Split buffer mismatch: \(session.serializeBuffer())"])
+    }
+    guard session.lineIndexTable.lineCount == 2 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable lineCount should be 2, got \(session.lineIndexTable.lineCount)"])
+    }
+    guard session.lineIndexTable.characterRange(startLine: 1, count: 1).length == 5 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Line 1 length mismatch after split"])
+    }
+
+    // 2. Open line below ('o')
+    session.feedKeys("oLine Two\u{1b}")
+    guard session.lineIndexTable.lineCount == 3 else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable lineCount should be 3 after 'o', got \(session.lineIndexTable.lineCount)"])
+    }
+
+    // 3. Open line above ('O')
+    session.feedKeys("gg")
+    session.feedKeys("OHeader\u{1b}")
+    guard session.lineIndexTable.lineCount == 4 else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable lineCount should be 4 after 'O', got \(session.lineIndexTable.lineCount)"])
+    }
+    guard session.lineIndexTable.characterRange(startLine: 1, count: 1).length == "Header".utf16.count else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Top header length mismatch"])
+    }
+}
+
+func testVimSessionQuitVariations() throws {
+    // 1. Test :wq
+    let s1 = VimSession(initialText: "Session 1")
+    s1.feedKeys("iEdit\u{1b}")
+    guard s1.isDirty else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected s1 to be dirty"])
+    }
+    s1.executeEx(":wq")
+    guard s1.shouldQuit && !s1.isDirty else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: ":wq should set shouldQuit and clear dirty"])
+    }
+
+    // 2. Test ZZ
+    let s2 = VimSession(initialText: "Session 2")
+    s2.feedKeys("iEdit\u{1b}")
+    s2.feedKeys("ZZ")
+    guard s2.shouldQuit && !s2.isDirty else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "ZZ should set shouldQuit and clear dirty"])
+    }
+
+    // 3. Test ZQ
+    let s3 = VimSession(initialText: "Session 3")
+    s3.feedKeys("iEdit\u{1b}")
+    s3.feedKeys("ZQ")
+    guard s3.shouldQuit && s3.isDirty else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "ZQ should set shouldQuit and preserve dirty"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -138,7 +300,13 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionMultibyteUnicode", testVimSessionMultibyteUnicode),
     ("testVimSessionMultiSessionIsolation", testVimSessionMultiSessionIsolation),
     ("testVimSessionLineDeltaCallback", testVimSessionLineDeltaCallback),
-    ("testVimSessionLoopStability", testVimSessionLoopStability)
+    ("testVimSessionLoopStability", testVimSessionLoopStability),
+    ("testVimSessionModalTransitions", testVimSessionModalTransitions),
+    ("testVimSessionCursorOffsetSync", testVimSessionCursorOffsetSync),
+    ("testVimSessionExSubstitutionAndDeltaSync", testVimSessionExSubstitutionAndDeltaSync),
+    ("testVimSessionQuitState", testVimSessionQuitState),
+    ("testVimSessionInsertModeLineMutations", testVimSessionInsertModeLineMutations),
+    ("testVimSessionQuitVariations", testVimSessionQuitVariations)
 ]
 
 for (name, test) in tests {

@@ -32,10 +32,11 @@ typedef void (*VimLineDeltaCallback)(
     void *userInfo
 );
 
-// Lifecycle
+// Lifecycle & Context Switching
 void vim_engine_init(void);
 VimContextRef vim_context_create(const char *initial_utf8);
 void vim_context_destroy(VimContextRef ctx);
+void vim_activate_context(VimContextRef ctx);
 
 // Input & Ex Engine
 void vim_context_feed_keys(VimContextRef ctx, const char *keys);
@@ -46,6 +47,7 @@ VimEngineMode vim_context_get_mode(VimContextRef ctx);
 VimBytePos vim_context_get_cursor(VimContextRef ctx);
 bool vim_context_is_dirty(VimContextRef ctx);
 void vim_context_clear_dirty(VimContextRef ctx);
+bool vim_context_should_quit(VimContextRef ctx);
 
 // Delta mutation callback registration & dispatch
 void vim_context_set_delta_callback(VimContextRef ctx, VimLineDeltaCallback cb, void *userInfo);

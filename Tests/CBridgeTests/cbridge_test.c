@@ -219,6 +219,225 @@ static void test_null_handling(void) {
     vim_context_dispatch_delta(NULL, 1, 0, NULL, 0);
 }
 
+static void test_modal_transitions(void) {
+    VimContextRef ctx = vim_context_create("Initial content");
+    assert(ctx != NULL);
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // Normal -> Insert via 'i'
+    vim_context_feed_keys(ctx, "i");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_INSERT);
+
+    // Insert -> Normal via Esc
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // Normal -> Insert via 'a'
+    vim_context_feed_keys(ctx, "a");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_INSERT);
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // Normal -> Visual via 'v'
+    vim_context_feed_keys(ctx, "v");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_VISUAL);
+
+    // Visual -> Normal via Esc
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // Normal -> Command via ':'
+    vim_context_feed_keys(ctx, ":");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_COMMAND);
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_cursor_navigation(void) {
+    const char *text = "Line 1 Hello\nLine 2 World\nLine 3";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // Right 'l'
+    vim_context_feed_keys(ctx, "l");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 2);
+
+    vim_context_feed_keys(ctx, "l");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 3);
+
+    // Left 'h'
+    vim_context_feed_keys(ctx, "h");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 2);
+
+    // Down 'j'
+    vim_context_feed_keys(ctx, "j");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 2 && pos.byteCol == 2);
+
+    // Up 'k'
+    vim_context_feed_keys(ctx, "k");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 2);
+
+    // Start of line '0'
+    vim_context_feed_keys(ctx, "0");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // End of line '$'
+    vim_context_feed_keys(ctx, "$");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 12);
+
+    // Last line 'G'
+    vim_context_feed_keys(ctx, "G");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 3);
+
+    // First line 'gg'
+    vim_context_feed_keys(ctx, "gg");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_insert_mode_mutations(void) {
+    VimContextRef ctx = vim_context_create("Hello");
+    assert(ctx != NULL);
+
+    // Enter insert mode and insert "World" at cursor col 1
+    vim_context_feed_keys(ctx, "iWorld\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(vim_context_is_dirty(ctx) == true);
+
+    size_t len = 0;
+    char *serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(serialized != NULL);
+    assert(strcmp(serialized, "WorldHello") == 0);
+    free(serialized);
+
+    // Append at end of line: 'A' enters insert at end
+    vim_context_feed_keys(ctx, "A!\x1b");
+    serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(strcmp(serialized, "WorldHello!") == 0);
+    free(serialized);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_ex_substitution(void) {
+    const char *text = "foo and foo\nfoo bar";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    MockDeltaState delta_state = {0};
+    vim_context_set_delta_callback(ctx, mock_delta_callback, &delta_state);
+
+    // Substitute first line: :s/foo/baz/
+    vim_context_execute_ex(ctx, ":s/foo/baz/");
+    assert(vim_context_is_dirty(ctx) == true);
+    assert(delta_state.call_count >= 1);
+
+    size_t len = 0;
+    char *serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(strncmp(serialized, "baz and foo\n", 12) == 0);
+    free(serialized);
+
+    // Global substitute: :%s/foo/qux/g
+    vim_context_execute_ex(ctx, ":%s/foo/qux/g");
+    serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(strcmp(serialized, "baz and qux\nqux bar") == 0);
+    free(serialized);
+
+    // :w clears dirty
+    vim_context_execute_ex(ctx, ":w");
+    assert(vim_context_is_dirty(ctx) == false);
+
+    // :q sets quit flag
+    assert(vim_context_should_quit(ctx) == false);
+    vim_context_execute_ex(ctx, ":q");
+    assert(vim_context_should_quit(ctx) == true);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_multi_window_context_isolation(void) {
+    VimContextRef ctxA = vim_context_create("Window A Content");
+    VimContextRef ctxB = vim_context_create("Window B Content");
+
+    assert(ctxA != NULL && ctxB != NULL);
+
+    // Mutate ctxA
+    vim_context_feed_keys(ctxA, "i123\x1b");
+    assert(vim_context_is_dirty(ctxA) == true);
+    assert(vim_context_is_dirty(ctxB) == false);
+
+    // Move cursor and change mode in ctxB
+    vim_context_feed_keys(ctxB, "l");
+    vim_context_feed_keys(ctxB, "v");
+    assert(vim_context_get_mode(ctxB) == VIM_MODE_VISUAL);
+    assert(vim_context_get_mode(ctxA) == VIM_MODE_NORMAL);
+
+    // Activate ctxA explicitly
+    vim_activate_context(ctxA);
+    assert(vim_context_get_mode(ctxA) == VIM_MODE_NORMAL);
+
+    // Verify independent serialized contents
+    size_t lenA = 0, lenB = 0;
+    char *serA = vim_context_serialize_buffer(ctxA, &lenA);
+    char *serB = vim_context_serialize_buffer(ctxB, &lenB);
+
+    assert(strcmp(serA, "123Window A Content") == 0);
+    assert(strcmp(serB, "Window B Content") == 0);
+
+    free(serA);
+    free(serB);
+
+    vim_context_destroy(ctxA);
+    vim_context_destroy(ctxB);
+}
+
+static void test_quit_commands(void) {
+    // 1. Test :wq: writes (clears dirty) and quits
+    VimContextRef ctx1 = vim_context_create("Testing :wq");
+    vim_context_feed_keys(ctx1, "iEdited\x1b");
+    assert(vim_context_is_dirty(ctx1) == true);
+    assert(vim_context_should_quit(ctx1) == false);
+    vim_context_execute_ex(ctx1, ":wq");
+    assert(vim_context_should_quit(ctx1) == true);
+    assert(vim_context_is_dirty(ctx1) == false);
+    vim_context_destroy(ctx1);
+
+    // 2. Test ZZ: writes (clears dirty) and quits
+    VimContextRef ctx2 = vim_context_create("Testing ZZ");
+    vim_context_feed_keys(ctx2, "iEdited\x1b");
+    assert(vim_context_is_dirty(ctx2) == true);
+    assert(vim_context_should_quit(ctx2) == false);
+    vim_context_feed_keys(ctx2, "ZZ");
+    assert(vim_context_should_quit(ctx2) == true);
+    assert(vim_context_is_dirty(ctx2) == false);
+    vim_context_destroy(ctx2);
+
+    // 3. Test ZQ: quits WITHOUT clearing dirty flag
+    VimContextRef ctx3 = vim_context_create("Testing ZQ");
+    vim_context_feed_keys(ctx3, "iEdited\x1b");
+    assert(vim_context_is_dirty(ctx3) == true);
+    assert(vim_context_should_quit(ctx3) == false);
+    vim_context_feed_keys(ctx3, "ZQ");
+    assert(vim_context_should_quit(ctx3) == true);
+    assert(vim_context_is_dirty(ctx3) == true); // Must preserve dirty!
+    vim_context_destroy(ctx3);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -230,6 +449,12 @@ int main(void) {
     RUN_TEST(test_delta_callback);
     RUN_TEST(test_multi_instance_isolation);
     RUN_TEST(test_null_handling);
+    RUN_TEST(test_modal_transitions);
+    RUN_TEST(test_cursor_navigation);
+    RUN_TEST(test_insert_mode_mutations);
+    RUN_TEST(test_ex_substitution);
+    RUN_TEST(test_multi_window_context_isolation);
+    RUN_TEST(test_quit_commands);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

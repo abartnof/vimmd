@@ -10,7 +10,6 @@ private func vimDeltaTrampoline(
 ) {
     guard let userInfo = userInfo else { return }
     let session = Unmanaged<VimSession>.fromOpaque(userInfo).takeUnretainedValue()
-    guard let callback = session.onLineDelta else { return }
 
     var lines: [String] = []
     if let newLinesPtr = newLinesPtr, addedCount > 0 {
@@ -21,7 +20,9 @@ private func vimDeltaTrampoline(
             }
         }
     }
-    callback(startLine, deletedCount, lines)
+
+    session.applyLineDelta(startLine: Int(startLine), deletedCount: Int(deletedCount), newLines: lines)
+    session.onLineDelta?(startLine, deletedCount, lines)
 }
 
 public final class VimSession {
@@ -30,7 +31,15 @@ public final class VimSession {
     /// Closure callback invoked when granular line mutations are emitted by the Vim engine.
     public var onLineDelta: ((Int32, Int32, [String]) -> Void)?
 
+    /// Internal line coordinate index table synchronized with document mutations.
+    public private(set) var lineIndexTable: LineIndexTable
+
+    internal func applyLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
+        lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
+    }
+
     public init(initialText: String) {
+        self.lineIndexTable = LineIndexTable(documentText: initialText)
         self.context = initialText.withCString { cStr in
             vim_context_create(cStr)
         }
@@ -63,6 +72,21 @@ public final class VimSession {
     public var cursor: VimBytePos {
         guard let ctx = context else { return VimBytePos(line: 1, byteCol: 1) }
         return vim_context_get_cursor(ctx)
+    }
+
+    public var cursorPosition: (line: Int, byteCol: Int) {
+        let pos = cursor
+        return (Int(pos.line), Int(pos.byteCol))
+    }
+
+    public var cursorUtf16Offset: Int {
+        let pos = cursorPosition
+        return lineIndexTable.documentUtf16Offset(line: pos.line, vimByteCol: pos.byteCol)
+    }
+
+    public var shouldQuit: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_should_quit(ctx)
     }
 
     public var isDirty: Bool {
