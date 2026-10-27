@@ -1,0 +1,4 @@
+module CBridge [system] {
+    header "libvim_bridge.h"
+    export *
+}

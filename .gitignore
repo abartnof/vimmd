@@ -5,7 +5,8 @@ config.json
 # macOS
 .DS_Store
 
-# Xcode & Swift Package Manager
+# Build outputs
+build/
 .build/
 Packages/
 *.xcodeproj/*
