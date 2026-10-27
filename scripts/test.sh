@@ -85,6 +85,22 @@ for test_file in "${ROOT_DIR}"/Tests/AppTests/*Tests.swift; do
     echo ""
 done
 
+# 5. Integration / End-to-End User Trial
+echo "[TEST] Building & running End-to-End Demo Trial..."
+echo "[TEST] Compiling demo_trial..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/scripts/demo_trial.swift" \
+    -o "${BUILD_DIR}/demo_trial"
+
+echo "[TEST] Executing demo_trial..."
+"${BUILD_DIR}/demo_trial"
+echo "[TEST] demo_trial passed."
+echo ""
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="

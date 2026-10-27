@@ -276,6 +276,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     p++;
                     continue;
                 }
+                int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)ctx->cursor.line;
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
                 ctx->lines[insert_idx] = new_line;
@@ -284,7 +285,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->cursor.byteCol = 1;
                 ctx->is_dirty = true;
                 ctx->mode = VIM_MODE_INSERT;
-                emit_line_delta(ctx, ctx->cursor.line, 0, 1);
+                emit_line_delta(ctx, orig_line, 1, 2);
                 p++;
             } else if (*p == 'O') {
                 if (!ensure_line_capacity(ctx, ctx->line_count + 1)) {
@@ -296,6 +297,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     p++;
                     continue;
                 }
+                int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)(ctx->cursor.line - 1);
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
                 ctx->lines[insert_idx] = new_line;
@@ -303,7 +305,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->cursor.byteCol = 1;
                 ctx->is_dirty = true;
                 ctx->mode = VIM_MODE_INSERT;
-                emit_line_delta(ctx, ctx->cursor.line, 0, 1);
+                emit_line_delta(ctx, orig_line, 1, 2);
                 p++;
             } else if (*p == 'v' || *p == 'V') {
                 ctx->mode = VIM_MODE_VISUAL;

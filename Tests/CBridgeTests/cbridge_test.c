@@ -438,6 +438,38 @@ static void test_quit_commands(void) {
     vim_context_destroy(ctx3);
 }
 
+static void test_open_line_deltas(void) {
+    VimContextRef ctx = vim_context_create("Line 1\nLine 2");
+    assert(ctx != NULL);
+
+    MockDeltaState delta_state = {0};
+    vim_context_set_delta_callback(ctx, mock_delta_callback, &delta_state);
+
+    // 'o' opens line below line 1: delta should replace line 1 (count 1) with 2 lines (Line 1, "")
+    vim_context_feed_keys(ctx, "o\x1b");
+    assert(delta_state.call_count >= 1);
+    assert(delta_state.start_line == 1);
+    assert(delta_state.deleted_count == 1);
+    assert(delta_state.added_count == 2);
+
+    size_t len = 0;
+    char *serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(strcmp(serialized, "Line 1\n\nLine 2") == 0);
+    free(serialized);
+
+    // 'O' opens line above: cursor is on line 2, 'O' replaces line 2 (count 1) with 2 lines ("", Line 2)
+    vim_context_feed_keys(ctx, "O\x1b");
+    assert(delta_state.start_line == 2);
+    assert(delta_state.deleted_count == 1);
+    assert(delta_state.added_count == 2);
+
+    serialized = vim_context_serialize_buffer(ctx, &len);
+    assert(strcmp(serialized, "Line 1\n\n\nLine 2") == 0);
+    free(serialized);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -455,6 +487,7 @@ int main(void) {
     RUN_TEST(test_ex_substitution);
     RUN_TEST(test_multi_window_context_isolation);
     RUN_TEST(test_quit_commands);
+    RUN_TEST(test_open_line_deltas);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

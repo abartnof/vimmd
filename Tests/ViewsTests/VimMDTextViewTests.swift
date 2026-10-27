@@ -206,6 +206,25 @@ func testNilSessionSafety() throws {
     // Passes if no crash
 }
 
+func testTextViewOpenLineMutations() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Line 1\nLine 2")
+    textView.session = session
+
+    // 'o' opens line below line 1
+    session.feedKeys("oInserted Below\u{1b}")
+    guard textView.string == "Line 1\nInserted Below\nLine 2" else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed 'o' insertion sync, got: '\(textView.string)'"])
+    }
+
+    // 'O' opens line above line 1
+    session.feedKeys("gg")
+    session.feedKeys("OTop Header\u{1b}")
+    guard textView.string == "Top Header\nLine 1\nInserted Below\nLine 2" else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed 'O' insertion sync, got: '\(textView.string)'"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -217,7 +236,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testImeMarkedTextLifecycle", testImeMarkedTextLifecycle),
     ("testAttributedSubstring", testAttributedSubstring),
     ("testVisualModeKeyInterception", testVisualModeKeyInterception),
-    ("testNilSessionSafety", testNilSessionSafety)
+    ("testNilSessionSafety", testNilSessionSafety),
+    ("testTextViewOpenLineMutations", testTextViewOpenLineMutations)
 ]
 
 for (name, test) in tests {
