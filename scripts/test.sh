@@ -101,6 +101,22 @@ echo "[TEST] Executing demo_trial..."
 echo "[TEST] demo_trial passed."
 echo ""
 
+# 6. Critical User Journey (CUJ) Trial
+echo "[TEST] Building & running Critical User Journey (CUJ) Trial..."
+echo "[TEST] Compiling cuj_trial..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/scripts/cuj_trial.swift" \
+    -o "${BUILD_DIR}/cuj_trial"
+
+echo "[TEST] Executing cuj_trial..."
+"${BUILD_DIR}/cuj_trial"
+echo "[TEST] cuj_trial passed."
+echo ""
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="
