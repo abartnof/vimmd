@@ -1,6 +1,8 @@
 import AppKit
 import App
 
+_ = NSStringFromClass(VimMDDocument.self)
+
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 app.activate(ignoringOtherApps: true)

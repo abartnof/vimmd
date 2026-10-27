@@ -241,15 +241,97 @@ func testInfoPlistDocumentExtensions() throws {
         throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing CFBundleTypeExtensions in CFBundleDocumentTypes"])
     }
 
-    guard extensions.contains("md") && extensions.contains("markdown") else {
-        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "CFBundleTypeExtensions missing md or markdown: \(extensions)"])
+    guard extensions.contains("md") && extensions.contains("markdown") &&
+          extensions.contains("tsv") && extensions.contains("csv") &&
+          extensions.contains("sh") && extensions.contains("txt") &&
+          extensions.contains("json") else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "CFBundleTypeExtensions missing common formats: \(extensions)"])
+    }
+
+    guard let contentTypes = firstType["LSItemContentTypes"] as? [String],
+          contentTypes.contains("public.plain-text"),
+          contentTypes.contains("public.comma-separated-values-text"),
+          contentTypes.contains("public.tab-separated-values-text"),
+          contentTypes.contains("public.source-code"),
+          contentTypes.contains("public.shell-script") else {
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "LSItemContentTypes missing common types: \(String(describing: firstType["LSItemContentTypes"]))"])
     }
 
     // UTExportedTypeDeclarations or UTImportedTypeDeclarations
     let hasUTI = (plist["UTExportedTypeDeclarations"] as? [[String: Any]]) != nil ||
                  (plist["UTImportedTypeDeclarations"] as? [[String: Any]]) != nil
     guard hasUTI else {
-        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing UTExportedTypeDeclarations or UTImportedTypeDeclarations in Info.plist"])
+        throw NSError(domain: "AppTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Missing UTExportedTypeDeclarations or UTImportedTypeDeclarations in Info.plist"])
+    }
+}
+
+func testMultipleCommonFileFormats() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+    let formats: [(ext: String, content: String)] = [
+        ("tsv", "col1\tcol2\tcol3\nval1\tval2\tval3"),
+        ("csv", "name,age,city\nAlice,30,New York\nBob,25,San Francisco"),
+        ("sh", "#!/bin/bash\necho 'hello world'\nexit 0"),
+        ("txt", "Simple plain text file\nSecond line."),
+        ("json", "{\n  \"status\": \"ok\",\n  \"count\": 42\n}"),
+        ("py", "def greet(name):\n    return f\"Hello, {name}!\"\n")
+    ]
+
+    for format in formats {
+        let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).\(format.ext)")
+        try format.content.write(to: fileURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let doc = try VimMDDocument(contentsOf: fileURL, ofType: "public.plain-text")
+        guard let session = doc.session else {
+            throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed initializing session for format .\(format.ext)"])
+        }
+        guard session.serializeBuffer() == format.content else {
+            throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Content mismatch for format .\(format.ext): expected '\(format.content)', got '\(session.serializeBuffer())'"])
+        }
+    }
+}
+
+func testDesignatedInitializers() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+    let tempURL = tempDir.appendingPathComponent("init_test_\(UUID().uuidString).md")
+    try "Init Content".write(to: tempURL, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+
+    // 1. init(contentsOf:ofType:)
+    let docFromURL = try VimMDDocument(contentsOf: tempURL, ofType: "public.plain-text")
+    guard docFromURL.session != nil else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "session was nil after init(contentsOf:ofType:)"])
+    }
+    guard docFromURL.session?.serializeBuffer() == "Init Content" else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after init(contentsOf:ofType:)"])
+    }
+
+    // 2. init(type:)
+    let docFromType = try VimMDDocument(type: "public.plain-text")
+    guard docFromType.session != nil else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "session was nil after init(type:)"])
+    }
+}
+
+func testBinaryContainsVimMDDocumentSymbol() throws {
+    let rootPath = FileManager.default.currentDirectoryPath
+    let binaryPath = "\(rootPath)/build/VimMD.app/Contents/MacOS/VimMD"
+    guard FileManager.default.fileExists(atPath: binaryPath) else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Binary does not exist at \(binaryPath)"])
+    }
+
+    let pipe = Pipe()
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/nm")
+    process.arguments = [binaryPath]
+    process.standardOutput = pipe
+    try process.run()
+    process.waitUntilExit()
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let output = String(decoding: data, as: UTF8.self)
+    guard output.contains("VimMDDocument") else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Binary at \(binaryPath) does NOT contain VimMDDocument symbol! Dead-stripped or missing link."])
     }
 }
 
@@ -364,6 +446,9 @@ let tests: [(String, () throws -> Void)] = [
     ("testAppDelegateTerminationPolicy", testAppDelegateTerminationPolicy),
     ("testDocumentLossyDecoding", testDocumentLossyDecoding),
     ("testInfoPlistDocumentExtensions", testInfoPlistDocumentExtensions),
+    ("testDesignatedInitializers", testDesignatedInitializers),
+    ("testBinaryContainsVimMDDocumentSymbol", testBinaryContainsVimMDDocumentSymbol),
+    ("testMultipleCommonFileFormats", testMultipleCommonFileFormats),
     ("testAppDelegateMenuBarSetup", testAppDelegateMenuBarSetup),
     ("testDefaultInitHasSession", testDefaultInitHasSession),
     ("testObjCRuntimeClassName", testObjCRuntimeClassName),

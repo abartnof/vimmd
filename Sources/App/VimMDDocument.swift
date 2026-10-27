@@ -16,6 +16,19 @@ open class VimMDDocument: NSDocument {
         bindSessionSystemAction(s)
     }
 
+    public convenience init(type typeName: String) throws {
+        self.init()
+        self.fileType = typeName
+    }
+
+    public convenience init(contentsOf url: URL, ofType typeName: String) throws {
+        self.init()
+        self.fileURL = url
+        self.fileType = typeName
+        let data = try Data(contentsOf: url)
+        try self.read(from: data, ofType: typeName)
+    }
+
     private func bindSessionSystemAction(_ s: VimSession) {
         s.onSystemAction = { [weak self] action in
             self?.handleSystemAction(action)

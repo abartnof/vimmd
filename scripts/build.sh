@@ -60,6 +60,7 @@ swiftc ${SWIFT_SIZE_FLAGS} -module-cache-path "${MODULE_CACHE}" \
     -I "${ROOT_DIR}/Sources/CBridge" \
     -I "${BUILD_DIR}" \
     -L "${BUILD_DIR}" \
+    -Xlinker -force_load -Xlinker "${BUILD_DIR}/libApp.a" \
     -lApp -lViews -lEngine -lCBridge \
     ${LINK_SIZE_FLAGS} \
     "${ROOT_DIR}/Sources/App/main.swift" \
@@ -79,8 +80,8 @@ rm -f "${BUILD_DIR}/VimMD"
 echo -n "APPL????" > "${CONTENTS_DIR}/PkgInfo"
 
 if [ "${OPTIMIZE_SIZE}" = "1" ]; then
-    echo "[BUILD] Stripping debug and local symbols from ${MACOS_DIR}/VimMD..."
-    strip -u -r "${MACOS_DIR}/VimMD"
+    echo "[BUILD] Stripping debug symbols from ${MACOS_DIR}/VimMD..."
+    strip -S "${MACOS_DIR}/VimMD"
 fi
 
 cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
@@ -121,13 +122,47 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
             <array>
                 <string>net.daringfireball.markdown</string>
                 <string>public.plain-text</string>
+                <string>public.text</string>
+                <string>public.source-code</string>
+                <string>public.shell-script</string>
+                <string>public.comma-separated-values-text</string>
+                <string>public.tab-separated-values-text</string>
+                <string>public.json</string>
+                <string>public.xml</string>
+                <string>public.data</string>
             </array>
             <key>CFBundleTypeExtensions</key>
             <array>
                 <string>md</string>
                 <string>markdown</string>
                 <string>mdown</string>
+                <string>mkd</string>
                 <string>txt</string>
+                <string>text</string>
+                <string>tsv</string>
+                <string>csv</string>
+                <string>tab</string>
+                <string>sh</string>
+                <string>bash</string>
+                <string>zsh</string>
+                <string>command</string>
+                <string>json</string>
+                <string>yaml</string>
+                <string>yml</string>
+                <string>xml</string>
+                <string>c</string>
+                <string>h</string>
+                <string>swift</string>
+                <string>py</string>
+                <string>rb</string>
+                <string>js</string>
+                <string>ts</string>
+                <string>css</string>
+                <string>html</string>
+                <string>ini</string>
+                <string>conf</string>
+                <string>env</string>
+                <string>log</string>
             </array>
             <key>NSDocumentClass</key>
             <string>VimMDDocument</string>
