@@ -8,14 +8,26 @@ MODULE_CACHE="/tmp/clang-module-cache"
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${MODULE_CACHE}"
 
+OPTIMIZE_SIZE="${OPTIMIZE_SIZE:-1}"
+if [ "${OPTIMIZE_SIZE}" = "1" ]; then
+    echo "[BUILD] Space optimization enabled (DESIGN.md §5: -Oz, -flto, -Osize, -dead_strip, strip)"
+    C_SIZE_FLAGS="-Oz -flto"
+    SWIFT_SIZE_FLAGS="-Osize"
+    LINK_SIZE_FLAGS="-Xlinker -dead_strip"
+else
+    C_SIZE_FLAGS=""
+    SWIFT_SIZE_FLAGS=""
+    LINK_SIZE_FLAGS=""
+fi
+
 echo "[BUILD] Compiling CBridge..."
-clang -Wall -Wextra -Werror -I "${ROOT_DIR}/Sources/CBridge" \
+clang -Wall -Wextra -Werror ${C_SIZE_FLAGS} -I "${ROOT_DIR}/Sources/CBridge" \
     -c "${ROOT_DIR}/Sources/CBridge/libvim_bridge.c" \
     -o "${BUILD_DIR}/libvim_bridge.o"
 ar rcs "${BUILD_DIR}/libCBridge.a" "${BUILD_DIR}/libvim_bridge.o"
 
 echo "[BUILD] Compiling Engine..."
-swiftc -module-cache-path "${MODULE_CACHE}" \
+swiftc ${SWIFT_SIZE_FLAGS} -module-cache-path "${MODULE_CACHE}" \
     -I "${ROOT_DIR}/Sources/CBridge" \
     -I "${BUILD_DIR}" \
     -emit-module -emit-module-path "${BUILD_DIR}/Engine.swiftmodule" \
@@ -24,7 +36,7 @@ swiftc -module-cache-path "${MODULE_CACHE}" \
     ${ROOT_DIR}/Sources/Engine/*.swift
 
 echo "[BUILD] Compiling Views..."
-swiftc -module-cache-path "${MODULE_CACHE}" \
+swiftc ${SWIFT_SIZE_FLAGS} -module-cache-path "${MODULE_CACHE}" \
     -I "${ROOT_DIR}/Sources/CBridge" \
     -I "${BUILD_DIR}" \
     -emit-module -emit-module-path "${BUILD_DIR}/Views.swiftmodule" \
@@ -33,7 +45,7 @@ swiftc -module-cache-path "${MODULE_CACHE}" \
     ${ROOT_DIR}/Sources/Views/*.swift
 
 echo "[BUILD] Compiling App library..."
-swiftc -module-cache-path "${MODULE_CACHE}" \
+swiftc ${SWIFT_SIZE_FLAGS} -module-cache-path "${MODULE_CACHE}" \
     -I "${ROOT_DIR}/Sources/CBridge" \
     -I "${BUILD_DIR}" \
     -emit-module -emit-module-path "${BUILD_DIR}/App.swiftmodule" \
@@ -44,11 +56,12 @@ swiftc -module-cache-path "${MODULE_CACHE}" \
     "${ROOT_DIR}/Sources/App/VimMDDocument.swift"
 
 echo "[BUILD] Compiling App executable..."
-swiftc -module-cache-path "${MODULE_CACHE}" \
+swiftc ${SWIFT_SIZE_FLAGS} -module-cache-path "${MODULE_CACHE}" \
     -I "${ROOT_DIR}/Sources/CBridge" \
     -I "${BUILD_DIR}" \
     -L "${BUILD_DIR}" \
     -lApp -lViews -lEngine -lCBridge \
+    ${LINK_SIZE_FLAGS} \
     "${ROOT_DIR}/Sources/App/main.swift" \
     -o "${BUILD_DIR}/VimMD"
 
@@ -61,6 +74,11 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 rm -rf "${APP_BUNDLE}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 cp "${BUILD_DIR}/VimMD" "${MACOS_DIR}/VimMD"
+
+if [ "${OPTIMIZE_SIZE}" = "1" ]; then
+    echo "[BUILD] Stripping debug and local symbols from ${MACOS_DIR}/VimMD..."
+    strip -u -r "${MACOS_DIR}/VimMD"
+fi
 
 cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
