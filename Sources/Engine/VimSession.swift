@@ -21,8 +21,7 @@ private func vimDeltaTrampoline(
         }
     }
 
-    session.applyLineDelta(startLine: Int(startLine), deletedCount: Int(deletedCount), newLines: lines)
-    session.onLineDelta?(startLine, deletedCount, lines)
+    session.handleLineDelta(startLine: Int(startLine), deletedCount: Int(deletedCount), newLines: lines)
 }
 
 public final class VimSession {
@@ -34,8 +33,14 @@ public final class VimSession {
     /// Internal line coordinate index table synchronized with document mutations.
     public private(set) var lineIndexTable: LineIndexTable
 
-    internal func applyLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
+    /// Callback providing pre-calculated characterRange for TextKit 2 synchronization per DESIGN.md §3.5
+    public var onLineDeltaWithRange: ((Int, Int, [String], NSRange) -> Void)?
+
+    internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
+        let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
         lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
+        onLineDeltaWithRange?(startLine, deletedCount, newLines, targetRange)
+        onLineDelta?(Int32(startLine), Int32(deletedCount), newLines)
     }
 
     public init(initialText: String) {

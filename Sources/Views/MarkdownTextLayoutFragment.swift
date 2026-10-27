@@ -1,7 +1,6 @@
 import AppKit
 
-// TextKit 2 (macOS 12.0+) compatibility declarations for environments
-// building against macOS 11.3 CommandLineTools SDK.
+// TextKit 2 compatibility types
 #if !canImport(TextKit2Compatibility)
 @objc open class NSTextElement: NSObject {}
 @objc open class NSTextRange: NSObject {}
@@ -25,7 +24,16 @@ import AppKit
 
 /// Layout fragment override for in-place Markdown concealment per Section 3.3 of DESIGN.md.
 open class MarkdownTextLayoutFragment: NSTextLayoutFragment {
+    public var isCurrentEditingLine: Bool = false
+    public var rawLineString: String = ""
+    public let syntaxResolver: MarkdownSyntaxResolver = MarkdownSyntaxResolver()
+
     public override init(textElement: NSTextElement, range: NSTextRange?) {
         super.init(textElement: textElement, range: range)
+    }
+
+    /// Computes vertical height delta ΔH for viewport counter-scroll compensation per DESIGN.md §3.3.
+    public static func computeScrollCompensation(beforeHeight: CGFloat, afterHeight: CGFloat) -> CGFloat {
+        return afterHeight - beforeHeight
     }
 }
