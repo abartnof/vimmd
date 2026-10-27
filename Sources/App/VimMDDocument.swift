@@ -42,9 +42,7 @@ open class VimMDDocument: NSDocument {
     }
 
     override open func read(from data: Data, ofType typeName: String) throws {
-        guard let string = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: "VimMDDocument", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to decode input data as UTF-8"])
-        }
+        let string = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
         let newSession = VimSession(initialText: string)
         self.session = newSession
         bindSessionSystemAction(newSession)
@@ -96,6 +94,9 @@ open class VimMDDocument: NSDocument {
         window.contentView = scrollView
 
         self.textView = tv
+
+        window.isReleasedWhenClosed = false
+        (NSApplication.shared.delegate as? AppDelegate)?.hasOpenedDocument = true
 
         let windowController = NSWindowController(window: window)
         self.addWindowController(windowController)

@@ -1,8 +1,10 @@
 import AppKit
 
 open class AppDelegate: NSObject, NSApplicationDelegate {
+    public var hasOpenedDocument: Bool = false
+
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return hasOpenedDocument && NSDocumentController.shared.documents.isEmpty
     }
 
     public func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {

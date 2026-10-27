@@ -193,9 +193,63 @@ func testDocumentAtomicWriteAndClearDirty() throws {
 
 func testAppDelegateTerminationPolicy() throws {
     let appDelegate = AppDelegate()
-    let shouldTerminate = appDelegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared)
-    guard shouldTerminate == true else {
-        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected applicationShouldTerminateAfterLastWindowClosed to return true"])
+    // Before any document is opened, termination should be guarded (return false)
+    // to prevent premature termination when NSOpenPanel closes.
+    guard appDelegate.hasOpenedDocument == false else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected hasOpenedDocument to be false initially"])
+    }
+    let shouldTerminateBeforeOpen = appDelegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared)
+    guard shouldTerminateBeforeOpen == false else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected applicationShouldTerminateAfterLastWindowClosed to return false before document opened"])
+    }
+
+    // Once a document has been opened and all documents are closed, it should terminate (return true)
+    appDelegate.hasOpenedDocument = true
+    let shouldTerminateAfterOpen = appDelegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared)
+    guard shouldTerminateAfterOpen == true else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected applicationShouldTerminateAfterLastWindowClosed to return true after document opened and closed"])
+    }
+}
+
+func testDocumentLossyDecoding() throws {
+    let doc = VimMDDocument()
+    // Non-strict UTF-8 bytes (invalid continuation sequence 0xFF 0xFE)
+    let nonStrictBytes = Data([0x23, 0x20, 0x54, 0x69, 0x74, 0x6c, 0x65, 0x0a, 0xff, 0xfe, 0x41, 0x42])
+    try doc.read(from: nonStrictBytes, ofType: "public.plain-text")
+    guard doc.session != nil else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session should be initialized even with non-strict UTF-8 data"])
+    }
+    guard let buffer = doc.session?.serializeBuffer(), buffer.contains("Title") else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Serialized buffer missing valid characters"])
+    }
+}
+
+func testInfoPlistDocumentExtensions() throws {
+    let rootPath = FileManager.default.currentDirectoryPath
+    let plistPath = "\(rootPath)/build/VimMD.app/Contents/Info.plist"
+    guard let plistData = FileManager.default.contents(atPath: plistPath),
+          let plist = try PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read Info.plist at \(plistPath)"])
+    }
+
+    guard let docTypes = plist["CFBundleDocumentTypes"] as? [[String: Any]], !docTypes.isEmpty else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing CFBundleDocumentTypes in Info.plist"])
+    }
+
+    let firstType = docTypes[0]
+    guard let extensions = firstType["CFBundleTypeExtensions"] as? [String] else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing CFBundleTypeExtensions in CFBundleDocumentTypes"])
+    }
+
+    guard extensions.contains("md") && extensions.contains("markdown") else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "CFBundleTypeExtensions missing md or markdown: \(extensions)"])
+    }
+
+    // UTExportedTypeDeclarations or UTImportedTypeDeclarations
+    let hasUTI = (plist["UTExportedTypeDeclarations"] as? [[String: Any]]) != nil ||
+                 (plist["UTImportedTypeDeclarations"] as? [[String: Any]]) != nil
+    guard hasUTI else {
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing UTExportedTypeDeclarations or UTImportedTypeDeclarations in Info.plist"])
     }
 }
 
@@ -308,6 +362,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testDocumentWindowControllerSetup", testDocumentWindowControllerSetup),
     ("testDocumentAtomicWriteAndClearDirty", testDocumentAtomicWriteAndClearDirty),
     ("testAppDelegateTerminationPolicy", testAppDelegateTerminationPolicy),
+    ("testDocumentLossyDecoding", testDocumentLossyDecoding),
+    ("testInfoPlistDocumentExtensions", testInfoPlistDocumentExtensions),
     ("testAppDelegateMenuBarSetup", testAppDelegateMenuBarSetup),
     ("testDefaultInitHasSession", testDefaultInitHasSession),
     ("testObjCRuntimeClassName", testObjCRuntimeClassName),
