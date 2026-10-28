@@ -21,6 +21,36 @@ open class VimMDTextView: NSTextView {
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
+    public let syntaxResolver = MarkdownSyntaxResolver()
+    private var lastRenderedMode: VimEngineMode?
+    private var lastRenderedActiveLine: Int?
+
+    public func updateSyntaxStyling(force: Bool = false) {
+        guard let storage = self.textStorage else { return }
+        let currentMode = session?.mode ?? VIM_MODE_NORMAL
+        let isInsert = (currentMode == VIM_MODE_INSERT)
+        let activeLine = session?.cursorPosition.line
+
+        if !force && currentMode == lastRenderedMode {
+            if !isInsert {
+                return
+            } else if activeLine == lastRenderedActiveLine {
+                return
+            }
+        }
+
+        lastRenderedMode = currentMode
+        lastRenderedActiveLine = activeLine
+
+        storage.beginEditing()
+        syntaxResolver.renderSyntax(
+            in: storage,
+            activeLineIndex: activeLine,
+            isInsertMode: isInsert
+        )
+        storage.endEditing()
+    }
+
     override open var acceptsFirstResponder: Bool {
         return true
     }
@@ -42,8 +72,10 @@ open class VimMDTextView: NSTextView {
             self?.applyDelta(targetRange: targetRange, newLines: newLines)
         }
         session.onModeChanged = { [weak self] mode in
+            self?.updateSyntaxStyling()
             self?.onModeChanged?(mode)
         }
+        updateSyntaxStyling(force: true)
         synchronizeCaretWithSession()
     }
 
@@ -63,6 +95,7 @@ open class VimMDTextView: NSTextView {
             }
         }
 
+        updateSyntaxStyling(force: true)
         synchronizeCaretWithSession()
     }
 
@@ -79,6 +112,9 @@ open class VimMDTextView: NSTextView {
         let clamped = max(0, min(docLength, offset))
         self.currentSelectedRange = NSRange(location: clamped, length: 0)
         self.setSelectedRange(self.currentSelectedRange)
+        if session.mode == VIM_MODE_INSERT {
+            updateSyntaxStyling()
+        }
     }
 
     override open func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {

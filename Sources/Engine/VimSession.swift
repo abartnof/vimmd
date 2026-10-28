@@ -42,6 +42,9 @@ public final class VimSession {
     /// Callback invoked when the Vim mode changes (NORMAL, INSERT, VISUAL, COMMAND).
     public var onModeChanged: ((VimEngineMode) -> Void)?
 
+    /// Callback invoked when session status or error states may have changed.
+    public var onStatusChanged: (() -> Void)?
+
     internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
         let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
         lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
@@ -155,6 +158,7 @@ public final class VimSession {
             onModeChanged?(newMode)
         }
         checkAndDispatchPendingAction()
+        onStatusChanged?()
     }
 
     public func executeEx(_ command: String) {
@@ -168,6 +172,7 @@ public final class VimSession {
             onModeChanged?(newMode)
         }
         checkAndDispatchPendingAction()
+        onStatusChanged?()
     }
 
     public func clearDirty() {

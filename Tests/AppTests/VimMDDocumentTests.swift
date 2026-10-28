@@ -460,6 +460,89 @@ func testDocumentExSaveAndQuitActions() throws {
     }
 }
 
+func testStatusBarWriteUntitledFeedback() throws {
+    let doc = VimMDDocument()
+    doc.makeWindowControllers()
+    guard doc.fileURL == nil else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected fileURL to be nil for new untitled doc"])
+    }
+
+    doc.session?.feedKeys(":w\r")
+    guard let msg = doc.currentStatusMessage, msg.contains("E32: No file name") else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected status message with 'E32: No file name', got '\(String(describing: doc.currentStatusMessage))'"])
+    }
+    guard doc.isCurrentStatusMessageWarning else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected status message to be flagged as warning"])
+    }
+    guard doc.messageLabel?.stringValue.contains("E32: No file name") == true else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected messageLabel to show 'E32: No file name', got '\(String(describing: doc.messageLabel?.stringValue))'"])
+    }
+}
+
+func testStatusBarWriteSuccessFeedback() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+    let fileURL = tempDir.appendingPathComponent("status_save_test_\(UUID().uuidString).md")
+    defer { try? FileManager.default.removeItem(at: fileURL) }
+
+    try "Line 1\nLine 2\nLine 3".write(to: fileURL, atomically: true, encoding: .utf8)
+    let doc = try VimMDDocument(contentsOf: fileURL, ofType: "public.plain-text")
+    doc.makeWindowControllers()
+
+    doc.session?.feedKeys("iUpdated \u{1b}")
+    doc.session?.feedKeys(":w\r")
+
+    guard let msg = doc.currentStatusMessage else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected currentStatusMessage after successful write"])
+    }
+    guard msg.contains("written") && msg.contains(fileURL.lastPathComponent) else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected write confirmation with filename and 'written', got '\(msg)'"])
+    }
+    guard msg.contains("3L") || msg.contains("L,") else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected line count indicator in write message: '\(msg)'"])
+    }
+    guard !doc.isCurrentStatusMessageWarning else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Successful write should not be marked as warning"])
+    }
+}
+
+func testStatusBarShowsLastErrorOnBlockedQuit() throws {
+    let doc = VimMDDocument()
+    doc.makeWindowControllers()
+    doc.session?.feedKeys("iChange\u{1b}")
+    guard doc.session?.isDirty == true else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session should be dirty"])
+    }
+
+    // Attempting :q on dirty doc
+    doc.session?.feedKeys(":q\r")
+    guard !doc.isClosed else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Document should not close"])
+    }
+
+    guard let msg = doc.currentStatusMessage, msg.contains("E37") else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected status message with 'E37', got '\(String(describing: doc.currentStatusMessage))'"])
+    }
+    guard doc.isCurrentStatusMessageWarning else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected status message to be warning"])
+    }
+}
+
+func testShowStatusMessageMethod() throws {
+    let doc = VimMDDocument()
+    doc.makeWindowControllers()
+    doc.showStatusMessage("Test Status Alert", isWarning: true)
+
+    guard doc.currentStatusMessage == "Test Status Alert" else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Status message not recorded"])
+    }
+    guard doc.isCurrentStatusMessageWarning else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Status message should be warning"])
+    }
+    guard doc.messageLabel?.stringValue == "Test Status Alert" else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "messageLabel not updated"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -481,7 +564,11 @@ let tests: [(String, () throws -> Void)] = [
     ("testDefaultInitHasSession", testDefaultInitHasSession),
     ("testObjCRuntimeClassName", testObjCRuntimeClassName),
     ("testAppDelegateShouldOpenUntitledFile", testAppDelegateShouldOpenUntitledFile),
-    ("testDocumentExSaveAndQuitActions", testDocumentExSaveAndQuitActions)
+    ("testDocumentExSaveAndQuitActions", testDocumentExSaveAndQuitActions),
+    ("testStatusBarWriteUntitledFeedback", testStatusBarWriteUntitledFeedback),
+    ("testStatusBarWriteSuccessFeedback", testStatusBarWriteSuccessFeedback),
+    ("testStatusBarShowsLastErrorOnBlockedQuit", testStatusBarShowsLastErrorOnBlockedQuit),
+    ("testShowStatusMessageMethod", testShowStatusMessageMethod)
 ]
 
 for (name, test) in tests {

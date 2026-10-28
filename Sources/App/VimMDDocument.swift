@@ -10,6 +10,17 @@ open class VimMDDocument: NSDocument {
     public var isClosed: Bool = false
     public var modeLabel: NSTextField?
     public var posLabel: NSTextField?
+    public var messageLabel: NSTextField?
+    public var currentStatusMessage: String?
+    public var isCurrentStatusMessageWarning: Bool = false
+
+    public func showStatusMessage(_ text: String, isWarning: Bool = false) {
+        self.currentStatusMessage = text
+        self.isCurrentStatusMessageWarning = isWarning
+        guard let label = self.messageLabel else { return }
+        label.stringValue = text
+        label.textColor = isWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
+    }
 
     public func updateStatusDisplay() {
         guard let session = session else { return }
@@ -20,6 +31,10 @@ open class VimMDDocument: NSDocument {
         if let win = self.windowControllers.first?.window {
             let baseTitle = self.displayName ?? "Untitled"
             win.title = "\(baseTitle) — [\(mode)]"
+        }
+        if let err = session.lastError, !err.isEmpty {
+            let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
+            showStatusMessage(warningText, isWarning: true)
         }
     }
 
@@ -48,6 +63,9 @@ open class VimMDDocument: NSDocument {
             self?.handleSystemAction(action)
         }
         s.onModeChanged = { [weak self] _ in
+            self?.updateStatusDisplay()
+        }
+        s.onStatusChanged = { [weak self] in
             self?.updateStatusDisplay()
         }
     }
@@ -142,7 +160,7 @@ open class VimMDDocument: NSDocument {
         let statusBar = NSView(frame: statusFrame)
         statusBar.autoresizingMask = [.width, .maxYMargin]
 
-        let modeLbl = NSTextField(frame: NSRect(x: 8, y: 3, width: 200, height: 16))
+        let modeLbl = NSTextField(frame: NSRect(x: 8, y: 3, width: 140, height: 16))
         modeLbl.isEditable = false
         modeLbl.isBordered = false
         modeLbl.backgroundColor = .clear
@@ -152,7 +170,19 @@ open class VimMDDocument: NSDocument {
         statusBar.addSubview(modeLbl)
         self.modeLabel = modeLbl
 
-        let posLbl = NSTextField(frame: NSRect(x: max(208, contentBounds.width - 208), y: 3, width: 200, height: 16))
+        let msgWidth = max(100, contentBounds.width - 325)
+        let msgLbl = NSTextField(frame: NSRect(x: 155, y: 3, width: msgWidth, height: 16))
+        msgLbl.autoresizingMask = [.width]
+        msgLbl.isEditable = false
+        msgLbl.isBordered = false
+        msgLbl.backgroundColor = .clear
+        msgLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        msgLbl.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
+        msgLbl.stringValue = currentStatusMessage ?? ""
+        statusBar.addSubview(msgLbl)
+        self.messageLabel = msgLbl
+
+        let posLbl = NSTextField(frame: NSRect(x: max(160, contentBounds.width - 165), y: 3, width: 155, height: 16))
         posLbl.autoresizingMask = [.minXMargin]
         posLbl.isEditable = false
         posLbl.isBordered = false
@@ -200,11 +230,20 @@ open class VimMDDocument: NSDocument {
                     try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
                     self.updateChangeCount(.changeCleared)
                     session.clearDirty()
+                    let lineCount = session.lineIndexTable.lineCount
+                    let content = session.serializeBuffer()
+                    let byteCount = content.utf8.count
+                    let filename = url.lastPathComponent
+                    showStatusMessage("\"\(filename)\" \(lineCount)L, \(byteCount)B written", isWarning: false)
                 } catch {
                     NSLog("Failed to save document: %@", error.localizedDescription)
+                    showStatusMessage("[Warning] E212: Cannot open file for writing: \(error.localizedDescription)", isWarning: true)
                 }
-            } else if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
-                self.save(self)
+            } else {
+                showStatusMessage("[Warning] E32: No file name", isWarning: true)
+                if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
+                    self.save(self)
+                }
             }
 
         case VIM_ACTION_SAVE_ALL:
@@ -216,13 +255,22 @@ open class VimMDDocument: NSDocument {
                     try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
                     self.updateChangeCount(.changeCleared)
                     session.clearDirty()
+                    let lineCount = session.lineIndexTable.lineCount
+                    let content = session.serializeBuffer()
+                    let byteCount = content.utf8.count
+                    let filename = url.lastPathComponent
+                    showStatusMessage("\"\(filename)\" \(lineCount)L, \(byteCount)B written", isWarning: false)
+                    self.close()
                 } catch {
                     NSLog("Failed to save document: %@", error.localizedDescription)
+                    showStatusMessage("[Warning] E212: Cannot open file for writing: \(error.localizedDescription)", isWarning: true)
                 }
-            } else if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
-                self.save(self)
+            } else {
+                showStatusMessage("[Warning] E32: No file name", isWarning: true)
+                if NSApplication.shared.mainWindow != nil && NSApplication.shared.isRunning {
+                    self.save(self)
+                }
             }
-            self.close()
 
         case VIM_ACTION_QUIT:
             if !session.isDirty {
@@ -269,6 +317,10 @@ open class VimMDDocument: NSDocument {
             if !session.isDirty {
                 self.close()
             }
+        }
+        if let err = session.lastError, !err.isEmpty {
+            let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
+            showStatusMessage(warningText, isWarning: true)
         }
     }
 }

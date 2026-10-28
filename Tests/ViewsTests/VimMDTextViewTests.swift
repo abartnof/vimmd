@@ -352,6 +352,142 @@ func testTextViewCommandHotkeysPreservation() throws {
     }
 }
 
+func testTextViewMarkdownRenderingInNormalMode() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "# Header\nThis is **bold** text.")
+    textView.session = session
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
+    }
+
+    // Line 1 is H1 -> 22pt bold
+    let h1Font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
+    guard let f = h1Font, f.pointSize == 22 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected 22pt header font in Normal mode, got \(String(describing: h1Font))"])
+    }
+
+    // Line 2 has bold text
+    let boldLoc = (storage.string as NSString).range(of: "bold").location
+    let boldFont = storage.attribute(.font, at: boldLoc, effectiveRange: nil) as? NSFont
+    guard let bf = boldFont, NSFontManager.shared.traits(of: bf).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected bold trait in Normal mode"])
+    }
+}
+
+func testTextViewActiveLineUnconcealedInInsertMode() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "# Header Line\n**Bold Line Two**")
+    textView.session = session
+
+    // Enter insert mode on Line 1
+    session.feedKeys("i")
+    textView.updateSyntaxStyling(force: true)
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
+    }
+
+    // Line 1 is active in insert mode -> raw monospaced font
+    let line1Font = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
+    guard let l1f = line1Font, l1f.isFixedPitch, l1f.pointSize == 13 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected active line in insert mode to be raw 13pt monospaced, got \(String(describing: line1Font))"])
+    }
+
+    // Line 2 is inactive in insert mode -> rendered markdown bold
+    let line2Loc = (storage.string as NSString).range(of: "Bold Line Two").location
+    let line2Font = storage.attribute(.font, at: line2Loc, effectiveRange: nil) as? NSFont
+    guard let l2f = line2Font, NSFontManager.shared.traits(of: l2f).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected inactive line to maintain bold styling"])
+    }
+}
+
+func testTextViewModeTransitionTogglesStyling() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "# Header")
+    textView.session = session
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
+    }
+
+    // Normal mode -> 22pt header
+    var font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
+    guard font?.pointSize == 22 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected 22pt header font in Normal mode"])
+    }
+
+    // Transition to Insert mode -> 13pt monospaced
+    session.feedKeys("i")
+    textView.updateSyntaxStyling(force: true)
+    font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
+    guard font?.isFixedPitch == true, font?.pointSize == 13 else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected 13pt monospaced font in Insert mode"])
+    }
+
+    // Escape back to Normal mode -> 22pt header
+    session.feedKeys("\u{1b}")
+    textView.updateSyntaxStyling(force: true)
+    font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
+    guard font?.pointSize == 22 else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected 22pt header font after returning to Normal mode"])
+    }
+}
+
+func testTextViewInsertModeCursorMoveSwapsActiveLine() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "# Line One\n## Line Two")
+    textView.session = session
+
+    // Enter insert mode on Line 1
+    session.feedKeys("i")
+    textView.updateSyntaxStyling(force: true)
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
+    }
+
+    // Line 1 active (13pt mono), Line 2 styled (18pt bold)
+    var fontL1 = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
+    let l2Offset = (storage.string as NSString).range(of: "Line Two").location
+    var fontL2 = storage.attribute(.font, at: l2Offset, effectiveRange: nil) as? NSFont
+    guard fontL1?.isFixedPitch == true, fontL2?.pointSize == 18 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial insert mode styling mismatch"])
+    }
+
+    // Move cursor to Line 2 while remaining in Insert mode (e.g. Down arrow or setCursor)
+    session.setCursor(line: 2, byteCol: 1)
+    textView.updateSyntaxStyling(force: true)
+
+    // Now Line 1 should be styled (22pt bold), Line 2 unconcealed (13pt mono)
+    fontL1 = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
+    fontL2 = storage.attribute(.font, at: l2Offset, effectiveRange: nil) as? NSFont
+    guard fontL1?.pointSize == 22, fontL2?.isFixedPitch == true else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Line swapping after cursor move mismatch: L1=\(String(describing: fontL1)), L2=\(String(describing: fontL2))"])
+    }
+}
+
+func testTextViewCaretAlignmentMatchesRawOffsets() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "# Line One\n**Bold Text**\n`Code`")
+    textView.session = session
+
+    // Normal mode: cursor at line 2 col 3
+    session.setCursor(line: 2, byteCol: 3)
+    textView.synchronizeCaretWithSession()
+    guard textView.selectedRange().location == session.cursorUtf16Offset else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Caret offset mismatch in Normal mode"])
+    }
+
+    // Insert mode: cursor at line 3 col 2
+    session.feedKeys("i")
+    session.setCursor(line: 3, byteCol: 2)
+    textView.synchronizeCaretWithSession()
+    guard textView.selectedRange().location == session.cursorUtf16Offset else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Caret offset mismatch in Insert mode"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -368,7 +504,12 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewFirstResponderAndCaretSelection", testTextViewFirstResponderAndCaretSelection),
     ("testTextViewDirectInsertModeKeyHandling", testTextViewDirectInsertModeKeyHandling),
     ("testTextViewModeAndCursorMovedCallbacks", testTextViewModeAndCursorMovedCallbacks),
-    ("testTextViewCommandHotkeysPreservation", testTextViewCommandHotkeysPreservation)
+    ("testTextViewCommandHotkeysPreservation", testTextViewCommandHotkeysPreservation),
+    ("testTextViewMarkdownRenderingInNormalMode", testTextViewMarkdownRenderingInNormalMode),
+    ("testTextViewActiveLineUnconcealedInInsertMode", testTextViewActiveLineUnconcealedInInsertMode),
+    ("testTextViewModeTransitionTogglesStyling", testTextViewModeTransitionTogglesStyling),
+    ("testTextViewInsertModeCursorMoveSwapsActiveLine", testTextViewInsertModeCursorMoveSwapsActiveLine),
+    ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets)
 ]
 
 for (name, test) in tests {
