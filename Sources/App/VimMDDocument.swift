@@ -58,34 +58,41 @@ open class SavedChipView: NSView {
 open class VimMDDocument: NSDocument {
     public static let wrapLinesPreferenceKey = "VimMDWrapLinesPreference"
 
+    public static func syntaxType(for url: URL?, fileType: String?) -> VimMDTextView.DocumentSyntaxType {
+        let ext = url?.pathExtension.lowercased()
+        let type = fileType?.lowercased()
+
+        if ext == "md" || ext == "markdown" || type == "net.daringfireball.markdown" || (type?.contains("markdown") ?? false) {
+            return .markdown
+        }
+        if ext == "tsv" || ext == "tab" || type == "public.tab-separated-values-text" || (type?.contains("tab-separated") ?? false) || (type?.contains(".tsv") ?? false) {
+            return .tsv
+        }
+        if ext == "csv" || type == "public.comma-separated-values-text" || (type?.contains("comma-separated") ?? false) || (type?.contains(".csv") ?? false) {
+            return .csv
+        }
+        return .plainText
+    }
+
+    public var documentSyntaxType: VimMDTextView.DocumentSyntaxType {
+        return VimMDDocument.syntaxType(for: self.fileURL, fileType: self.fileType)
+    }
+
     public static func isTabularFormat(url: URL?, fileType: String?) -> Bool {
-        if let ext = url?.pathExtension.lowercased(), ext == "csv" || ext == "tsv" {
-            return true
-        }
-        if let type = fileType?.lowercased(),
-           type.contains("comma-separated") || type.contains("tab-separated") || type.contains(".csv") || type.contains(".tsv") {
-            return true
-        }
-        return false
+        let st = syntaxType(for: url, fileType: fileType)
+        return st == .csv || st == .tsv
     }
 
     public static func isTSVFormat(url: URL?, fileType: String?) -> Bool {
-        if let ext = url?.pathExtension.lowercased(), ext == "tsv" || ext == "tab" {
-            return true
-        }
-        if let type = fileType?.lowercased(),
-           type.contains("tab-separated") || type.contains(".tsv") || type.contains("tab") {
-            return true
-        }
-        return false
+        return syntaxType(for: url, fileType: fileType) == .tsv
     }
 
     public var isTabularDocument: Bool {
-        return VimMDDocument.isTabularFormat(url: self.fileURL, fileType: self.fileType)
+        return documentSyntaxType == .csv || documentSyntaxType == .tsv
     }
 
     public var isTSVDocument: Bool {
-        return VimMDDocument.isTSVFormat(url: self.fileURL, fileType: self.fileType)
+        return documentSyntaxType == .tsv
     }
 
     public var wrapLines: Bool = true {
@@ -274,8 +281,7 @@ open class VimMDDocument: NSDocument {
         bindSessionSystemAction(newSession)
         if let tv = self.textView {
             tv.session = newSession
-            tv.isTabularDocument = self.isTabularDocument
-            tv.isTSV = self.isTSVDocument
+            tv.documentSyntaxType = self.documentSyntaxType
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
         }
@@ -286,8 +292,7 @@ open class VimMDDocument: NSDocument {
         self.fileURL = url
         self.fileType = typeName
         configureWrapLinesPolicy()
-        self.textView?.isTabularDocument = self.isTabularDocument
-        self.textView?.isTSV = self.isTSVDocument
+        self.textView?.documentSyntaxType = self.documentSyntaxType
         try super.read(from: url, ofType: typeName)
         self.updateChangeCount(.changeCleared)
     }
@@ -295,8 +300,7 @@ open class VimMDDocument: NSDocument {
     override open func write(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType, originalContentsURL absoluteOriginalContentsURL: URL?) throws {
         self.fileURL = url
         self.fileType = typeName
-        self.textView?.isTabularDocument = self.isTabularDocument
-        self.textView?.isTSV = self.isTSVDocument
+        self.textView?.documentSyntaxType = self.documentSyntaxType
         try super.write(to: url, ofType: typeName, for: saveOperation, originalContentsURL: absoluteOriginalContentsURL)
         session?.clearDirty()
         self.updateChangeCount(.changeCleared)
@@ -366,8 +370,7 @@ open class VimMDDocument: NSDocument {
             self.session = s
             bindSessionSystemAction(s)
         }
-        tv.isTabularDocument = self.isTabularDocument
-        tv.isTSV = self.isTSVDocument
+        tv.documentSyntaxType = self.documentSyntaxType
         tv.session = self.session
         tv.onQuitRequested = { [weak self] in
             self?.handleQuitTrigger()

@@ -186,15 +186,74 @@ public struct MarkdownSyntaxResolver {
 
         let defaultFont = NSFont.systemFont(ofSize: 14)
         let defaultTextColor = NSColor.labelColor
+        let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
-        for lineRange in lineRanges {
-            // Apply markdown formatting permanently to all lines in all modes (NORMAL, VISUAL, INSERT)
+        var inFrontmatter = false
+        var inCodeBlock = false
+
+        for (lineIndex, lineRange) in lineRanges.enumerated() {
+            let lineString = fullString.substring(with: lineRange)
+            let trimmed = lineString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Check for YAML Frontmatter at start of document
+            if lineIndex == 0 && trimmed == "---" {
+                inFrontmatter = true
+                textStorage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: NSColor.secondaryLabelColor
+                ], range: lineRange)
+                continue
+            } else if inFrontmatter {
+                textStorage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: NSColor.secondaryLabelColor
+                ], range: lineRange)
+                if trimmed == "---" {
+                    inFrontmatter = false
+                }
+                continue
+            }
+
+            // Check for Fenced Code Block: ```
+            if trimmed.hasPrefix("```") {
+                inCodeBlock = !inCodeBlock
+                textStorage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: NSColor.secondaryLabelColor
+                ], range: lineRange)
+                continue
+            } else if inCodeBlock {
+                textStorage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: defaultTextColor
+                ], range: lineRange)
+                continue
+            }
+
+            // Check for Markdown Table row (starts with | and contains |)
+            if trimmed.hasPrefix("|") && trimmed.count > 1 && trimmed.contains("|") {
+                textStorage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: defaultTextColor
+                ], range: lineRange)
+
+                // Subtly dim delimiter pipe characters
+                let nsLine = lineString as NSString
+                for i in 0..<nsLine.length {
+                    if nsLine.character(at: i) == 124 { // ASCII for '|'
+                        let pipeRange = NSRange(location: lineRange.location + i, length: 1)
+                        textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: pipeRange)
+                    }
+                }
+                continue
+            }
+
+            // Apply markdown formatting permanently to standard lines
             textStorage.setAttributes([
                 .font: defaultFont,
                 .foregroundColor: defaultTextColor
             ], range: lineRange)
 
-            let lineString = fullString.substring(with: lineRange)
             let nsLine = lineString as NSString
             let lineLength = nsLine.length
 

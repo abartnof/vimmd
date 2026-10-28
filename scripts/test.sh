@@ -55,7 +55,7 @@ for test_file in "${ROOT_DIR}"/Tests/ViewsTests/*Tests.swift; do
         -I "${ROOT_DIR}/Sources/CBridge" \
         -I "${BUILD_DIR}" \
         -L "${BUILD_DIR}" \
-        -lViews -lEngine -lCBridge \
+        -lApp -lViews -lEngine -lCBridge \
         "${test_file}" \
         -o "${bin_name}"
     

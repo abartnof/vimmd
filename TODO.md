@@ -29,15 +29,15 @@ This document tracks all active milestones, user requirements, and architectural
     - [x] Synchronize `session.isDirty` with AppKit `updateChangeCount(.changeDone)` / `updateChangeCount(.changeCleared)`.
     - [x] Vim path (`:q`, `:qa`): Blocks close when dirty and displays `[Warning] E37: No write since last change (add ! to override)` in warning style.
     - [x] macOS path (`Cmd+W`, `Cmd+Q`, window close button): Prompts standard native alert save sheet when document is edited, preventing accidental data loss.
+- [x] **Milestone I: Typography Hierarchy (Monospace Default for Non-Markdown)**
+  - [x] **Markdown (`.md`, `.markdown`)**: Rich hybrid typography (proportional SF Pro for headers, body text, bold, italics, and lists; monospaced SF Mono 13pt for code spans, tables, code fences, and frontmatter).
+  - [x] **All Other Formats (`.txt`, `.csv`, `.tsv`, `.sh`, `.json`, `.py`, `.c`, `.swift`, `.yaml`, etc., and untitled non-markdown documents)**: Default to native Monospaced System Font (SF Mono 13pt, `NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)`) with `NSColor.textColor`.
+  - [x] **Zero Markdown Concealment Leakage**: Plain text documents have 100% SF Mono 13pt without header resizing or delimiter hiding, even if text contains markdown tokens (`#`, `*`, `**`, `` ` ``).
+  - [x] **Dynamic Format Switching & Typing**: Seamless typography synchronization on syntax mode switches and delta typing.
 
 ---
 
 ## 2. Upcoming Milestones
-
-### Milestone I: Typography Hierarchy (Monospace Default for Non-Markdown)
-- [ ] **Format-Aware Typography Hierarchy**:
-  - **Markdown (`.md`)**: Rich hybrid typography (proportional SF Pro for headers, body text, bold, italics, and lists; monospaced SF Mono for code spans, tables, and frontmatter).
-  - **All Other Formats (`.txt`, `.csv`, `.tsv`, `.sh`, `.json`, etc.)**: Default to native Monospaced System Font (SF Mono, 13pt).
 
 ### Milestone J: Operator-Pending Inner Text Objects (`di'`, `ci'`, `yi'`)
 - [ ] **Delete Inner Text Objects (`di...`)**:

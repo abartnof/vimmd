@@ -37,10 +37,19 @@ open class VimMDTextView: NSTextView {
         case markdown
         case csv
         case tsv
+        case plainText
     }
 
     public var documentSyntaxType: DocumentSyntaxType = .markdown {
         didSet {
+            if documentSyntaxType == .plainText {
+                self.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                self.textColor = NSColor.textColor
+                self.typingAttributes = [
+                    .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                    .foregroundColor: NSColor.textColor
+                ]
+            }
             updateSyntaxStyling(force: true)
         }
     }
@@ -89,6 +98,12 @@ open class VimMDTextView: NSTextView {
     }
 
     private func setupDefaults() {
+        self.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        self.textColor = NSColor.textColor
+        self.typingAttributes = [
+            .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: NSColor.textColor
+        ]
         self.isVerticallyResizable = true
         self.isHorizontallyResizable = false
         self.autoresizingMask = [.width]
@@ -184,9 +199,21 @@ open class VimMDTextView: NSTextView {
     public func updateSyntaxStyling(force: Bool = false) {
         guard let storage = self.textStorage else { return }
         storage.beginEditing()
-        if isTabularDocument {
-            tabularResolver.renderTabularSyntax(in: storage, isTSV: isTSV)
-        } else {
+        switch documentSyntaxType {
+        case .csv:
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: false)
+        case .tsv:
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: true)
+        case .plainText:
+            let fullRange = NSRange(location: 0, length: storage.length)
+            let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+            if storage.length > 0 {
+                storage.setAttributes([
+                    .font: monoFont,
+                    .foregroundColor: NSColor.textColor
+                ], range: fullRange)
+            }
+        case .markdown:
             let currentMode = session?.mode ?? VIM_MODE_NORMAL
             let isInsert = (currentMode == VIM_MODE_INSERT)
             let activeLine = session?.cursorPosition.line
