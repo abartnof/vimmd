@@ -43,7 +43,30 @@ struct VimDocumentContext {
     void *buf_ptr;
     void *win_ptr;
     int mode_state;
+
+    // Undo / Redo history
+    struct VimUndoNode *undo_head;
+    struct VimUndoNode *undo_tail;
+    size_t undo_count;
+
+    struct VimUndoNode *redo_head;
+    struct VimUndoNode *redo_tail;
+    size_t redo_count;
+
+    bool in_insert_undo_group;
 };
+
+#define MAX_UNDO_LEVELS 100
+
+typedef struct VimUndoNode {
+    char **lines;
+    size_t line_count;
+    VimBytePos cursor;
+    bool is_dirty;
+    struct VimUndoNode *prev;
+    struct VimUndoNode *next;
+} VimUndoNode;
+
 
 #define MAX_TRACKED_CONTEXTS 128
 static struct VimDocumentContext *g_contexts[MAX_TRACKED_CONTEXTS];
@@ -109,6 +132,125 @@ static void free_lines(char **lines, size_t count) {
     }
     free(lines);
 }
+
+static VimUndoNode* create_undo_node(struct VimDocumentContext *ctx) {
+    if (!ctx || ctx->line_count == 0) return NULL;
+    VimUndoNode *node = (VimUndoNode *)calloc(1, sizeof(VimUndoNode));
+    if (!node) return NULL;
+    node->line_count = ctx->line_count;
+    node->cursor = ctx->cursor;
+    node->is_dirty = ctx->is_dirty;
+    node->lines = (char **)malloc(node->line_count * sizeof(char *));
+    if (!node->lines) {
+        free(node);
+        return NULL;
+    }
+    for (size_t i = 0; i < node->line_count; i++) {
+        node->lines[i] = duplicate_string(ctx->lines[i]);
+    }
+    return node;
+}
+
+static void free_undo_node(VimUndoNode *node) {
+    if (!node) return;
+    if (node->lines) {
+        for (size_t i = 0; i < node->line_count; i++) {
+            if (node->lines[i]) {
+                free(node->lines[i]);
+                node->lines[i] = NULL;
+            }
+        }
+        free(node->lines);
+        node->lines = NULL;
+    }
+    free(node);
+}
+
+static void clear_undo_stack(struct VimDocumentContext *ctx) {
+    if (!ctx) return;
+    VimUndoNode *curr = ctx->undo_head;
+    while (curr) {
+        VimUndoNode *next = curr->next;
+        free_undo_node(curr);
+        curr = next;
+    }
+    ctx->undo_head = NULL;
+    ctx->undo_tail = NULL;
+    ctx->undo_count = 0;
+}
+
+static void clear_redo_stack(struct VimDocumentContext *ctx) {
+    if (!ctx) return;
+    VimUndoNode *curr = ctx->redo_head;
+    while (curr) {
+        VimUndoNode *next = curr->next;
+        free_undo_node(curr);
+        curr = next;
+    }
+    ctx->redo_head = NULL;
+    ctx->redo_tail = NULL;
+    ctx->redo_count = 0;
+}
+
+static void push_undo_node(struct VimDocumentContext *ctx, VimUndoNode *node) {
+    if (!ctx || !node) return;
+    node->next = ctx->undo_head;
+    node->prev = NULL;
+    if (ctx->undo_head) {
+        ctx->undo_head->prev = node;
+    } else {
+        ctx->undo_tail = node;
+    }
+    ctx->undo_head = node;
+    ctx->undo_count++;
+
+    while (ctx->undo_count > MAX_UNDO_LEVELS && ctx->undo_tail) {
+        VimUndoNode *old_tail = ctx->undo_tail;
+        ctx->undo_tail = old_tail->prev;
+        if (ctx->undo_tail) {
+            ctx->undo_tail->next = NULL;
+        } else {
+            ctx->undo_head = NULL;
+        }
+        free_undo_node(old_tail);
+        ctx->undo_count--;
+    }
+}
+
+static void push_redo_node(struct VimDocumentContext *ctx, VimUndoNode *node) {
+    if (!ctx || !node) return;
+    node->next = ctx->redo_head;
+    node->prev = NULL;
+    if (ctx->redo_head) {
+        ctx->redo_head->prev = node;
+    } else {
+        ctx->redo_tail = node;
+    }
+    ctx->redo_head = node;
+    ctx->redo_count++;
+
+    while (ctx->redo_count > MAX_UNDO_LEVELS && ctx->redo_tail) {
+        VimUndoNode *old_tail = ctx->redo_tail;
+        ctx->redo_tail = old_tail->prev;
+        if (ctx->redo_tail) {
+            ctx->redo_tail->next = NULL;
+        } else {
+            ctx->redo_head = NULL;
+        }
+        free_undo_node(old_tail);
+        ctx->redo_count--;
+    }
+}
+
+static void snapshot_for_undo(struct VimDocumentContext *ctx) {
+    if (!ctx) return;
+    clear_redo_stack(ctx);
+    VimUndoNode *node = create_undo_node(ctx);
+    if (node) {
+        push_undo_node(ctx, node);
+    }
+}
+
 
 static bool ensure_line_capacity(struct VimDocumentContext *ctx, size_t needed) {
     if (needed <= ctx->line_capacity) return true;
@@ -247,6 +389,8 @@ void vim_context_destroy(VimContextRef ctx) {
         free(ctx->yank_buffer);
         ctx->yank_buffer = NULL;
     }
+    clear_undo_stack(ctx);
+    clear_redo_stack(ctx);
     free_lines(ctx->lines, ctx->line_count);
     free(ctx);
 }
@@ -990,6 +1134,7 @@ static char** split_lines(const char *text, size_t *out_count, bool linewise) {
 
 static void paste_text(struct VimDocumentContext *ctx, bool after) {
     if (!ctx || !ctx->yank_buffer) return;
+    snapshot_for_undo(ctx);
 
     if (ctx->yank_is_linewise) {
         size_t num_lines = 0;
@@ -1159,6 +1304,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 char *line = ctx->lines[l_idx];
                 size_t len = strlen(line);
                 if (len > 0 && (size_t)ctx->cursor.byteCol <= len) {
+                    snapshot_for_undo(ctx);
                     line[ctx->cursor.byteCol - 1] = *p;
                     ctx->is_dirty = true;
                     emit_line_delta(ctx, ctx->cursor.line, 1, 1);
@@ -1219,6 +1365,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
 
                 if (op == 'd') {
                     if (*p == 'd') { // dd: delete line(s)
+                        snapshot_for_undo(ctx);
                         size_t start_idx = (size_t)(ctx->cursor.line - 1);
                         size_t del_count = (size_t)count;
                         if (start_idx + del_count > ctx->line_count) {
@@ -1258,6 +1405,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         ctx->cursor = orig;
 
                         if (end > start) {
+                            snapshot_for_undo(ctx);
                             char *yanked = (char *)malloc(end - start + 1);
                             if (yanked) {
                                 memcpy(yanked, line + start, end - start);
@@ -1273,6 +1421,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         p++;
                         continue;
                     } else if (*p == '$') { // d$: delete to end of line
+                        snapshot_for_undo(ctx);
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
                         char *line = ctx->lines[l_idx];
                         size_t start = (size_t)(ctx->cursor.byteCol - 1);
@@ -1289,6 +1438,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         size_t len = strlen(line);
                         size_t end = (size_t)(ctx->cursor.byteCol - 1);
                         if (end > 0) {
+                            snapshot_for_undo(ctx);
                             char *yanked = (char *)malloc(end + 1);
                             if (yanked) {
                                 memcpy(yanked, line, end);
@@ -1359,6 +1509,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     }
                 } else if (op == 'c') {
                     if (*p == 'c') { // cc: change line
+                        snapshot_for_undo(ctx);
+                        ctx->in_insert_undo_group = true;
                         yank_linewise_range(ctx, ctx->cursor.line, ctx->cursor.line);
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
                         free(ctx->lines[l_idx]);
@@ -1381,6 +1533,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         ctx->cursor = orig;
 
                         if (end > start) {
+                            snapshot_for_undo(ctx);
+                            ctx->in_insert_undo_group = true;
                             char *yanked = (char *)malloc(end - start + 1);
                             if (yanked) {
                                 memcpy(yanked, line + start, end - start);
@@ -1396,6 +1550,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         p++;
                         continue;
                     } else if (*p == '$') { // c$: change to end of line
+                        snapshot_for_undo(ctx);
+                        ctx->in_insert_undo_group = true;
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
                         char *line = ctx->lines[l_idx];
                         size_t start = (size_t)(ctx->cursor.byteCol - 1);
@@ -1413,6 +1569,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         size_t len = strlen(line);
                         size_t end = (size_t)(ctx->cursor.byteCol - 1);
                         if (end > 0) {
+                            snapshot_for_undo(ctx);
+                            ctx->in_insert_undo_group = true;
                             char *yanked = (char *)malloc(end + 1);
                             if (yanked) {
                                 memcpy(yanked, line, end);
@@ -1446,11 +1604,13 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             // 7. Standard Normal Mode Keystrokes
             if (*p == 'i') {
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->in_insert_undo_group = false;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'I') {
                 ctx->cursor.byteCol = 1;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->in_insert_undo_group = false;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'a') {
@@ -1459,18 +1619,22 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     ctx->cursor.byteCol++;
                 }
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->in_insert_undo_group = false;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'A') {
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
                 ctx->cursor.byteCol = (int32_t)line_len + 1;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->in_insert_undo_group = false;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'o') {
                 if (!ensure_line_capacity(ctx, ctx->line_count + 1)) { p++; continue; }
                 char *new_line = duplicate_string("");
                 if (!new_line) { p++; continue; }
+                snapshot_for_undo(ctx);
+                ctx->in_insert_undo_group = true;
                 int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)ctx->cursor.line;
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
@@ -1487,6 +1651,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 if (!ensure_line_capacity(ctx, ctx->line_count + 1)) { p++; continue; }
                 char *new_line = duplicate_string("");
                 if (!new_line) { p++; continue; }
+                snapshot_for_undo(ctx);
+                ctx->in_insert_undo_group = true;
                 int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)(ctx->cursor.line - 1);
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
@@ -1622,6 +1788,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 char *line = ctx->lines[l_idx];
                 size_t line_len = strlen(line);
                 if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
+                    snapshot_for_undo(ctx);
                     size_t pos = (size_t)(ctx->cursor.byteCol - 1);
                     char yanked[2] = { line[pos], '\0' };
                     set_yank_buffer(ctx, yanked, false);
@@ -1637,18 +1804,23 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 char *line = ctx->lines[l_idx];
                 size_t line_len = strlen(line);
                 if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
+                    snapshot_for_undo(ctx);
+                    ctx->in_insert_undo_group = true;
                     size_t pos = (size_t)(ctx->cursor.byteCol - 1);
                     char yanked[2] = { line[pos], '\0' };
                     set_yank_buffer(ctx, yanked, false);
                     memmove(&line[pos], &line[pos + 1], line_len - pos);
                     ctx->is_dirty = true;
                     emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                } else {
+                    ctx->in_insert_undo_group = false;
                 }
                 ctx->mode = VIM_MODE_INSERT;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'J') { // join lines
                 if ((size_t)ctx->cursor.line < ctx->line_count) {
+                    snapshot_for_undo(ctx);
                     size_t idx1 = (size_t)(ctx->cursor.line - 1);
                     size_t idx2 = idx1 + 1;
                     char *line1 = ctx->lines[idx1];
@@ -1684,6 +1856,20 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 }
                 ctx->count_accumulator = 0;
                 p++;
+            } else if (*p == 'u') {
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                for (int i = 0; i < count; i++) {
+                    vim_context_undo(ctx);
+                }
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == '\x12') { // Ctrl+R (redo)
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                for (int i = 0; i < count; i++) {
+                    vim_context_redo(ctx);
+                }
+                ctx->count_accumulator = 0;
+                p++;
             } else if (*p == 'Z') {
                 ctx->pending_leader = 'Z';
                 p++;
@@ -1694,11 +1880,16 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
         } else if (ctx->mode == VIM_MODE_INSERT) {
             if (*p == '\x1b') {
                 ctx->mode = VIM_MODE_NORMAL;
+                ctx->in_insert_undo_group = false;
                 if (ctx->cursor.byteCol > 1) {
                     ctx->cursor.byteCol--;
                 }
                 p++;
             } else if (*p == '\x7f' || *p == '\x08') {
+                if (!ctx->in_insert_undo_group) {
+                    snapshot_for_undo(ctx);
+                    ctx->in_insert_undo_group = true;
+                }
                 size_t line_idx = (size_t)(ctx->cursor.line - 1);
                 char *line = ctx->lines[line_idx];
                 size_t line_len = strlen(line);
@@ -1711,6 +1902,10 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 }
                 p++;
             } else if (*p == '\n' || *p == '\r') {
+                if (!ctx->in_insert_undo_group) {
+                    snapshot_for_undo(ctx);
+                    ctx->in_insert_undo_group = true;
+                }
                 size_t line_idx = (size_t)(ctx->cursor.line - 1);
                 char *line = ctx->lines[line_idx];
                 size_t line_len = strlen(line);
@@ -1739,6 +1934,10 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 emit_line_delta(ctx, ctx->cursor.line - 1, 1, 2);
                 p++;
             } else {
+                if (!ctx->in_insert_undo_group) {
+                    snapshot_for_undo(ctx);
+                    ctx->in_insert_undo_group = true;
+                }
                 size_t line_idx = (size_t)(ctx->cursor.line - 1);
                 char *line = ctx->lines[line_idx];
                 size_t line_len = strlen(line);
@@ -1780,6 +1979,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->count_accumulator = 0;
                 bool is_change = (*p == 'c');
                 if (ctx->visual_is_linewise) {
+                    snapshot_for_undo(ctx);
                     int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     size_t start_idx = (size_t)(start_l - 1);
@@ -1811,6 +2011,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         if (end > len) end = len;
 
                         if (end > start) {
+                            snapshot_for_undo(ctx);
                             char *yanked = (char *)malloc(end - start + 1);
                             if (yanked) {
                                 memcpy(yanked, line + start, end - start);
@@ -1825,6 +2026,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     }
                 }
                 ctx->is_dirty = true;
+                ctx->in_insert_undo_group = is_change;
                 ctx->mode = is_change ? VIM_MODE_INSERT : VIM_MODE_NORMAL;
                 clamp_cursor(ctx);
                 p++;
@@ -2058,6 +2260,12 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command) {
     } else if (strcmp(cmd, "e!") == 0 || strcmp(cmd, "edit!") == 0) {
         ctx->pending_action = VIM_ACTION_RELOAD_FORCE;
         ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "u") == 0 || strcmp(cmd, "undo") == 0) {
+        vim_context_undo(ctx);
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "red") == 0 || strcmp(cmd, "redo") == 0) {
+        vim_context_redo(ctx);
+        ctx->last_error[0] = '\0';
     } else if (strncmp(cmd, "%s/", 3) == 0 || strncmp(cmd, "s/", 2) == 0) {
         bool is_global_lines = (cmd[0] == '%');
         const char *p = is_global_lines ? cmd + 3 : cmd + 2;
@@ -2096,11 +2304,16 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command) {
 
             size_t start_line = is_global_lines ? 1 : (size_t)ctx->cursor.line;
             size_t end_line = is_global_lines ? ctx->line_count : (size_t)ctx->cursor.line;
+            bool did_snapshot = false;
 
             for (size_t l = start_line; l <= end_line && l <= ctx->line_count; l++) {
                 char *new_line = replace_substring(ctx->lines[l - 1], find_buf, replace_buf, replace_all_in_line);
                 if (new_line) {
                     if (strcmp(new_line, ctx->lines[l - 1]) != 0) {
+                        if (!did_snapshot) {
+                            snapshot_for_undo(ctx);
+                            did_snapshot = true;
+                        }
                         free(ctx->lines[l - 1]);
                         ctx->lines[l - 1] = new_line;
                         ctx->is_dirty = true;
@@ -2153,3 +2366,94 @@ char* vim_context_serialize_buffer(VimContextRef ctx, size_t *outLength) {
     }
     return buf;
 }
+
+bool vim_context_can_undo(VimContextRef ctx) {
+    if (!ctx) return false;
+    return ctx->undo_head != NULL;
+}
+
+bool vim_context_can_redo(VimContextRef ctx) {
+    if (!ctx) return false;
+    return ctx->redo_head != NULL;
+}
+
+bool vim_context_undo(VimContextRef ctx) {
+    if (!ctx || !ctx->undo_head) return false;
+
+    // Snapshot current state into redo stack
+    VimUndoNode *redo_node = create_undo_node(ctx);
+    if (redo_node) {
+        push_redo_node(ctx, redo_node);
+    }
+
+    // Pop top node from undo stack
+    VimUndoNode *node = ctx->undo_head;
+    ctx->undo_head = node->next;
+    if (ctx->undo_head) {
+        ctx->undo_head->prev = NULL;
+    } else {
+        ctx->undo_tail = NULL;
+    }
+    ctx->undo_count--;
+
+    // Restore state
+    size_t old_line_count = ctx->line_count;
+    free_lines(ctx->lines, ctx->line_count);
+
+    ctx->lines = node->lines;
+    ctx->line_count = node->line_count;
+    ctx->line_capacity = node->line_count;
+    ctx->cursor = node->cursor;
+    ctx->is_dirty = node->is_dirty;
+
+    node->lines = NULL;
+    free(node);
+
+    clamp_cursor(ctx);
+    ctx->in_insert_undo_group = false;
+
+    // Dispatch delta
+    emit_line_delta(ctx, 1, (int32_t)old_line_count, (int32_t)ctx->line_count);
+    return true;
+}
+
+bool vim_context_redo(VimContextRef ctx) {
+    if (!ctx || !ctx->redo_head) return false;
+
+    // Snapshot current state into undo stack
+    VimUndoNode *undo_node = create_undo_node(ctx);
+    if (undo_node) {
+        push_undo_node(ctx, undo_node);
+    }
+
+    // Pop top node from redo stack
+    VimUndoNode *node = ctx->redo_head;
+    ctx->redo_head = node->next;
+    if (ctx->redo_head) {
+        ctx->redo_head->prev = NULL;
+    } else {
+        ctx->redo_tail = NULL;
+    }
+    ctx->redo_count--;
+
+    // Restore state
+    size_t old_line_count = ctx->line_count;
+    free_lines(ctx->lines, ctx->line_count);
+
+    ctx->lines = node->lines;
+    ctx->line_count = node->line_count;
+    ctx->line_capacity = node->line_count;
+    ctx->cursor = node->cursor;
+    ctx->is_dirty = node->is_dirty;
+
+    node->lines = NULL;
+    free(node);
+
+    clamp_cursor(ctx);
+    ctx->in_insert_undo_group = false;
+
+    // Dispatch delta
+    emit_line_delta(ctx, 1, (int32_t)old_line_count, (int32_t)ctx->line_count);
+    return true;
+}
+

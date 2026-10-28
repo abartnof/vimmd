@@ -1255,6 +1255,223 @@ static void test_yank_callback_and_clipboard(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_undo_redo_basic(void) {
+    const char *initial = "Hello World\nLine two";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+    assert(!vim_context_can_undo(ctx));
+    assert(!vim_context_can_redo(ctx));
+
+    // Delete character 'H' with 'x'
+    vim_context_feed_keys(ctx, "x");
+    assert(vim_context_can_undo(ctx));
+    assert(!vim_context_can_redo(ctx));
+    assert(vim_context_is_dirty(ctx));
+
+    char *ser1 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser1, "ello World\nLine two") == 0);
+    free(ser1);
+
+    // Undo with 'u'
+    vim_context_feed_keys(ctx, "u");
+    assert(!vim_context_can_undo(ctx));
+    assert(vim_context_can_redo(ctx));
+    assert(!vim_context_is_dirty(ctx));
+
+    char *ser2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser2, initial) == 0);
+    free(ser2);
+
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // Redo with Ctrl+R (\x12)
+    vim_context_feed_keys(ctx, "\x12");
+    assert(vim_context_can_undo(ctx));
+    assert(!vim_context_can_redo(ctx));
+    assert(vim_context_is_dirty(ctx));
+
+    char *ser3 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser3, "ello World\nLine two") == 0);
+    free(ser3);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_undo_redo_sequential(void) {
+    const char *initial = "Line 1\nLine 2\nLine 3";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    // Edit 1: delete line 1 with "dd"
+    vim_context_feed_keys(ctx, "dd");
+    char *s1 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s1, "Line 2\nLine 3") == 0);
+    free(s1);
+
+    // Edit 2: append line "Line 2.5" with "oLine 2.5\x1b"
+    vim_context_feed_keys(ctx, "oLine 2.5\x1b");
+    char *s2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s2, "Line 2\nLine 2.5\nLine 3") == 0);
+    free(s2);
+
+    // Undo 1: should undo Edit 2, restoring "Line 2\nLine 3"
+    bool u1 = vim_context_undo(ctx);
+    assert(u1);
+    char *u1_ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(u1_ser, "Line 2\nLine 3") == 0);
+    free(u1_ser);
+
+    // Undo 2: should undo Edit 1, restoring initial text "Line 1\nLine 2\nLine 3"
+    bool u2 = vim_context_undo(ctx);
+    assert(u2);
+    char *u2_ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(u2_ser, initial) == 0);
+    free(u2_ser);
+    assert(!vim_context_can_undo(ctx));
+
+    // Redo 1: should redo Edit 1, restoring "Line 2\nLine 3"
+    bool r1 = vim_context_redo(ctx);
+    assert(r1);
+    char *r1_ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(r1_ser, "Line 2\nLine 3") == 0);
+    free(r1_ser);
+
+    // Redo 2: should redo Edit 2, restoring "Line 2\nLine 2.5\nLine 3"
+    bool r2 = vim_context_redo(ctx);
+    assert(r2);
+    char *r2_ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(r2_ser, "Line 2\nLine 2.5\nLine 3") == 0);
+    free(r2_ser);
+    assert(!vim_context_can_redo(ctx));
+
+    vim_context_destroy(ctx);
+}
+
+static void test_undo_insert_session_cohesive(void) {
+    const char *initial = "Header: ";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    // Move to end of line: "$"
+    vim_context_feed_keys(ctx, "$");
+
+    // Enter insert mode, type multiple words, insert newline, backspace, and exit
+    vim_context_feed_keys(ctx, "aDraft One\nDraft Two\x7f\x7f\x1b");
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Header: Draft One\nDraft T") == 0);
+    free(ser);
+
+    // Single 'u' must undo the ENTIRE insert session
+    vim_context_feed_keys(ctx, "u");
+
+    char *undone = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(undone, initial) == 0);
+    free(undone);
+
+    // Redo with Ctrl+R restores the whole typed session
+    vim_context_feed_keys(ctx, "\x12");
+
+    char *redone = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(redone, "Header: Draft One\nDraft T") == 0);
+    free(redone);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_undo_ex_commands(void) {
+    const char *initial = "apple banana apple";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    // Substitute apple -> orange
+    vim_context_execute_ex(ctx, "%s/apple/orange/g");
+
+    char *s1 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s1, "orange banana orange") == 0);
+    free(s1);
+
+    // Undo via Ex command ":u"
+    vim_context_execute_ex(ctx, "u");
+
+    char *s2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s2, initial) == 0);
+    free(s2);
+
+    // Redo via Ex command ":redo"
+    vim_context_execute_ex(ctx, "redo");
+
+    char *s3 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s3, "orange banana orange") == 0);
+    free(s3);
+
+    // Undo via Ex command ":undo"
+    vim_context_execute_ex(ctx, "undo");
+    char *s4 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s4, initial) == 0);
+    free(s4);
+
+    // Redo via Ex command ":red"
+    vim_context_execute_ex(ctx, "red");
+    char *s5 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(s5, "orange banana orange") == 0);
+    free(s5);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_undo_tree_truncation_on_new_edit(void) {
+    VimContextRef ctx = vim_context_create("Base Line");
+    assert(ctx != NULL);
+
+    vim_context_feed_keys(ctx, "oSecond\x1b");
+    vim_context_feed_keys(ctx, "oThird\x1b");
+
+    // Undo to "Second"
+    vim_context_feed_keys(ctx, "u");
+    assert(vim_context_can_redo(ctx));
+
+    // Performing a new edit must invalidate and clear redo history
+    vim_context_feed_keys(ctx, "oBranch Line\x1b");
+    assert(!vim_context_can_redo(ctx));
+
+    // Ctrl+R should do nothing
+    bool redone = vim_context_redo(ctx);
+    assert(!redone);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Base Line\nSecond\nBranch Line") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_undo_cap_levels(void) {
+    VimContextRef ctx = vim_context_create("Initial");
+    assert(ctx != NULL);
+
+    // Perform 120 sequential edits
+    for (int i = 0; i < 120; i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "oLine %d\x1b", i);
+        vim_context_feed_keys(ctx, buf);
+    }
+
+    assert(vim_context_can_undo(ctx));
+
+    // Undo 100 times should succeed
+    int undos = 0;
+    while (vim_context_undo(ctx)) {
+        undos++;
+    }
+    // Cap is 100 levels
+    assert(undos == 100);
+    assert(!vim_context_can_undo(ctx));
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -1286,6 +1503,12 @@ int main(void) {
     RUN_TEST(test_visual_selection_and_operators);
     RUN_TEST(test_esc_cancellation);
     RUN_TEST(test_yank_callback_and_clipboard);
+    RUN_TEST(test_undo_redo_basic);
+    RUN_TEST(test_undo_redo_sequential);
+    RUN_TEST(test_undo_insert_session_cohesive);
+    RUN_TEST(test_undo_ex_commands);
+    RUN_TEST(test_undo_tree_truncation_on_new_edit);
+    RUN_TEST(test_undo_cap_levels);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

@@ -714,6 +714,154 @@ func testTextViewCopyAndPasteSynchronizedWithSystemPasteboard() throws {
     }
 }
 
+class MockMenuItem: NSObject, NSValidatedUserInterfaceItem {
+    let action: Selector?
+    let tag: Int
+    init(action: Selector?, tag: Int = 0) {
+        self.action = action
+        self.tag = tag
+        super.init()
+    }
+}
+
+func testTextViewUndoRedoCommandKeys() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let initial = "Sample text for undo test"
+    let session = VimSession(initialText: initial)
+    textView.session = session
+
+    // Normal mode delete character 'S' with 'x'
+    let eventX = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7)!
+    textView.keyDown(with: eventX)
+
+    guard textView.string == "ample text for undo test" else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected 'ample text for undo test', got '\(textView.string)'"])
+    }
+
+    // Cmd+Z: Undo
+    let eventCmdZ = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [.command],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "z",
+        charactersIgnoringModifiers: "z",
+        isARepeat: false,
+        keyCode: 6 // 'z'
+    )!
+    textView.keyDown(with: eventCmdZ)
+
+    guard textView.string == initial else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected Cmd+Z to restore initial string, got '\(textView.string)'"])
+    }
+
+    // Cmd+Shift+Z: Redo
+    let eventCmdShiftZ = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [.command, .shift],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "Z",
+        charactersIgnoringModifiers: "z",
+        isARepeat: false,
+        keyCode: 6 // 'z'
+    )!
+    textView.keyDown(with: eventCmdShiftZ)
+
+    guard textView.string == "ample text for undo test" else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected Cmd+Shift+Z to redo deletion, got '\(textView.string)'"])
+    }
+}
+
+func testTextViewUndoRedoActionMethods() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let initial = "Alpha Beta Gamma"
+    let session = VimSession(initialText: initial)
+    textView.session = session
+
+    let undoItem = MockMenuItem(action: #selector(VimMDTextView.undo(_:)))
+    let redoItem = MockMenuItem(action: #selector(VimMDTextView.redo(_:)))
+
+    // Initially cannot undo or redo
+    guard !textView.validateUserInterfaceItem(undoItem) else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected undo to be disabled initially"])
+    }
+    guard !textView.validateUserInterfaceItem(redoItem) else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected redo to be disabled initially"])
+    }
+
+    // Make an edit: delete word 'Alpha ' with 'dw'
+    session.feedKeys("dw")
+    guard textView.string == "Beta Gamma" else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected 'Beta Gamma', got '\(textView.string)'"])
+    }
+
+    guard textView.validateUserInterfaceItem(undoItem) else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected undo to be enabled after edit"])
+    }
+    guard !textView.validateUserInterfaceItem(redoItem) else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected redo to be disabled after edit"])
+    }
+
+    // Call undo(_:)
+    textView.undo(nil as Any?)
+    guard textView.string == initial else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected undo(_:) to restore initial, got '\(textView.string)'"])
+    }
+
+    guard !textView.validateUserInterfaceItem(undoItem) else {
+        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected undo to be disabled after full undo"])
+    }
+    guard textView.validateUserInterfaceItem(redoItem) else {
+        throw NSError(domain: "ViewsTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected redo to be enabled after undo"])
+    }
+
+    // Call redo(_:)
+    textView.redo(nil as Any?)
+    guard textView.string == "Beta Gamma" else {
+        throw NSError(domain: "ViewsTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected redo(_:) to reapply edit, got '\(textView.string)'"])
+    }
+}
+
+func testTextViewUndoManagerIntegration() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let initial = "First Line\nSecond Line"
+    let session = VimSession(initialText: initial)
+    textView.session = session
+
+    guard let mgr = textView.undoManager else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil undoManager"])
+    }
+
+    guard !mgr.canUndo && !mgr.canRedo else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "undoManager should report cannot undo/redo initially"])
+    }
+
+    // Mutate
+    session.feedKeys("dd")
+    guard mgr.canUndo && !mgr.canRedo else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "undoManager should allow undo after dd"])
+    }
+
+    mgr.undo()
+    guard textView.string == initial else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "mgr.undo() failed: '\(textView.string)'"])
+    }
+
+    guard !mgr.canUndo && mgr.canRedo else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "undoManager state after undo incorrect"])
+    }
+
+    mgr.redo()
+    guard textView.string == "Second Line" else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "mgr.redo() failed: '\(textView.string)'"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -742,7 +890,10 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets),
     ("testTextViewVisualTextObjectSelection", testTextViewVisualTextObjectSelection),
     ("testTextViewSearchKeyNavigation", testTextViewSearchKeyNavigation),
-    ("testTextViewCopyAndPasteSynchronizedWithSystemPasteboard", testTextViewCopyAndPasteSynchronizedWithSystemPasteboard)
+    ("testTextViewCopyAndPasteSynchronizedWithSystemPasteboard", testTextViewCopyAndPasteSynchronizedWithSystemPasteboard),
+    ("testTextViewUndoRedoCommandKeys", testTextViewUndoRedoCommandKeys),
+    ("testTextViewUndoRedoActionMethods", testTextViewUndoRedoActionMethods),
+    ("testTextViewUndoManagerIntegration", testTextViewUndoManagerIntegration)
 ]
 
 for (name, test) in tests {

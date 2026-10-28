@@ -785,6 +785,132 @@ func testVimSessionClipboardPasteIntegration() throws {
     }
 }
 
+func testVimSessionUndoRedoBasic() throws {
+    let initial = "The quick brown fox"
+    let session = VimSession(initialText: initial)
+    guard !session.canUndo else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Initial session should not have undo states"])
+    }
+    guard !session.canRedo else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial session should not have redo states"])
+    }
+
+    session.feedKeys("x")
+    guard session.serializeBuffer() == "he quick brown fox" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after 'x'"])
+    }
+    guard session.canUndo else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected canUndo == true after edit"])
+    }
+    guard !session.canRedo else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected canRedo == false after edit"])
+    }
+
+    session.undo()
+    guard session.serializeBuffer() == initial else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after undo: \(session.serializeBuffer())"])
+    }
+    guard !session.canUndo else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected canUndo == false after full undo"])
+    }
+    guard session.canRedo else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected canRedo == true after undo"])
+    }
+
+    session.redo()
+    guard session.serializeBuffer() == "he quick brown fox" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after redo"])
+    }
+    guard session.canUndo && !session.canRedo else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "State flags incorrect after redo"])
+    }
+}
+
+func testVimSessionUndoInsertSession() throws {
+    let initial = "Prefix: "
+    let session = VimSession(initialText: initial)
+    session.feedKeys("$aInserted Text\u{1b}")
+
+    guard session.serializeBuffer() == "Prefix: Inserted Text" else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after insert session"])
+    }
+
+    session.undo()
+    guard session.serializeBuffer() == initial else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after undo of insert session: '\(session.serializeBuffer())'"])
+    }
+
+    session.redo()
+    guard session.serializeBuffer() == "Prefix: Inserted Text" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Buffer mismatch after redo of insert session"])
+    }
+}
+
+func testVimSessionExUndoRedo() throws {
+    let initial = "red green blue"
+    let session = VimSession(initialText: initial)
+
+    session.executeEx(":%s/green/yellow/g")
+    guard session.serializeBuffer() == "red yellow blue" else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Substitution failed"])
+    }
+
+    session.executeEx(":u")
+    guard session.serializeBuffer() == initial else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Undo via :u failed"])
+    }
+
+    session.executeEx(":redo")
+    guard session.serializeBuffer() == "red yellow blue" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Redo via :redo failed"])
+    }
+}
+
+func testVimSessionMultiStepUndoRedoWithCoordinateResolver() throws {
+    let initial = "Row 1\nRow 2\nRow 3"
+    let session = VimSession(initialText: initial)
+
+    // Edit 1: delete Row 1
+    session.feedKeys("dd")
+    // Edit 2: append Row 4
+    session.feedKeys("G")
+    session.feedKeys("oRow 4\u{1b}")
+
+    guard session.lineIndexTable.lineCount == 3 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected 3 lines in lineIndexTable"])
+    }
+
+    // Undo edit 2
+    session.undo()
+    guard session.serializeBuffer() == "Row 2\nRow 3" else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Undo 2 failed"])
+    }
+    guard session.lineIndexTable.lineCount == 2 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable should have 2 lines after undo 2"])
+    }
+
+    // Undo edit 1
+    session.undo()
+    guard session.serializeBuffer() == initial else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Undo 1 failed"])
+    }
+    guard session.lineIndexTable.lineCount == 3 else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "lineIndexTable should have 3 lines after undo 1"])
+    }
+
+    // Redo edit 1
+    session.redo()
+    guard session.serializeBuffer() == "Row 2\nRow 3" else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Redo 1 failed"])
+    }
+
+    // Redo edit 2
+    session.redo()
+    guard session.serializeBuffer() == "Row 2\nRow 3\nRow 4" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Redo 2 failed"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -813,7 +939,11 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionCore8020Commands", testVimSessionCore8020Commands),
     ("testVimSessionEscCancellation", testVimSessionEscCancellation),
     ("testVimSessionClipboardYankIntegration", testVimSessionClipboardYankIntegration),
-    ("testVimSessionClipboardPasteIntegration", testVimSessionClipboardPasteIntegration)
+    ("testVimSessionClipboardPasteIntegration", testVimSessionClipboardPasteIntegration),
+    ("testVimSessionUndoRedoBasic", testVimSessionUndoRedoBasic),
+    ("testVimSessionUndoInsertSession", testVimSessionUndoInsertSession),
+    ("testVimSessionExUndoRedo", testVimSessionExUndoRedo),
+    ("testVimSessionMultiStepUndoRedoWithCoordinateResolver", testVimSessionMultiStepUndoRedoWithCoordinateResolver)
 ]
 
 for (name, test) in tests {

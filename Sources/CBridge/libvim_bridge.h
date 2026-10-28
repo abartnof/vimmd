@@ -85,6 +85,12 @@ const char* vim_context_get_last_error(VimContextRef ctx);
 void vim_context_set_delta_callback(VimContextRef ctx, VimLineDeltaCallback cb, void *userInfo);
 void vim_context_dispatch_delta(VimContextRef ctx, int32_t startLine, int32_t deletedCount, const char **newLines, int32_t addedCount);
 
+// Undo / Redo
+bool vim_context_undo(VimContextRef ctx);
+bool vim_context_redo(VimContextRef ctx);
+bool vim_context_can_undo(VimContextRef ctx);
+bool vim_context_can_redo(VimContextRef ctx);
+
 // Full serialization (Save operations only)
 char* vim_context_serialize_buffer(VimContextRef ctx, size_t *outLength);
 

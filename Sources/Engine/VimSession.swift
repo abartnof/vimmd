@@ -82,7 +82,17 @@ public final class VimSession {
     }
 
     internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
-        let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
+        var targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
+        if newLines.isEmpty && deletedCount > 0 {
+            let startIdx = max(0, startLine - 1)
+            let endIdx = min(lineIndexTable.lineCount - 1, startIdx + deletedCount - 1)
+            if endIdx + 1 < lineIndexTable.lineCount {
+                targetRange.length += 1
+            } else if startIdx > 0 {
+                targetRange.location -= 1
+                targetRange.length += 1
+            }
+        }
         lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
         onLineDeltaWithRange?(startLine, deletedCount, newLines, targetRange)
         onLineDelta?(Int32(startLine), Int32(deletedCount), newLines)
@@ -307,6 +317,30 @@ public final class VimSession {
         }
         defer { free(rawPtr) }
         return String(cString: rawPtr)
+    }
+
+    public var canUndo: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_can_undo(ctx)
+    }
+
+    public var canRedo: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_can_redo(ctx)
+    }
+
+    public func undo() {
+        if mode != VIM_MODE_NORMAL {
+            feedKeys("\u{1b}")
+        }
+        feedKeys("u")
+    }
+
+    public func redo() {
+        if mode != VIM_MODE_NORMAL {
+            feedKeys("\u{1b}")
+        }
+        feedKeys("\u{12}")
     }
 
     public func triggerLineDelta(startLine: Int32, deletedCount: Int32, newLines: [String]) {

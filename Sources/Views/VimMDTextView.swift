@@ -191,8 +191,23 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        // Preserve macOS Command shortcuts (Cmd+W, Cmd+S, Cmd+Q, Cmd+C, Cmd+V, Cmd+Z, Cmd+A, etc.)
+        // Intercept macOS Cmd+Z (Undo) and Cmd+Shift+Z (Redo)
         if event.modifierFlags.contains(.command) {
+            if event.charactersIgnoringModifiers == "z" {
+                if event.modifierFlags.contains(.shift) {
+                    session.redo()
+                } else {
+                    session.undo()
+                }
+                synchronizeCaretWithSession()
+                updateSyntaxStyling(force: true)
+                if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+                    ruler.updateThickness(for: self)
+                    ruler.needsDisplay = true
+                }
+                onCursorMoved?()
+                return
+            }
             super.keyDown(with: event)
             return
         }
@@ -262,6 +277,51 @@ open class VimMDTextView: NSTextView {
         session.feedKeys("\u{7f}")
         synchronizeCaretWithSession()
         onCursorMoved?()
+    }
+
+    // MARK: - Undo & Redo Integration
+
+    private var customUndoManager: UndoManager?
+
+    override open var undoManager: UndoManager? {
+        if customUndoManager == nil {
+            customUndoManager = VimUndoManagerProxy(sessionProvider: { [weak self] in self?.session })
+        }
+        return customUndoManager
+    }
+
+    @objc @IBAction open func undo(_ sender: Any?) {
+        guard let session = session else { return }
+        session.undo()
+        synchronizeCaretWithSession()
+        updateSyntaxStyling(force: true)
+        if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+            ruler.updateThickness(for: self)
+            ruler.needsDisplay = true
+        }
+        onCursorMoved?()
+    }
+
+    @objc @IBAction open func redo(_ sender: Any?) {
+        guard let session = session else { return }
+        session.redo()
+        synchronizeCaretWithSession()
+        updateSyntaxStyling(force: true)
+        if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+            ruler.updateThickness(for: self)
+            ruler.needsDisplay = true
+        }
+        onCursorMoved?()
+    }
+
+    override open func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(VimMDTextView.undo(_:)) {
+            return session?.canUndo ?? false
+        }
+        if item.action == #selector(VimMDTextView.redo(_:)) {
+            return session?.canRedo ?? false
+        }
+        return super.validateUserInterfaceItem(item)
     }
 
     // MARK: - Clipboard Synchronization
@@ -388,3 +448,29 @@ open class VimMDTextView: NSTextView {
         return 0
     }
 }
+
+private class VimUndoManagerProxy: UndoManager {
+    private let sessionProvider: () -> VimSession?
+
+    init(sessionProvider: @escaping () -> VimSession?) {
+        self.sessionProvider = sessionProvider
+        super.init()
+    }
+
+    override var canUndo: Bool {
+        return sessionProvider()?.canUndo ?? false
+    }
+
+    override var canRedo: Bool {
+        return sessionProvider()?.canRedo ?? false
+    }
+
+    override func undo() {
+        sessionProvider()?.undo()
+    }
+
+    override func redo() {
+        sessionProvider()?.redo()
+    }
+}
+
