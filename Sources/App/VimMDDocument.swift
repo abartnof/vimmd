@@ -4,7 +4,10 @@ import Views
 import CBridge
 
 open class SavedChipView: NSView {
+    public var imageView: NSImageView?
     public let label: NSTextField
+    public var symbolImage: NSImage?
+    public let stackView: NSStackView
 
     public var text: String {
         get { return label.stringValue }
@@ -17,24 +20,46 @@ open class SavedChipView: NSView {
     }
 
     public override init(frame frameRect: NSRect) {
-        let lbl = NSTextField(labelWithString: "✓ Saved")
-        self.label = lbl
+        self.label = NSTextField(labelWithString: "Saved")
+        self.stackView = NSStackView()
         super.init(frame: frameRect)
         setup()
     }
 
     required public init?(coder: NSCoder) {
-        let lbl = NSTextField(labelWithString: "✓ Saved")
-        self.label = lbl
+        self.label = NSTextField(labelWithString: "Saved")
+        self.stackView = NSStackView()
         super.init(coder: coder)
         setup()
     }
 
+    open override var wantsUpdateLayer: Bool {
+        return true
+    }
+
+    open override func updateLayer() {
+        super.updateLayer()
+        updatePillColors()
+    }
+
+    open override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updatePillColors()
+    }
+
+    public func updatePillColors() {
+        self.layer?.cornerRadius = 9.0
+        self.layer?.borderWidth = 0.5
+        self.layer?.masksToBounds = true
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            self.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.16).cgColor
+            self.layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.35).cgColor
+        }
+    }
+
     private func setup() {
         self.wantsLayer = true
-        self.layer?.cornerRadius = 8.0
-        self.layer?.masksToBounds = true
-        self.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.18).cgColor
+        updatePillColors()
 
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
@@ -43,13 +68,38 @@ open class SavedChipView: NSView {
         label.backgroundColor = .clear
         label.isBordered = false
         label.isEditable = false
-        addSubview(label)
+
+        if #available(macOS 11.0, *), let baseImg = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Saved") {
+            let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+            let symbol = baseImg.withSymbolConfiguration(config) ?? baseImg
+            self.symbolImage = symbol
+            let iv = NSImageView(image: symbol)
+            iv.contentTintColor = NSColor.systemGreen
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            self.imageView = iv
+            self.label.stringValue = "Saved"
+        } else {
+            self.symbolImage = nil
+            self.imageView = nil
+            self.label.stringValue = "✓ Saved"
+        }
+
+        stackView.orientation = .horizontal
+        stackView.alignment = .centerY
+        stackView.spacing = 4
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+
+        if let iv = self.imageView {
+            stackView.addArrangedSubview(iv)
+        }
+        stackView.addArrangedSubview(label)
+        addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4)
+            stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stackView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4),
+            stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4)
         ])
     }
 }
@@ -131,10 +181,24 @@ open class VimMDDocument: NSDocument {
         savedChipTimer = nil
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
+            context.duration = 0.2
             chip.animator().alphaValue = 1.0
         }
         chip.alphaValue = 1.0
+
+        if let layer = chip.layer {
+            let scaleAnim = CABasicAnimation(keyPath: "transform")
+            let midX = chip.bounds.midX
+            let midY = chip.bounds.midY
+            var startT = CATransform3DMakeTranslation(midX, midY, 0)
+            startT = CATransform3DScale(startT, 0.90, 0.90, 1.0)
+            startT = CATransform3DTranslate(startT, -midX, -midY, 0)
+            scaleAnim.fromValue = NSValue(caTransform3D: startT)
+            scaleAnim.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+            scaleAnim.duration = 0.18
+            scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(scaleAnim, forKey: "savedChipScale")
+        }
 
         if duration > 0 {
             savedChipTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self, weak chip] _ in
@@ -200,7 +264,7 @@ open class VimMDDocument: NSDocument {
     override public init() {
         let s = VimSession(initialText: "")
         self.session = s
-        let chip = SavedChipView(frame: NSRect(x: 0, y: 0, width: 70, height: 16))
+        let chip = SavedChipView(frame: NSRect(x: 0, y: 0, width: 78, height: 18))
         chip.alphaValue = 0.0
         self.savedChipView = chip
         super.init()
@@ -415,14 +479,14 @@ open class VimMDDocument: NSDocument {
         statusBar.addSubview(modeLbl)
         self.modeLabel = modeLbl
 
-        let chipWidth: CGFloat = 70.0
-        let chipHeight: CGFloat = 16.0
+        let chipWidth: CGFloat = 78.0
+        let chipHeight: CGFloat = 18.0
         let posWidth: CGFloat = 110.0
         let posRightMargin: CGFloat = 8.0
 
         let chipX = max(160, contentBounds.width - posRightMargin - posWidth - chipWidth - 10)
-        let chip = self.savedChipView ?? SavedChipView(frame: NSRect(x: chipX, y: 3, width: chipWidth, height: chipHeight))
-        chip.frame = NSRect(x: chipX, y: 3, width: chipWidth, height: chipHeight)
+        let chip = self.savedChipView ?? SavedChipView(frame: NSRect(x: chipX, y: 2, width: chipWidth, height: chipHeight))
+        chip.frame = NSRect(x: chipX, y: 2, width: chipWidth, height: chipHeight)
         chip.autoresizingMask = [.minXMargin]
         statusBar.addSubview(chip)
         self.savedChipView = chip
