@@ -18,8 +18,23 @@ open class VimMDDocument: NSDocument {
         return false
     }
 
+    public static func isTSVFormat(url: URL?, fileType: String?) -> Bool {
+        if let ext = url?.pathExtension.lowercased(), ext == "tsv" || ext == "tab" {
+            return true
+        }
+        if let type = fileType?.lowercased(),
+           type.contains("tab-separated") || type.contains(".tsv") || type.contains("tab") {
+            return true
+        }
+        return false
+    }
+
     public var isTabularDocument: Bool {
         return VimMDDocument.isTabularFormat(url: self.fileURL, fileType: self.fileType)
+    }
+
+    public var isTSVDocument: Bool {
+        return VimMDDocument.isTSVFormat(url: self.fileURL, fileType: self.fileType)
     }
 
     public var wrapLines: Bool = true {
@@ -133,6 +148,8 @@ open class VimMDDocument: NSDocument {
         bindSessionSystemAction(newSession)
         if let tv = self.textView {
             tv.session = newSession
+            tv.isTabularDocument = self.isTabularDocument
+            tv.isTSV = self.isTSVDocument
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
         }
@@ -142,10 +159,16 @@ open class VimMDDocument: NSDocument {
         self.fileURL = url
         self.fileType = typeName
         configureWrapLinesPolicy()
+        self.textView?.isTabularDocument = self.isTabularDocument
+        self.textView?.isTSV = self.isTSVDocument
         try super.read(from: url, ofType: typeName)
     }
 
     override open func write(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType, originalContentsURL absoluteOriginalContentsURL: URL?) throws {
+        self.fileURL = url
+        self.fileType = typeName
+        self.textView?.isTabularDocument = self.isTabularDocument
+        self.textView?.isTSV = self.isTSVDocument
         try super.write(to: url, ofType: typeName, for: saveOperation, originalContentsURL: absoluteOriginalContentsURL)
         session?.clearDirty()
     }
@@ -185,6 +208,8 @@ open class VimMDDocument: NSDocument {
             self.session = s
             bindSessionSystemAction(s)
         }
+        tv.isTabularDocument = self.isTabularDocument
+        tv.isTSV = self.isTSVDocument
         tv.session = self.session
         tv.onQuitRequested = { [weak self] in
             self?.handleQuitTrigger()

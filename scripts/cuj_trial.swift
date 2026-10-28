@@ -248,6 +248,19 @@ for tc in testCases {
     assert(textView.string == tc.initialContent, "TextView content mismatch for \(tc.ext)")
     assert(session.serializeBuffer() == tc.initialContent, "Session buffer mismatch for \(tc.ext)")
     assert(!doc.isDocumentEdited, "Initial document should not be dirty for \(tc.ext)")
+    if tc.ext == "csv" || tc.ext == "tsv" {
+        assert(textView.isTabularDocument, "Expected isTabularDocument for \(tc.ext)")
+        assert(!textView.wrapLines, "Expected wrapLines == false for tabular \(tc.ext)")
+        if tc.ext == "tsv" {
+            assert(textView.isTSV, "Expected isTSV == true for TSV")
+        } else {
+            assert(!textView.isTSV, "Expected isTSV == false for CSV")
+        }
+        if let storage = textView.textStorage {
+            let f0 = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            assert(f0 != nil && NSFontManager.shared.traits(of: f0!).contains(.boldFontMask), "Expected bold header on \(tc.ext)")
+        }
+    }
     print("  - Step 3: Verified content loaded into session and text view without errors")
 
     // Apply mutation

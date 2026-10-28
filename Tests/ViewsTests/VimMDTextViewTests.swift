@@ -960,6 +960,150 @@ func testTextViewWrapLinesPropertyAndConfiguration() throws {
     }
 }
 
+func testTextViewTabularLiveTypingInInsertMode() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    let session = VimSession(initialText: "HeaderA,HeaderB\n")
+    textView.session = session
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing textStorage"])
+    }
+
+    // Verify initial line 1 header styling
+    let f0 = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    guard let font0 = f0, NSFontManager.shared.traits(of: font0).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected bold header on CSV in textView"])
+    }
+
+    // Move to line 2 in insert mode using 'o'
+    session.feedKeys("o")
+    textView.synchronizeCaretWithSession()
+    guard session.mode == VIM_MODE_INSERT else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected Insert mode"])
+    }
+
+    // Type "Alpha"
+    session.feedKeys("Alpha")
+    textView.synchronizeCaretWithSession()
+    guard textView.string.contains("Alpha") else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Text does not contain 'Alpha'"])
+    }
+
+    // Check "Alpha" styling on line 2 (should be Col 0: teal)
+    let alphaStart = 16 // "HeaderA,HeaderB\n".count = 16
+    let colorAlpha = storage.attribute(.foregroundColor, at: alphaStart, effectiveRange: nil) as? NSColor
+    guard colorAlpha == TabularSyntaxResolver.columnColors[0] else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 color on 'Alpha'"])
+    }
+
+    // Type comma ","
+    session.feedKeys(",")
+    textView.synchronizeCaretWithSession()
+    let colorComma = storage.attribute(.foregroundColor, at: alphaStart + 5, effectiveRange: nil) as? NSColor
+    guard colorComma == NSColor.tertiaryLabelColor else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected tertiaryLabelColor on newly typed comma"])
+    }
+
+    // Type "Beta"
+    session.feedKeys("Beta")
+    textView.synchronizeCaretWithSession()
+    let colorBeta = storage.attribute(.foregroundColor, at: alphaStart + 6, effectiveRange: nil) as? NSColor
+    guard colorBeta == TabularSyntaxResolver.columnColors[1] else {
+        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 color on 'Beta'"])
+    }
+
+    // Exit insert mode
+    session.feedKeys("\u{1b}")
+    textView.synchronizeCaretWithSession()
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected Normal mode after Esc"])
+    }
+
+    // Verify styling remains intact in Normal mode
+    let colorAlphaNormal = storage.attribute(.foregroundColor, at: alphaStart, effectiveRange: nil) as? NSColor
+    let colorBetaNormal = storage.attribute(.foregroundColor, at: alphaStart + 6, effectiveRange: nil) as? NSColor
+    guard colorAlphaNormal == TabularSyntaxResolver.columnColors[0] && colorBetaNormal == TabularSyntaxResolver.columnColors[1] else {
+        throw NSError(domain: "ViewsTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Styling lost on transition to Normal mode"])
+    }
+}
+
+func testTextViewTSVLiveEditingAndStyling() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = true
+    let session = VimSession(initialText: "Col1\tCol2\n")
+    textView.session = session
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing textStorage"])
+    }
+
+    // Header tab at index 4
+    let tab0Color = storage.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? NSColor
+    guard tab0Color == NSColor.tertiaryLabelColor else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Header tab delimiter should be tertiaryLabelColor"])
+    }
+
+    // Open line below and type "Data1\tData2"
+    session.feedKeys("oData1\tData2")
+    textView.synchronizeCaretWithSession()
+
+    let line2Start = 10 // "Col1\tCol2\n".count = 10
+    // "Data1": Col 0 (teal)
+    let colorData1 = storage.attribute(.foregroundColor, at: line2Start, effectiveRange: nil) as? NSColor
+    guard colorData1 == TabularSyntaxResolver.columnColors[0] else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 color on Data1"])
+    }
+
+    // "\t": tertiaryLabelColor
+    let tab1Color = storage.attribute(.foregroundColor, at: line2Start + 5, effectiveRange: nil) as? NSColor
+    guard tab1Color == NSColor.tertiaryLabelColor else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected tertiaryLabelColor on data tab"])
+    }
+
+    // "Data2": Col 1 (purple)
+    let colorData2 = storage.attribute(.foregroundColor, at: line2Start + 6, effectiveRange: nil) as? NSColor
+    guard colorData2 == TabularSyntaxResolver.columnColors[1] else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 color on Data2"])
+    }
+}
+
+func testTextViewTabularCaretAlignmentMatchesRawOffsets() throws {
+    let csvContent = "Name,Address,Age\n\"Smith, John\",123 Elm St,45\n"
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    let session = VimSession(initialText: csvContent)
+    textView.session = session
+
+    // Ensure text view string matches session serialized buffer exactly 1:1
+    guard textView.string == csvContent else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "TextView string length does not match session"])
+    }
+
+    // Navigate in Normal mode: move down to line 2
+    session.feedKeys("j")
+    textView.synchronizeCaretWithSession()
+    guard session.cursorPosition.line == 2 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cursor did not move to line 2"])
+    }
+
+    let line2Offset = 17 // "Name,Address,Age\n".count = 17
+    guard textView.selectedRange().location == line2Offset else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected caret offset \(line2Offset), got \(textView.selectedRange().location)"])
+    }
+
+    // Move to end of line 2 with '$'
+    session.feedKeys("$")
+    textView.synchronizeCaretWithSession()
+    let expectedDollarPos = line2Offset + 27 - 1 // 27 chars on line 2, 0-based offset within line = 26
+    guard textView.selectedRange().location == expectedDollarPos else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected dollar pos \(expectedDollarPos), got \(textView.selectedRange().location)"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -992,7 +1136,10 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewUndoRedoCommandKeys", testTextViewUndoRedoCommandKeys),
     ("testTextViewUndoRedoActionMethods", testTextViewUndoRedoActionMethods),
     ("testTextViewUndoManagerIntegration", testTextViewUndoManagerIntegration),
-    ("testTextViewWrapLinesPropertyAndConfiguration", testTextViewWrapLinesPropertyAndConfiguration)
+    ("testTextViewWrapLinesPropertyAndConfiguration", testTextViewWrapLinesPropertyAndConfiguration),
+    ("testTextViewTabularLiveTypingInInsertMode", testTextViewTabularLiveTypingInInsertMode),
+    ("testTextViewTSVLiveEditingAndStyling", testTextViewTSVLiveEditingAndStyling),
+    ("testTextViewTabularCaretAlignmentMatchesRawOffsets", testTextViewTabularCaretAlignmentMatchesRawOffsets)
 ]
 
 for (name, test) in tests {

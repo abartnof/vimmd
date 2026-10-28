@@ -606,6 +606,70 @@ func testDocumentLineNumberRulerConfiguration() throws {
     }
 }
 
+func testDocumentTabularSyntaxIntegration() throws {
+    // 1. CSV Document
+    let csvDoc = VimMDDocument()
+    csvDoc.fileURL = URL(fileURLWithPath: "/tmp/test.csv")
+    csvDoc.fileType = "public.comma-separated-values-text"
+    let csvData = "col1,col2\nval1,val2".data(using: .utf8)!
+    try csvDoc.read(from: csvData, ofType: "public.comma-separated-values-text")
+    csvDoc.makeWindowControllers()
+
+    guard let csvTv = csvDoc.textView else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV textView nil"])
+    }
+    guard csvTv.isTabularDocument else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected isTabularDocument == true for CSV"])
+    }
+    guard !csvTv.isTSV else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected isTSV == false for CSV"])
+    }
+    guard !csvTv.wrapLines else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected wrapLines == false for CSV"])
+    }
+
+    // Check header styling in textStorage
+    if let storage = csvTv.textStorage {
+        let f0 = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        guard let font0 = f0, NSFontManager.shared.traits(of: font0).contains(.boldFontMask) else {
+            throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected bold font on CSV header in textView"])
+        }
+    }
+
+    // 2. TSV Document
+    let tsvDoc = VimMDDocument()
+    tsvDoc.fileURL = URL(fileURLWithPath: "/tmp/test.tsv")
+    tsvDoc.fileType = "public.tab-separated-values-text"
+    let tsvData = "colA\tcolB\nvalA\tvalB".data(using: .utf8)!
+    try tsvDoc.read(from: tsvData, ofType: "public.tab-separated-values-text")
+    tsvDoc.makeWindowControllers()
+
+    guard let tsvTv = tsvDoc.textView else {
+        throw NSError(domain: "AppTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "TSV textView nil"])
+    }
+    guard tsvTv.isTabularDocument else {
+        throw NSError(domain: "AppTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected isTabularDocument == true for TSV"])
+    }
+    guard tsvTv.isTSV else {
+        throw NSError(domain: "AppTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected isTSV == true for TSV"])
+    }
+
+    // 3. Markdown Document
+    let mdDoc = VimMDDocument()
+    mdDoc.fileURL = URL(fileURLWithPath: "/tmp/test.md")
+    mdDoc.fileType = "net.daringfireball.markdown"
+    let mdData = "# Header\nHello".data(using: .utf8)!
+    try mdDoc.read(from: mdData, ofType: "net.daringfireball.markdown")
+    mdDoc.makeWindowControllers()
+
+    guard let mdTv = mdDoc.textView else {
+        throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "MD textView nil"])
+    }
+    guard !mdTv.isTabularDocument else {
+        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected isTabularDocument == false for MD"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -633,7 +697,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testStatusBarShowsLastErrorOnBlockedQuit", testStatusBarShowsLastErrorOnBlockedQuit),
     ("testShowStatusMessageMethod", testShowStatusMessageMethod),
     ("testDocumentScrollViewDynamicHeightAndScroller", testDocumentScrollViewDynamicHeightAndScroller),
-    ("testDocumentLineNumberRulerConfiguration", testDocumentLineNumberRulerConfiguration)
+    ("testDocumentLineNumberRulerConfiguration", testDocumentLineNumberRulerConfiguration),
+    ("testDocumentTabularSyntaxIntegration", testDocumentTabularSyntaxIntegration)
 ]
 
 for (name, test) in tests {

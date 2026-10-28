@@ -31,6 +31,47 @@ open class VimMDTextView: NSTextView {
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
     public let syntaxResolver = MarkdownSyntaxResolver()
+    public let tabularResolver = TabularSyntaxResolver()
+
+    public enum DocumentSyntaxType: Equatable {
+        case markdown
+        case csv
+        case tsv
+    }
+
+    public var documentSyntaxType: DocumentSyntaxType = .markdown {
+        didSet {
+            updateSyntaxStyling(force: true)
+        }
+    }
+
+    public var isTabularDocument: Bool {
+        get {
+            return documentSyntaxType == .csv || documentSyntaxType == .tsv
+        }
+        set {
+            if newValue {
+                if documentSyntaxType != .csv && documentSyntaxType != .tsv {
+                    documentSyntaxType = .csv
+                }
+            } else {
+                documentSyntaxType = .markdown
+            }
+        }
+    }
+
+    public var isTSV: Bool {
+        get {
+            return documentSyntaxType == .tsv
+        }
+        set {
+            if newValue {
+                documentSyntaxType = .tsv
+            } else if documentSyntaxType == .tsv {
+                documentSyntaxType = .csv
+            }
+        }
+    }
 
     override public init(frame frameRect: NSRect, textContainer: NSTextContainer?) {
         super.init(frame: frameRect, textContainer: textContainer)
@@ -142,16 +183,20 @@ open class VimMDTextView: NSTextView {
 
     public func updateSyntaxStyling(force: Bool = false) {
         guard let storage = self.textStorage else { return }
-        let currentMode = session?.mode ?? VIM_MODE_NORMAL
-        let isInsert = (currentMode == VIM_MODE_INSERT)
-        let activeLine = session?.cursorPosition.line
-
         storage.beginEditing()
-        syntaxResolver.renderSyntax(
-            in: storage,
-            activeLineIndex: activeLine,
-            isInsertMode: isInsert
-        )
+        if isTabularDocument {
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: isTSV)
+        } else {
+            let currentMode = session?.mode ?? VIM_MODE_NORMAL
+            let isInsert = (currentMode == VIM_MODE_INSERT)
+            let activeLine = session?.cursorPosition.line
+
+            syntaxResolver.renderSyntax(
+                in: storage,
+                activeLineIndex: activeLine,
+                isInsertMode: isInsert
+            )
+        }
         storage.endEditing()
     }
 
