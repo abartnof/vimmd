@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Engine
 import CBridge
 
@@ -689,6 +690,101 @@ func testVimSessionEscCancellation() throws {
     }
 }
 
+func testVimSessionClipboardYankIntegration() throws {
+    let session = VimSession(initialText: "First line\nSecond line\nThird line")
+
+    var yankCount = 0
+    var lastYank = ""
+    var lastLinewise = false
+    session.onYank = { text, linewise in
+        yankCount += 1
+        lastYank = text
+        lastLinewise = linewise
+    }
+
+    // 1. yy (yank line)
+    session.feedKeys("yy")
+    guard yankCount == 1, lastLinewise == true, lastYank.contains("First line") else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "yy failed to trigger onYank: count=\(yankCount), text=\(lastYank)"])
+    }
+    let pb1 = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pb1.contains("First line") else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "yy failed to update NSPasteboard: '\(pb1)'"])
+    }
+
+    // 2. yw (yank word)
+    session.feedKeys("yw")
+    guard yankCount == 2, lastLinewise == false, lastYank.hasPrefix("First") else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "yw failed to trigger onYank: count=\(yankCount), text=\(lastYank)"])
+    }
+    let pb2 = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pb2.hasPrefix("First") else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "yw failed to update NSPasteboard: '\(pb2)'"])
+    }
+
+    // 3. dd (delete line)
+    session.feedKeys("dd")
+    guard yankCount == 3, lastLinewise == true, lastYank.contains("First line") else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "dd failed to trigger onYank: count=\(yankCount), text=\(lastYank)"])
+    }
+    let pb3 = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pb3.contains("First line") else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "dd failed to update NSPasteboard: '\(pb3)'"])
+    }
+
+    // 4. dw (delete word) on "Second line"
+    session.feedKeys("dw")
+    guard yankCount == 4, lastLinewise == false, lastYank.hasPrefix("Second") else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "dw failed to trigger onYank: count=\(yankCount), text=\(lastYank)"])
+    }
+    let pb4 = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pb4.hasPrefix("Second") else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "dw failed to update NSPasteboard: '\(pb4)'"])
+    }
+
+    // 5. x (cut character) on "line"
+    session.feedKeys("x")
+    guard yankCount == 5, lastLinewise == false, lastYank == "l" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "x failed to trigger onYank: count=\(yankCount), text=\(lastYank)"])
+    }
+    let pb5 = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pb5 == "l" else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "x failed to update NSPasteboard: '\(pb5)'"])
+    }
+}
+
+func testVimSessionClipboardPasteIntegration() throws {
+    let session = VimSession(initialText: "Header Line\nTarget Line")
+
+    // 1. External clipboard write
+    let extString = "Injected From macOS Pasteboard"
+    let pb = NSPasteboard.general
+    pb.clearContents()
+    pb.setString(extString, forType: .string)
+
+    // Move to col 1 of line 2 and paste 'p' (characterwise)
+    session.setCursor(line: 2, byteCol: 1)
+    session.feedKeys("p")
+
+    let contentAfterP = session.serializeBuffer()
+    guard contentAfterP.contains(extString) else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "'p' did not paste external clipboard string: '\(contentAfterP)'"])
+    }
+
+    // 2. Multiline external clipboard paste
+    let multilineClip = "Inserted Row 1\nInserted Row 2\n"
+    pb.clearContents()
+    pb.setString(multilineClip, forType: .string)
+
+    session.setCursor(line: 1, byteCol: 1)
+    session.feedKeys("p") // linewise paste after line 1
+
+    let contentAfterMultiline = session.serializeBuffer()
+    guard contentAfterMultiline.contains("Inserted Row 1") && contentAfterMultiline.contains("Inserted Row 2") else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "multiline 'p' did not paste rows: '\(contentAfterMultiline)'"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -715,7 +811,9 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionSearchAndNavigation", testVimSessionSearchAndNavigation),
     ("testVimSessionExCommandsAndZZ", testVimSessionExCommandsAndZZ),
     ("testVimSessionCore8020Commands", testVimSessionCore8020Commands),
-    ("testVimSessionEscCancellation", testVimSessionEscCancellation)
+    ("testVimSessionEscCancellation", testVimSessionEscCancellation),
+    ("testVimSessionClipboardYankIntegration", testVimSessionClipboardYankIntegration),
+    ("testVimSessionClipboardPasteIntegration", testVimSessionClipboardPasteIntegration)
 ]
 
 for (name, test) in tests {

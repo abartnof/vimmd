@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import CBridge
 
 private func vimDeltaTrampoline(
@@ -24,11 +25,25 @@ private func vimDeltaTrampoline(
     session.handleLineDelta(startLine: Int(startLine), deletedCount: Int(deletedCount), newLines: lines)
 }
 
+private func vimYankTrampoline(
+    textPtr: UnsafePointer<CChar>?,
+    linewise: Bool,
+    userInfo: UnsafeMutableRawPointer?
+) {
+    guard let userInfo = userInfo, let textPtr = textPtr else { return }
+    let session = Unmanaged<VimSession>.fromOpaque(userInfo).takeUnretainedValue()
+    let text = String(cString: textPtr)
+    session.handleYank(text: text, linewise: linewise)
+}
+
 public final class VimSession {
     private var context: VimContextRef?
 
     /// Closure callback invoked when granular line mutations are emitted by the Vim engine.
     public var onLineDelta: ((Int32, Int32, [String]) -> Void)?
+
+    /// Closure callback invoked when text is yanked or cut by the Vim engine.
+    public var onYank: ((String, Bool) -> Void)?
 
     /// Internal line coordinate index table synchronized with document mutations.
     public private(set) var lineIndexTable: LineIndexTable
@@ -44,6 +59,27 @@ public final class VimSession {
 
     /// Callback invoked when session status or error states may have changed.
     public var onStatusChanged: (() -> Void)?
+
+    public var yankBuffer: (text: String, linewise: Bool)? {
+        guard let ctx = context else { return nil }
+        var linewise: Bool = false
+        guard let cStr = vim_context_get_yank_buffer(ctx, &linewise) else { return nil }
+        return (String(cString: cStr), linewise)
+    }
+
+    public func setYankBuffer(text: String, linewise: Bool) {
+        guard let ctx = context else { return }
+        text.withCString { cStr in
+            vim_context_set_yank_buffer(ctx, cStr, linewise)
+        }
+    }
+
+    internal func handleYank(text: String, linewise: Bool) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        onYank?(text, linewise)
+    }
 
     internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
         let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
@@ -63,12 +99,18 @@ public final class VimSession {
                 vimDeltaTrampoline,
                 Unmanaged.passUnretained(self).toOpaque()
             )
+            vim_context_set_yank_callback(
+                ctx,
+                vimYankTrampoline,
+                Unmanaged.passUnretained(self).toOpaque()
+            )
         }
     }
 
     deinit {
         if let ctx = context {
             vim_context_set_delta_callback(ctx, nil, nil)
+            vim_context_set_yank_callback(ctx, nil, nil)
             vim_context_destroy(ctx)
             context = nil
         }
@@ -210,8 +252,22 @@ public final class VimSession {
         }
     }
 
+    private func syncPasteboardIfPasting(keys: String) {
+        guard mode == VIM_MODE_NORMAL || mode == VIM_MODE_VISUAL else { return }
+        if keys.contains("p") || keys.contains("P") {
+            if let pbText = NSPasteboard.general.string(forType: .string) {
+                let currentYank = yankBuffer?.text
+                if currentYank != pbText {
+                    let isLinewise = pbText.hasSuffix("\n")
+                    setYankBuffer(text: pbText, linewise: isLinewise)
+                }
+            }
+        }
+    }
+
     public func feedKeys(_ keys: String) {
         guard let ctx = context else { return }
+        syncPasteboardIfPasting(keys: keys)
         let oldMode = mode
         keys.withCString { cKeys in
             vim_context_feed_keys(ctx, cKeys)

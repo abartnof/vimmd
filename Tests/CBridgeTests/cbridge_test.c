@@ -1138,6 +1138,123 @@ static void test_esc_cancellation(void) {
     vim_context_destroy(ctx);
 }
 
+static char g_last_yank_text[512];
+static bool g_last_yank_linewise = false;
+static int g_yank_callback_count = 0;
+
+static void cbridge_test_yank_cb(const char *text, bool linewise, void *userInfo) {
+    (void)userInfo;
+    g_yank_callback_count++;
+    g_last_yank_linewise = linewise;
+    if (text) {
+        strncpy(g_last_yank_text, text, sizeof(g_last_yank_text) - 1);
+        g_last_yank_text[sizeof(g_last_yank_text) - 1] = '\0';
+    } else {
+        g_last_yank_text[0] = '\0';
+    }
+}
+
+static void test_yank_callback_and_clipboard(void) {
+    VimContextRef ctx = vim_context_create("first line\nsecond line\nthird line");
+    assert(ctx != NULL);
+
+    g_yank_callback_count = 0;
+    g_last_yank_text[0] = '\0';
+    g_last_yank_linewise = false;
+
+    // Register yank callback
+    vim_context_set_yank_callback(ctx, cbridge_test_yank_cb, NULL);
+
+    // 1. Test 'yy' (yank line)
+    vim_context_feed_keys(ctx, "yy");
+    assert(g_yank_callback_count == 1);
+    assert(g_last_yank_linewise == true);
+    assert(strstr(g_last_yank_text, "first line") != NULL);
+
+    bool out_linewise = false;
+    const char *y_buf = vim_context_get_yank_buffer(ctx, &out_linewise);
+    assert(y_buf != NULL);
+    assert(out_linewise == true);
+    assert(strstr(y_buf, "first line") != NULL);
+
+    // 2. Test 'yw' (yank word)
+    vim_context_feed_keys(ctx, "yw");
+    assert(g_yank_callback_count == 2);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "first ") == 0 || strcmp(g_last_yank_text, "first") == 0);
+
+    // 3. Test 'y$' (yank to end of line)
+    vim_context_feed_keys(ctx, "y$");
+    assert(g_yank_callback_count == 3);
+    assert(g_last_yank_linewise == false);
+    assert(strstr(g_last_yank_text, "first line") != NULL);
+
+    // 4. Test 'dd' (delete line)
+    vim_context_feed_keys(ctx, "dd");
+    assert(g_yank_callback_count == 4);
+    assert(g_last_yank_linewise == true);
+    assert(strstr(g_last_yank_text, "first line") != NULL);
+
+    // 5. Test 'dw' (delete word) on line 1 ("second line")
+    vim_context_feed_keys(ctx, "dw");
+    assert(g_yank_callback_count == 5);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "second ") == 0 || strcmp(g_last_yank_text, "second") == 0);
+
+    // 6. Test 'x' (cut single character) on "line"
+    vim_context_feed_keys(ctx, "x");
+    assert(g_yank_callback_count == 6);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "l") == 0);
+
+    // 7. Test 's' (substitute single character) -> 'i', then escape
+    vim_context_feed_keys(ctx, "s\x1b");
+    assert(g_yank_callback_count == 7);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "i") == 0);
+
+    // 8. Test 'cw' (change word)
+    vim_context_feed_keys(ctx, "cw\x1b");
+    assert(g_yank_callback_count == 8);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "ne") == 0);
+
+    // 9. Test 'cc' (change line)
+    vim_context_feed_keys(ctx, "cc\x1b");
+    assert(g_yank_callback_count == 9);
+    assert(g_last_yank_linewise == true);
+
+    // 10. Visual mode yank 'v...y'
+    vim_context_set_cursor(ctx, 2, 1); // "third line"
+    vim_context_feed_keys(ctx, "v2ly"); // visual select "thi", yank
+    assert(g_yank_callback_count == 10);
+    assert(g_last_yank_linewise == false);
+    assert(strcmp(g_last_yank_text, "thi") == 0);
+
+    // 11. Visual linewise yank 'V...y'
+    vim_context_feed_keys(ctx, "Vy");
+    assert(g_yank_callback_count == 11);
+    assert(g_last_yank_linewise == true);
+    assert(strstr(g_last_yank_text, "third line") != NULL);
+
+    // 12. Test external pasteboard sync: vim_context_set_yank_buffer and 'p'
+    const char *ext_clip = "external pasted text";
+    vim_context_set_yank_buffer(ctx, ext_clip, false);
+    const char *check_buf = vim_context_get_yank_buffer(ctx, &out_linewise);
+    assert(strcmp(check_buf, ext_clip) == 0);
+    assert(out_linewise == false);
+
+    // Paste with 'p'
+    vim_context_feed_keys(ctx, "p");
+    size_t out_len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &out_len);
+    assert(ser != NULL);
+    assert(strstr(ser, ext_clip) != NULL);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -1168,6 +1285,7 @@ int main(void) {
     RUN_TEST(test_operator_mutations);
     RUN_TEST(test_visual_selection_and_operators);
     RUN_TEST(test_esc_cancellation);
+    RUN_TEST(test_yank_callback_and_clipboard);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

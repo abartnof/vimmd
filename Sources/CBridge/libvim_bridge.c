@@ -33,6 +33,8 @@ struct VimDocumentContext {
     // Yank register
     char *yank_buffer;
     bool yank_is_linewise;
+    VimYankCallback yank_cb;
+    void *yank_user_info;
 
     VimLineDeltaCallback delta_cb;
     void *user_info;
@@ -167,6 +169,8 @@ VimContextRef vim_context_create(const char *initial_utf8) {
     ctx->count_accumulator = 0;
     ctx->yank_buffer = NULL;
     ctx->yank_is_linewise = false;
+    ctx->yank_cb = NULL;
+    ctx->yank_user_info = NULL;
 
     if (!initial_utf8 || strlen(initial_utf8) == 0) {
         if (!ensure_line_capacity(ctx, 1)) {
@@ -861,29 +865,161 @@ static void set_yank_buffer(struct VimDocumentContext *ctx, const char *str, boo
     }
     ctx->yank_buffer = duplicate_string(str ? str : "");
     ctx->yank_is_linewise = linewise;
+
+    if (ctx->yank_cb && ctx->yank_buffer) {
+        ctx->yank_cb(ctx->yank_buffer, ctx->yank_is_linewise, ctx->yank_user_info);
+    }
+}
+
+void vim_context_set_yank_callback(VimContextRef ctx, VimYankCallback cb, void *userInfo) {
+    if (!ctx) return;
+    ctx->yank_cb = cb;
+    ctx->yank_user_info = userInfo;
+}
+
+const char* vim_context_get_yank_buffer(VimContextRef ctx, bool *out_linewise) {
+    if (!ctx) return NULL;
+    if (out_linewise) {
+        *out_linewise = ctx->yank_is_linewise;
+    }
+    return ctx->yank_buffer;
+}
+
+void vim_context_set_yank_buffer(VimContextRef ctx, const char *text, bool linewise) {
+    if (!ctx) return;
+    if (ctx->yank_buffer) {
+        free(ctx->yank_buffer);
+        ctx->yank_buffer = NULL;
+    }
+    ctx->yank_buffer = duplicate_string(text ? text : "");
+    ctx->yank_is_linewise = linewise;
+}
+
+static void yank_linewise_range(struct VimDocumentContext *ctx, int32_t start_l, int32_t end_l) {
+    if (!ctx) return;
+    if (start_l < 1) start_l = 1;
+    if ((size_t)end_l > ctx->line_count) end_l = (int32_t)ctx->line_count;
+    if (start_l > end_l) return;
+
+    size_t total_len = 0;
+    for (int32_t l = start_l; l <= end_l; l++) {
+        total_len += strlen(ctx->lines[l - 1]) + 1;
+    }
+    char *buf = (char *)malloc(total_len + 1);
+    if (!buf) return;
+    char *cur = buf;
+    for (int32_t l = start_l; l <= end_l; l++) {
+        size_t len = strlen(ctx->lines[l - 1]);
+        memcpy(cur, ctx->lines[l - 1], len);
+        cur += len;
+        *cur++ = '\n';
+    }
+    *cur = '\0';
+    set_yank_buffer(ctx, buf, true);
+    free(buf);
+}
+
+static char** split_lines(const char *text, size_t *out_count, bool linewise) {
+    if (!text) {
+        *out_count = 0;
+        return NULL;
+    }
+    size_t len = strlen(text);
+    if (len == 0) {
+        *out_count = 0;
+        return NULL;
+    }
+
+    size_t count = 0;
+    const char *p = text;
+    while (*p) {
+        if (*p == '\n') count++;
+        p++;
+    }
+    if (text[len - 1] != '\n') {
+        count++;
+    }
+    if (count == 0 && linewise) {
+        count = 1;
+    }
+    if (count == 0) {
+        *out_count = 0;
+        return NULL;
+    }
+
+    char **lines = (char **)malloc(count * sizeof(char *));
+    if (!lines) {
+        *out_count = 0;
+        return NULL;
+    }
+
+    size_t idx = 0;
+    const char *start = text;
+    p = text;
+    while (*p) {
+        if (*p == '\n') {
+            size_t line_len = p - start;
+            if (line_len > 0 && start[line_len - 1] == '\r') {
+                line_len--;
+            }
+            char *s = (char *)malloc(line_len + 1);
+            if (s) {
+                memcpy(s, start, line_len);
+                s[line_len] = '\0';
+                lines[idx++] = s;
+            }
+            start = p + 1;
+        }
+        p++;
+    }
+    if (p > start || text[len - 1] != '\n') {
+        size_t line_len = p - start;
+        if (line_len > 0 && start[line_len - 1] == '\r') {
+            line_len--;
+        }
+        char *s = (char *)malloc(line_len + 1);
+        if (s) {
+            memcpy(s, start, line_len);
+            s[line_len] = '\0';
+            lines[idx++] = s;
+        }
+    }
+    *out_count = idx;
+    return lines;
 }
 
 static void paste_text(struct VimDocumentContext *ctx, bool after) {
     if (!ctx || !ctx->yank_buffer) return;
 
     if (ctx->yank_is_linewise) {
-        int32_t insert_line = after ? ctx->cursor.line + 1 : ctx->cursor.line;
-        if (!ensure_line_capacity(ctx, ctx->line_count + 1)) return;
+        size_t num_lines = 0;
+        char **p_lines = split_lines(ctx->yank_buffer, &num_lines, true);
+        if (!p_lines || num_lines == 0) {
+            if (p_lines) free(p_lines);
+            return;
+        }
 
-        char *new_line = duplicate_string(ctx->yank_buffer);
-        if (!new_line) return;
+        int32_t insert_line = after ? ctx->cursor.line + 1 : ctx->cursor.line;
+        if (!ensure_line_capacity(ctx, ctx->line_count + num_lines)) {
+            for (size_t i = 0; i < num_lines; i++) free(p_lines[i]);
+            free(p_lines);
+            return;
+        }
 
         size_t idx = (size_t)(insert_line - 1);
         if (idx > ctx->line_count) idx = ctx->line_count;
 
-        memmove(&ctx->lines[idx + 1], &ctx->lines[idx], (ctx->line_count - idx) * sizeof(char *));
-        ctx->lines[idx] = new_line;
-        ctx->line_count++;
+        memmove(&ctx->lines[idx + num_lines], &ctx->lines[idx], (ctx->line_count - idx) * sizeof(char *));
+        for (size_t i = 0; i < num_lines; i++) {
+            ctx->lines[idx + i] = p_lines[i];
+        }
+        free(p_lines);
+        ctx->line_count += num_lines;
 
         ctx->cursor.line = insert_line;
         ctx->cursor.byteCol = 1;
         ctx->is_dirty = true;
-        emit_line_delta(ctx, insert_line, 0, 1);
+        emit_line_delta(ctx, insert_line, 0, (int32_t)num_lines);
     } else {
         size_t l_idx = (size_t)(ctx->cursor.line - 1);
         char *line = ctx->lines[l_idx];
@@ -892,19 +1028,97 @@ static void paste_text(struct VimDocumentContext *ctx, bool after) {
         if (after && line_len > 0) pos++;
         if (pos > line_len) pos = line_len;
 
-        size_t y_len = strlen(ctx->yank_buffer);
-        char *new_line = (char *)malloc(line_len + y_len + 1);
-        if (!new_line) return;
+        if (strchr(ctx->yank_buffer, '\n') == NULL) {
+            size_t y_len = strlen(ctx->yank_buffer);
+            char *new_line = (char *)malloc(line_len + y_len + 1);
+            if (!new_line) return;
 
-        memcpy(new_line, line, pos);
-        memcpy(new_line + pos, ctx->yank_buffer, y_len);
-        memcpy(new_line + pos + y_len, line + pos, line_len - pos + 1);
+            memcpy(new_line, line, pos);
+            memcpy(new_line + pos, ctx->yank_buffer, y_len);
+            memcpy(new_line + pos + y_len, line + pos, line_len - pos + 1);
 
-        free(line);
-        ctx->lines[l_idx] = new_line;
-        ctx->cursor.byteCol = (int32_t)(pos + y_len);
-        ctx->is_dirty = true;
-        emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+            free(line);
+            ctx->lines[l_idx] = new_line;
+            ctx->cursor.byteCol = (int32_t)(pos + y_len);
+            ctx->is_dirty = true;
+            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+        } else {
+            size_t num_lines = 0;
+            char **p_lines = split_lines(ctx->yank_buffer, &num_lines, false);
+            if (!p_lines || num_lines == 0) {
+                if (p_lines) free(p_lines);
+                return;
+            }
+            if (num_lines == 1) {
+                size_t y_len = strlen(p_lines[0]);
+                char *new_line = (char *)malloc(line_len + y_len + 1);
+                if (new_line) {
+                    memcpy(new_line, line, pos);
+                    memcpy(new_line + pos, p_lines[0], y_len);
+                    memcpy(new_line + pos + y_len, line + pos, line_len - pos + 1);
+                    free(line);
+                    ctx->lines[l_idx] = new_line;
+                    ctx->cursor.byteCol = (int32_t)(pos + y_len);
+                    ctx->is_dirty = true;
+                    emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                }
+                free(p_lines[0]);
+                free(p_lines);
+            } else {
+                if (!ensure_line_capacity(ctx, ctx->line_count + num_lines - 1)) {
+                    for (size_t i = 0; i < num_lines; i++) free(p_lines[i]);
+                    free(p_lines);
+                    return;
+                }
+                char *line_prefix = (char *)malloc(pos + 1);
+                if (line_prefix) {
+                    memcpy(line_prefix, line, pos);
+                    line_prefix[pos] = '\0';
+                }
+                char *line_suffix = duplicate_string(line + pos);
+
+                size_t len_first = pos + strlen(p_lines[0]);
+                char *first_line = (char *)malloc(len_first + 1);
+                if (first_line) {
+                    if (line_prefix) memcpy(first_line, line_prefix, pos);
+                    memcpy(first_line + pos, p_lines[0], strlen(p_lines[0]) + 1);
+                }
+
+                size_t suffix_len = line_suffix ? strlen(line_suffix) : 0;
+                size_t last_part_len = strlen(p_lines[num_lines - 1]);
+                size_t len_last = last_part_len + suffix_len;
+                char *last_line = (char *)malloc(len_last + 1);
+                if (last_line) {
+                    memcpy(last_line, p_lines[num_lines - 1], last_part_len);
+                    if (line_suffix) memcpy(last_line + last_part_len, line_suffix, suffix_len + 1);
+                    else last_line[last_part_len] = '\0';
+                }
+
+                free(line);
+                if (line_prefix) free(line_prefix);
+                free(p_lines[0]);
+                free(p_lines[num_lines - 1]);
+
+                ctx->lines[l_idx] = first_line ? first_line : duplicate_string("");
+
+                size_t insert_idx = l_idx + 1;
+                size_t extra = num_lines - 1;
+                memmove(&ctx->lines[insert_idx + extra], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
+
+                for (size_t i = 1; i < num_lines - 1; i++) {
+                    ctx->lines[l_idx + i] = p_lines[i];
+                }
+                ctx->lines[l_idx + extra] = last_line ? last_line : duplicate_string("");
+                free(p_lines);
+                ctx->line_count += extra;
+
+                ctx->cursor.line = (int32_t)(l_idx + num_lines);
+                ctx->cursor.byteCol = (int32_t)(last_part_len + 1);
+                if (line_suffix) free(line_suffix);
+                ctx->is_dirty = true;
+                emit_line_delta(ctx, (int32_t)(l_idx + 1), 1, (int32_t)num_lines);
+            }
+        }
     }
     clamp_cursor(ctx);
 }
@@ -1011,8 +1225,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                             del_count = ctx->line_count - start_idx;
                         }
 
-                        // Yank deleted line
-                        set_yank_buffer(ctx, ctx->lines[start_idx], true);
+                        // Yank deleted lines
+                        yank_linewise_range(ctx, (int32_t)(start_idx + 1), (int32_t)(start_idx + del_count));
 
                         for (size_t i = 0; i < del_count; i++) {
                             free(ctx->lines[start_idx + i]);
@@ -1092,8 +1306,12 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         continue;
                     }
                 } else if (op == 'y') {
-                    if (*p == 'y') { // yy: yank line
-                        set_yank_buffer(ctx, ctx->lines[ctx->cursor.line - 1], true);
+                    if (*p == 'y') { // yy: yank line(s)
+                        int32_t end_line = ctx->cursor.line + count - 1;
+                        if ((size_t)end_line > ctx->line_count) {
+                            end_line = (int32_t)ctx->line_count;
+                        }
+                        yank_linewise_range(ctx, ctx->cursor.line, end_line);
                         p++;
                         continue;
                     } else if (*p == 'w') { // yw: yank word
@@ -1124,9 +1342,24 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         set_yank_buffer(ctx, line + start, false);
                         p++;
                         continue;
+                    } else if (*p == '0') { // y0: yank to start of line
+                        const char *line = ctx->lines[ctx->cursor.line - 1];
+                        size_t end = (size_t)(ctx->cursor.byteCol - 1);
+                        if (end > 0) {
+                            char *yanked = (char *)malloc(end + 1);
+                            if (yanked) {
+                                memcpy(yanked, line, end);
+                                yanked[end] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                        }
+                        p++;
+                        continue;
                     }
                 } else if (op == 'c') {
                     if (*p == 'c') { // cc: change line
+                        yank_linewise_range(ctx, ctx->cursor.line, ctx->cursor.line);
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
                         free(ctx->lines[l_idx]);
                         ctx->lines[l_idx] = duplicate_string("");
@@ -1148,9 +1381,50 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         ctx->cursor = orig;
 
                         if (end > start) {
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
                             memmove(line + start, line + end, len - end + 1);
                             ctx->mode = VIM_MODE_INSERT;
                             ctx->is_dirty = true;
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                        p++;
+                        continue;
+                    } else if (*p == '$') { // c$: change to end of line
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+                        set_yank_buffer(ctx, line + start, false);
+                        line[start] = '\0';
+                        ctx->mode = VIM_MODE_INSERT;
+                        ctx->is_dirty = true;
+                        clamp_cursor(ctx);
+                        emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        p++;
+                        continue;
+                    } else if (*p == '0') { // c0: change to start of line
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t end = (size_t)(ctx->cursor.byteCol - 1);
+                        if (end > 0) {
+                            char *yanked = (char *)malloc(end + 1);
+                            if (yanked) {
+                                memcpy(yanked, line, end);
+                                yanked[end] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                            memmove(line, line + end, len - end + 1);
+                            ctx->cursor.byteCol = 1;
+                            ctx->mode = VIM_MODE_INSERT;
+                            ctx->is_dirty = true;
+                            clamp_cursor(ctx);
                             emit_line_delta(ctx, ctx->cursor.line, 1, 1);
                         }
                         p++;
@@ -1349,6 +1623,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 size_t line_len = strlen(line);
                 if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
                     size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+                    char yanked[2] = { line[pos], '\0' };
+                    set_yank_buffer(ctx, yanked, false);
                     memmove(&line[pos], &line[pos + 1], line_len - pos);
                     ctx->is_dirty = true;
                     clamp_cursor(ctx);
@@ -1362,6 +1638,8 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 size_t line_len = strlen(line);
                 if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
                     size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+                    char yanked[2] = { line[pos], '\0' };
+                    set_yank_buffer(ctx, yanked, false);
                     memmove(&line[pos], &line[pos + 1], line_len - pos);
                     ctx->is_dirty = true;
                     emit_line_delta(ctx, ctx->cursor.line, 1, 1);
@@ -1484,22 +1762,30 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             if (*p == '\x1b') {
                 ctx->mode = VIM_MODE_NORMAL;
                 ctx->pending_text_object = 0;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (ctx->pending_text_object == 'i') {
                 handle_visual_text_object(ctx, *p);
                 ctx->pending_text_object = 0;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'i') {
                 ctx->pending_text_object = 'i';
                 p++;
-            } else if (*p == 'd') { // Visual delete
+            } else if ((*p >= '1' && *p <= '9') || (ctx->count_accumulator > 0 && *p == '0')) {
+                ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                p++;
+                continue;
+            } else if (*p == 'd' || *p == 'c') { // Visual delete or change
+                ctx->count_accumulator = 0;
+                bool is_change = (*p == 'c');
                 if (ctx->visual_is_linewise) {
                     int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     size_t start_idx = (size_t)(start_l - 1);
                     size_t del_count = (size_t)(end_l - start_l + 1);
 
-                    set_yank_buffer(ctx, ctx->lines[start_idx], true);
+                    yank_linewise_range(ctx, start_l, end_l);
                     for (size_t i = 0; i < del_count; i++) free(ctx->lines[start_idx + i]);
                     memmove(&ctx->lines[start_idx], &ctx->lines[start_idx + del_count], (ctx->line_count - (start_idx + del_count)) * sizeof(char *));
                     ctx->line_count -= del_count;
@@ -1539,13 +1825,15 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     }
                 }
                 ctx->is_dirty = true;
-                ctx->mode = VIM_MODE_NORMAL;
+                ctx->mode = is_change ? VIM_MODE_INSERT : VIM_MODE_NORMAL;
                 clamp_cursor(ctx);
                 p++;
             } else if (*p == 'y') { // Visual yank
+                ctx->count_accumulator = 0;
                 if (ctx->visual_is_linewise) {
                     int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
-                    set_yank_buffer(ctx, ctx->lines[start_l - 1], true);
+                    int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
+                    yank_linewise_range(ctx, start_l, end_l);
                 } else if (ctx->visual_anchor.line == ctx->cursor.line) {
                     const char *line = ctx->lines[ctx->cursor.line - 1];
                     size_t col1 = (size_t)ctx->visual_anchor.byteCol;
@@ -1567,31 +1855,45 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->mode = VIM_MODE_NORMAL;
                 p++;
             } else if (*p == 'h') {
-                if (ctx->cursor.byteCol > 1) ctx->cursor.byteCol--;
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->count_accumulator = 0;
+                ctx->cursor.byteCol = (ctx->cursor.byteCol > count) ? (ctx->cursor.byteCol - count) : 1;
                 p++;
             } else if (*p == 'l') {
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->count_accumulator = 0;
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
-                if ((size_t)ctx->cursor.byteCol < line_len) ctx->cursor.byteCol++;
+                ctx->cursor.byteCol += count;
+                if ((size_t)ctx->cursor.byteCol > line_len) {
+                    ctx->cursor.byteCol = (int32_t)line_len;
+                }
+                if (ctx->cursor.byteCol < 1) ctx->cursor.byteCol = 1;
                 p++;
             } else if (*p == 'j') {
-                if ((size_t)ctx->cursor.line < ctx->line_count) {
-                    ctx->cursor.line++;
-                    clamp_cursor(ctx);
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->count_accumulator = 0;
+                ctx->cursor.line += count;
+                if ((size_t)ctx->cursor.line > ctx->line_count) {
+                    ctx->cursor.line = (int32_t)ctx->line_count;
                 }
+                clamp_cursor(ctx);
                 p++;
             } else if (*p == 'k') {
-                if (ctx->cursor.line > 1) {
-                    ctx->cursor.line--;
-                    clamp_cursor(ctx);
-                }
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->count_accumulator = 0;
+                ctx->cursor.line = (ctx->cursor.line > count) ? (ctx->cursor.line - count) : 1;
+                clamp_cursor(ctx);
                 p++;
             } else if (*p == '0') {
+                ctx->count_accumulator = 0;
                 ctx->cursor.byteCol = 1;
                 p++;
             } else if (*p == '$') {
+                ctx->count_accumulator = 0;
                 motion_dollar(ctx);
                 p++;
             } else {
+                ctx->count_accumulator = 0;
                 p++;
             }
         } else if (ctx->mode == VIM_MODE_COMMAND) {

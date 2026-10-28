@@ -569,6 +569,43 @@ func testDocumentScrollViewDynamicHeightAndScroller() throws {
     }
 }
 
+func testDocumentLineNumberRulerConfiguration() throws {
+    let doc = VimMDDocument()
+    doc.makeWindowControllers()
+
+    guard let windowController = doc.windowControllers.first,
+          let window = windowController.window,
+          let contentView = window.contentView else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Window hierarchy missing"])
+    }
+
+    var foundScrollView: NSScrollView?
+    func findScrollView(in view: NSView) {
+        if let sv = view as? NSScrollView {
+            foundScrollView = sv
+            return
+        }
+        for sub in view.subviews {
+            findScrollView(in: sub)
+        }
+    }
+    findScrollView(in: contentView)
+
+    guard let scrollView = foundScrollView else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "NSScrollView not found in document window"])
+    }
+
+    guard scrollView.hasVerticalRuler else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "scrollView.hasVerticalRuler is false"])
+    }
+    guard scrollView.rulersVisible else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "scrollView.rulersVisible is false"])
+    }
+    guard scrollView.verticalRulerView is LineNumberRulerView else {
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "scrollView.verticalRulerView is not LineNumberRulerView"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -595,7 +632,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testStatusBarWriteSuccessFeedback", testStatusBarWriteSuccessFeedback),
     ("testStatusBarShowsLastErrorOnBlockedQuit", testStatusBarShowsLastErrorOnBlockedQuit),
     ("testShowStatusMessageMethod", testShowStatusMessageMethod),
-    ("testDocumentScrollViewDynamicHeightAndScroller", testDocumentScrollViewDynamicHeightAndScroller)
+    ("testDocumentScrollViewDynamicHeightAndScroller", testDocumentScrollViewDynamicHeightAndScroller),
+    ("testDocumentLineNumberRulerConfiguration", testDocumentLineNumberRulerConfiguration)
 ]
 
 for (name, test) in tests {

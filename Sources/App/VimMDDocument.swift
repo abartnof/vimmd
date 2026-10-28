@@ -157,6 +157,14 @@ open class VimMDDocument: NSDocument {
         scrollView.documentView = tv
         tv.updateFrameHeightToFitText()
 
+        // Configure LineNumberRulerView gutter
+        let ruler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+        ruler.clientView = tv
+        scrollView.hasVerticalRuler = true
+        scrollView.verticalRulerView = ruler
+        scrollView.rulersVisible = true
+        ruler.updateThickness(for: tv)
+
         // 2. Status bar at bottom
         let statusFrame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)
         let statusBar = NSView(frame: statusFrame)

@@ -675,6 +675,45 @@ func testTextViewSearchKeyNavigation() throws {
     }
 }
 
+func testTextViewCopyAndPasteSynchronizedWithSystemPasteboard() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Hello VimMD World\nSecond line")
+    textView.session = session
+
+    // 1. In Normal mode without selection: copy() yanks current line ('yy')
+    textView.copy(nil as Any?)
+    let pbText = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pbText.contains("Hello VimMD World") else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "copy() in normal mode did not copy current line to pasteboard: '\(pbText)'"])
+    }
+
+    // 2. In Visual mode: 'v3l' selects 'Hell', copy() yanks selection and returns to normal
+    session.feedKeys("v3l")
+    guard session.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected Visual mode"])
+    }
+    textView.copy(nil as Any?)
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected Normal mode after visual copy()"])
+    }
+    let pbVisual = NSPasteboard.general.string(forType: .string) ?? ""
+    guard pbVisual == "Hell" else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Visual copy() did not yank 'Hell': '\(pbVisual)'"])
+    }
+
+    // 3. Pasteboard paste() in normal mode pastes clipboard text
+    let newClip = " [COPIED] "
+    let pb = NSPasteboard.general
+    pb.clearContents()
+    pb.setString(newClip, forType: .string)
+
+    textView.paste(nil as Any?)
+    let contentAfterPaste = textView.string
+    guard contentAfterPaste.contains(newClip) else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "paste() did not insert clipboard text: '\(contentAfterPaste)'"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -702,7 +741,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testScrollWheelForwarding", testScrollWheelForwarding),
     ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets),
     ("testTextViewVisualTextObjectSelection", testTextViewVisualTextObjectSelection),
-    ("testTextViewSearchKeyNavigation", testTextViewSearchKeyNavigation)
+    ("testTextViewSearchKeyNavigation", testTextViewSearchKeyNavigation),
+    ("testTextViewCopyAndPasteSynchronizedWithSystemPasteboard", testTextViewCopyAndPasteSynchronizedWithSystemPasteboard)
 ]
 
 for (name, test) in tests {

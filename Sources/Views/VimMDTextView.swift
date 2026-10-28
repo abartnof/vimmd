@@ -135,6 +135,10 @@ open class VimMDTextView: NSTextView {
 
         updateSyntaxStyling(force: true)
         updateFrameHeightToFitText()
+        if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+            ruler.updateThickness(for: self)
+            ruler.needsDisplay = true
+        }
         synchronizeCaretWithSession()
     }
 
@@ -161,6 +165,7 @@ open class VimMDTextView: NSTextView {
         if session.mode == VIM_MODE_INSERT {
             updateSyntaxStyling()
         }
+        self.enclosingScrollView?.verticalRulerView?.needsDisplay = true
     }
 
     override open func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
@@ -257,6 +262,62 @@ open class VimMDTextView: NSTextView {
         session.feedKeys("\u{7f}")
         synchronizeCaretWithSession()
         onCursorMoved?()
+    }
+
+    // MARK: - Clipboard Synchronization
+
+    override open func copy(_ sender: Any?) {
+        guard let session = session else {
+            super.copy(sender)
+            return
+        }
+
+        if session.mode == VIM_MODE_VISUAL {
+            session.feedKeys("y")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        } else {
+            let range = self.selectedRange()
+            if range.length > 0 {
+                let nsStr = self.string as NSString
+                if range.location + range.length <= nsStr.length {
+                    let sub = nsStr.substring(with: range)
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(sub, forType: .string)
+                    session.setYankBuffer(text: sub, linewise: false)
+                }
+            } else {
+                session.feedKeys("yy")
+                synchronizeCaretWithSession()
+                onCursorMoved?()
+            }
+        }
+    }
+
+    override open func paste(_ sender: Any?) {
+        guard let session = session else {
+            super.paste(sender)
+            return
+        }
+
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            return
+        }
+
+        if session.mode == VIM_MODE_INSERT {
+            session.feedKeys(text)
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        } else if session.mode == VIM_MODE_VISUAL {
+            session.feedKeys("p")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        } else {
+            session.feedKeys("p")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        }
     }
 
     // MARK: - NSTextInputClient overrides

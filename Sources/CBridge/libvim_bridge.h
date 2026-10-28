@@ -45,6 +45,12 @@ typedef void (*VimLineDeltaCallback)(
     void *userInfo
 );
 
+// Yank & Cut Callback & Clipboard Buffer
+typedef void (*VimYankCallback)(const char *text, bool linewise, void *userInfo);
+void vim_context_set_yank_callback(VimContextRef ctx, VimYankCallback cb, void *userInfo);
+const char* vim_context_get_yank_buffer(VimContextRef ctx, bool *out_linewise);
+void vim_context_set_yank_buffer(VimContextRef ctx, const char *text, bool linewise);
+
 // Lifecycle & Context Switching
 void vim_engine_init(void);
 VimContextRef vim_context_create(const char *initial_utf8);
