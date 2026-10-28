@@ -34,23 +34,25 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **All Other Formats (`.txt`, `.csv`, `.tsv`, `.sh`, `.json`, `.py`, `.c`, `.swift`, `.yaml`, etc., and untitled non-markdown documents)**: Default to native Monospaced System Font (SF Mono 13pt, `NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)`) with `NSColor.textColor`.
   - [x] **Zero Markdown Concealment Leakage**: Plain text documents have 100% SF Mono 13pt without header resizing or delimiter hiding, even if text contains markdown tokens (`#`, `*`, `**`, `` ` ``).
   - [x] **Dynamic Format Switching & Typing**: Seamless typography synchronization on syntax mode switches and delta typing.
+- [x] **Milestone J: Operator-Pending Inner Text Objects (`di'`, `ci'`, `yi'`)**
+  - [x] **Delete Inner Text Objects (`di...`)**:
+    - `di'`: Delete content inside single quotes (`'...'`) without deleting quotes.
+    - `di"`: Delete content inside double quotes (`"..."`) without deleting quotes.
+    - `di(` / `di)` / `dib`: Delete content inside parentheses (`(...)`).
+    - `di[` / `di]`: Delete content inside square brackets (`[...]`).
+    - `di<` / `di>`: Delete content inside angle brackets (`<...>`).
+    - `di{` / `di}` / `diB`: Delete content inside braces (`{...}`).
+  - [x] **Change Inner Text Objects (`ci...`)**:
+    - `ci'`, `ci"`, `ci(`, `ci)`, `cib`, `ci[`, `ci]`, `ci<`, `ci>`, `ci{`, `ci}`, `ciB`: Delete content inside enclosing pairs and immediately transition to Insert mode at insertion point.
+    - Single cohesive undo group encompassing change + insert typing.
+  - [x] **Yank Inner Text Objects (`yi...`)**:
+    - `yi'`, `yi"`, `yi(`, `yi)`, `yib`, `yi[`, `yi]`, `yi<`, `yi>`, `yi{`, `yi}`, `yiB`: Yank content inside enclosing pairs to clipboard without modifying buffer.
+    - Restores cursor to starting position.
+  - [x] Single-line and multiline nested pairs support, empty pair safety, and `<Esc>` cancellation.
 
 ---
 
 ## 2. Upcoming Milestones
-
-### Milestone J: Operator-Pending Inner Text Objects (`di'`, `ci'`, `yi'`)
-- [ ] **Delete Inner Text Objects (`di...`)**:
-  - `di'`: Delete content inside single quotes (`'...'`) without deleting quotes.
-  - `di"`: Delete content inside double quotes (`"..."`) without deleting quotes.
-  - `di(` / `di)` / `dib`: Delete content inside parentheses (`(...)`).
-  - `di[` / `di]`: Delete content inside square brackets (`[...]`).
-  - `di<` / `di>`: Delete content inside angle brackets (`<...>`).
-  - `di{` / `di}` / `diB`: Delete content inside braces (`{...}`).
-- [ ] **Change Inner Text Objects (`ci...`)**:
-  - `ci'`, `ci"`, `ci(`, `ci)`, `cib`, `ci[`, `ci]`, `ci<`, `ci>`, `ci{`, `ci}`, `ciB`: Delete content inside enclosing pairs and immediately transition to Insert mode at insertion point.
-- [ ] **Yank Inner Text Objects (`yi...`)**:
-  - `yi'`, `yi"`, `yi(`, `yi)`, `yib`, `yi[`, `yi]`, `yi<`, `yi>`, `yi{`, `yi}`, `yiB`: Yank content inside enclosing pairs to clipboard without modifying buffer.
 
 ### Milestone K: Vim `:sort` Command Subsystem
 - [ ] **Alphabetical and Numerical Line Sorting (`:sort`)**:
@@ -61,6 +63,18 @@ This document tracks all active milestones, user requirements, and architectural
   - `:sort n`: Numeric sorting (evaluating leading or embedded integers).
   - Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
   - Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
+
+### Milestone L: Live Search Status Bar Feedback & Navigation Pipeline (`/`, `n`, `N` / `p`)
+- [ ] **Live Search Bar Rendering (`/`)**:
+  - When typing `/` in Normal mode, display the search prompt `/` live starting from the bottom-left of the status bar (hiding mode tag so `/query` has full prominence).
+  - Stream query characters and backspaces live in the status bar command buffer.
+- [ ] **Search Execution & Viewport Centering**:
+  - On `<CR>`: Execute search forward, jump cursor to match, and scroll viewport (`scrollRangeToVisible`) to ensure matched occurrence is clearly visible.
+  - If pattern is not found, display prominent warning in status bar: `Pattern not found: <pattern>`.
+- [ ] **Subsequent Search Navigation (`n` / `N` / `p`)**:
+  - `n`: Jump to next search occurrence forward and auto-scroll to caret.
+  - `N` (and alias `p` for previous search): Jump to previous search occurrence backward and auto-scroll to caret.
+  - Retain `lastSearchPattern` across document navigation until replaced or cleared.
 
 ### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
 - [ ] **36 End-to-End Synthetic User Journeys**:

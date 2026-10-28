@@ -846,9 +846,19 @@ static bool vim_search_backward(struct VimDocumentContext *ctx, const char *patt
     return false;
 }
 
-// MARK: - Visual Text Objects
-static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim) {
-    if (!ctx || ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return false;
+// MARK: - Text Objects
+typedef struct {
+    bool found;
+    bool is_empty;
+    int32_t open_line;  // 1-based
+    int32_t open_col;   // 1-based
+    int32_t close_line; // 1-based
+    int32_t close_col;  // 1-based
+} InnerTextObjectBounds;
+
+static bool resolve_inner_bounds(struct VimDocumentContext *ctx, char delim, InnerTextObjectBounds *bounds) {
+    if (!ctx || !bounds || ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return false;
+    memset(bounds, 0, sizeof(*bounds));
 
     if (delim == '\'' || delim == '"') {
         const char *line = ctx->lines[ctx->cursor.line - 1];
@@ -859,7 +869,6 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
         int open_idx = -1;
         int close_idx = -1;
 
-        // Find pairs of quotes on this line
         int first_q = -1;
         for (size_t i = 0; i < len; i++) {
             if (line[i] == delim) {
@@ -870,13 +879,11 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
                     int p_close = (int)i;
                     first_q = -1;
 
-                    // If cursor is within or adjacent to this pair
                     if ((int)cur >= p_open && (int)cur <= p_close) {
                         open_idx = p_open;
                         close_idx = p_close;
                         break;
                     }
-                    // If cursor is before this pair and we don't have one yet
                     if ((int)cur < p_open && open_idx == -1) {
                         open_idx = p_open;
                         close_idx = p_close;
@@ -887,23 +894,12 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
         }
 
         if (open_idx != -1 && close_idx != -1) {
-            int32_t line_num = ctx->cursor.line;
-            int32_t inner_start = open_idx + 2; // 1-based col of first inner char
-            int32_t inner_end = close_idx;     // 1-based col of last inner char
-
-            if (inner_start > inner_end) {
-                // Empty string "" or ''
-                ctx->visual_anchor.line = line_num;
-                ctx->visual_anchor.byteCol = inner_start;
-                ctx->cursor.line = line_num;
-                ctx->cursor.byteCol = inner_start - 1;
-            } else {
-                ctx->visual_anchor.line = line_num;
-                ctx->visual_anchor.byteCol = inner_start;
-                ctx->cursor.line = line_num;
-                ctx->cursor.byteCol = inner_end;
-            }
-            clamp_cursor(ctx);
+            bounds->found = true;
+            bounds->open_line = ctx->cursor.line;
+            bounds->open_col = open_idx + 1;
+            bounds->close_line = ctx->cursor.line;
+            bounds->close_col = close_idx + 1;
+            bounds->is_empty = (close_idx == open_idx + 1);
             return true;
         }
         return false;
@@ -923,7 +919,6 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
         return false;
     }
 
-    // Search backward from cursor for open_ch
     int open_line = -1;
     int open_col = -1;
     int depth = 0;
@@ -932,6 +927,9 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
         const char *line = ctx->lines[l - 1];
         size_t len = strlen(line);
         int start = (l == ctx->cursor.line) ? (ctx->cursor.byteCol - 1) : ((int)len - 1);
+        if (l == ctx->cursor.line && start >= 0 && (size_t)start < len && line[start] == close_ch) {
+            start--;
+        }
 
         for (int c = start; c >= 0; c--) {
             if (line[c] == close_ch) {
@@ -941,14 +939,13 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
                     depth--;
                 } else {
                     open_line = l;
-                    open_col = c + 1; // 1-based
+                    open_col = c + 1;
                     goto found_open;
                 }
             }
         }
     }
 
-    // If not found backward, try search forward on current line for first open_ch
     {
         const char *line = ctx->lines[ctx->cursor.line - 1];
         size_t len = strlen(line);
@@ -964,7 +961,6 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
 found_open:
     if (open_line == -1) return false;
 
-    // Search forward from open_line, open_col for matching close_ch
     int close_line = -1;
     int close_col = -1;
     depth = 1;
@@ -981,7 +977,7 @@ found_open:
                 depth--;
                 if (depth == 0) {
                     close_line = (int)l;
-                    close_col = (int)(c + 1); // 1-based
+                    close_col = (int)(c + 1);
                     goto found_close;
                 }
             }
@@ -991,16 +987,31 @@ found_open:
 found_close:
     if (close_line == -1) return false;
 
-    // Inner range
-    int32_t a_line = open_line;
-    int32_t a_col = open_col + 1;
-    int32_t c_line = close_line;
-    int32_t c_col = close_col - 1;
+    bounds->found = true;
+    bounds->open_line = open_line;
+    bounds->open_col = open_col;
+    bounds->close_line = close_line;
+    bounds->close_col = close_col;
+    bounds->is_empty = (open_line == close_line && close_col == open_col + 1);
+    return true;
+}
 
-    ctx->visual_anchor.line = a_line;
-    ctx->visual_anchor.byteCol = a_col;
-    ctx->cursor.line = c_line;
-    ctx->cursor.byteCol = c_col;
+static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim) {
+    if (!ctx) return false;
+    InnerTextObjectBounds bounds;
+    if (!resolve_inner_bounds(ctx, delim, &bounds)) return false;
+
+    if (bounds.is_empty) {
+        ctx->visual_anchor.line = bounds.open_line;
+        ctx->visual_anchor.byteCol = bounds.open_col + 1;
+        ctx->cursor.line = bounds.open_line;
+        ctx->cursor.byteCol = bounds.open_col;
+    } else {
+        ctx->visual_anchor.line = bounds.open_line;
+        ctx->visual_anchor.byteCol = bounds.open_col + 1;
+        ctx->cursor.line = bounds.close_line;
+        ctx->cursor.byteCol = bounds.close_col - 1;
+    }
     clamp_cursor(ctx);
     return true;
 }
@@ -1017,6 +1028,164 @@ static void set_yank_buffer(struct VimDocumentContext *ctx, const char *str, boo
 
     if (ctx->yank_cb && ctx->yank_buffer) {
         ctx->yank_cb(ctx->yank_buffer, ctx->yank_is_linewise, ctx->yank_user_info);
+    }
+}
+
+static char* extract_inner_text(struct VimDocumentContext *ctx, const InnerTextObjectBounds *bounds) {
+    if (!ctx || !bounds || !bounds->found || bounds->is_empty) {
+        return duplicate_string("");
+    }
+
+    if (bounds->open_line == bounds->close_line) {
+        size_t l_idx = (size_t)(bounds->open_line - 1);
+        const char *line = ctx->lines[l_idx];
+        size_t len = strlen(line);
+        size_t start = (size_t)bounds->open_col;
+        size_t end = (size_t)(bounds->close_col - 1);
+        if (start >= end || start >= len) {
+            return duplicate_string("");
+        }
+        if (end > len) end = len;
+        size_t inner_len = end - start;
+        char *buf = (char *)malloc(inner_len + 1);
+        if (buf) {
+            memcpy(buf, line + start, inner_len);
+            buf[inner_len] = '\0';
+        }
+        return buf ? buf : duplicate_string("");
+    }
+
+    // Multiline extraction
+    size_t open_idx = (size_t)(bounds->open_line - 1);
+    size_t close_idx = (size_t)(bounds->close_line - 1);
+    const char *line1 = ctx->lines[open_idx];
+    size_t len1 = strlen(line1);
+    size_t start1 = (size_t)bounds->open_col;
+    size_t part1_len = (len1 > start1) ? (len1 - start1) : 0;
+
+    const char *line2 = ctx->lines[close_idx];
+    size_t len2 = strlen(line2);
+    size_t end2 = (size_t)(bounds->close_col - 1);
+    size_t part2_len = (end2 < len2) ? end2 : len2;
+
+    size_t total_len = part1_len + 1; // +1 for '\n'
+    for (size_t l = open_idx + 1; l < close_idx; l++) {
+        total_len += strlen(ctx->lines[l]) + 1;
+    }
+    total_len += part2_len;
+
+    char *buf = (char *)malloc(total_len + 1);
+    if (!buf) return duplicate_string("");
+
+    char *dst = buf;
+    if (part1_len > 0) {
+        memcpy(dst, line1 + start1, part1_len);
+        dst += part1_len;
+    }
+    *dst++ = '\n';
+
+    for (size_t l = open_idx + 1; l < close_idx; l++) {
+        size_t mid_len = strlen(ctx->lines[l]);
+        memcpy(dst, ctx->lines[l], mid_len);
+        dst += mid_len;
+        *dst++ = '\n';
+    }
+
+    if (part2_len > 0) {
+        memcpy(dst, line2, part2_len);
+        dst += part2_len;
+    }
+    *dst = '\0';
+    return buf;
+}
+
+static void handle_operator_inner_text_object(struct VimDocumentContext *ctx, char op, char delim) {
+    if (!ctx) return;
+    InnerTextObjectBounds bounds;
+    if (!resolve_inner_bounds(ctx, delim, &bounds)) {
+        return;
+    }
+
+    char *yanked = extract_inner_text(ctx, &bounds);
+    set_yank_buffer(ctx, yanked ? yanked : "", false);
+    if (yanked) free(yanked);
+
+    if (op == 'y') {
+        // Yank inner: buffer unmodified, cursor returns to starting position
+        return;
+    }
+
+    // op is 'd' or 'c'
+    snapshot_for_undo(ctx);
+
+    if (bounds.is_empty) {
+        ctx->cursor.line = bounds.open_line;
+        ctx->cursor.byteCol = bounds.open_col + 1;
+        if (op == 'c') {
+            ctx->in_insert_undo_group = true;
+            ctx->mode = VIM_MODE_INSERT;
+        } else {
+            ctx->mode = VIM_MODE_NORMAL;
+            clamp_cursor(ctx);
+        }
+        return;
+    }
+
+    if (bounds.open_line == bounds.close_line) {
+        size_t l_idx = (size_t)(bounds.open_line - 1);
+        char *line = ctx->lines[l_idx];
+        size_t len = strlen(line);
+        size_t start = (size_t)bounds.open_col;
+        size_t end = (size_t)(bounds.close_col - 1);
+        if (end > len) end = len;
+        if (start < end) {
+            memmove(line + start, line + end, len - end + 1);
+        }
+        ctx->cursor.line = bounds.open_line;
+        ctx->cursor.byteCol = bounds.open_col + 1;
+        ctx->is_dirty = true;
+        emit_line_delta(ctx, bounds.open_line, 1, 1);
+    } else {
+        size_t open_idx = (size_t)(bounds.open_line - 1);
+        size_t close_idx = (size_t)(bounds.close_line - 1);
+        size_t prefix_len = (size_t)bounds.open_col;
+        const char *close_line = ctx->lines[close_idx];
+        size_t close_char_idx = (size_t)(bounds.close_col - 1);
+        size_t suffix_len = (close_char_idx < strlen(close_line)) ? strlen(close_line + close_char_idx) : 0;
+
+        char *new_line = (char *)malloc(prefix_len + suffix_len + 1);
+        if (new_line) {
+            memcpy(new_line, ctx->lines[open_idx], prefix_len);
+            if (suffix_len > 0) {
+                memcpy(new_line + prefix_len, close_line + close_char_idx, suffix_len);
+            }
+            new_line[prefix_len + suffix_len] = '\0';
+        }
+
+        for (size_t l = open_idx; l <= close_idx; l++) {
+            free(ctx->lines[l]);
+        }
+        ctx->lines[open_idx] = new_line ? new_line : duplicate_string("");
+
+        size_t deleted_lines = close_idx - open_idx;
+        size_t remaining = ctx->line_count - (close_idx + 1);
+        if (remaining > 0) {
+            memmove(&ctx->lines[open_idx + 1], &ctx->lines[close_idx + 1], remaining * sizeof(char *));
+        }
+        ctx->line_count -= deleted_lines;
+
+        ctx->cursor.line = bounds.open_line;
+        ctx->cursor.byteCol = bounds.open_col + 1;
+        ctx->is_dirty = true;
+        emit_line_delta(ctx, bounds.open_line, (int32_t)(deleted_lines + 1), 1);
+    }
+
+    if (op == 'c') {
+        ctx->in_insert_undo_group = true;
+        ctx->mode = VIM_MODE_INSERT;
+    } else {
+        ctx->mode = VIM_MODE_NORMAL;
+        clamp_cursor(ctx);
     }
 }
 
@@ -1363,6 +1532,21 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
 
             // 5. Pending operator ('d', 'y', 'c')
             if (ctx->pending_operator != 0) {
+                if (ctx->pending_text_object == 'i') {
+                    char op = ctx->pending_operator;
+                    char delim = *p;
+                    ctx->pending_operator = 0;
+                    ctx->pending_text_object = 0;
+                    ctx->count_accumulator = 0;
+                    handle_operator_inner_text_object(ctx, op, delim);
+                    p++;
+                    continue;
+                }
+                if (*p == 'i') {
+                    ctx->pending_text_object = 'i';
+                    p++;
+                    continue;
+                }
                 char op = ctx->pending_operator;
                 ctx->pending_operator = 0;
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;

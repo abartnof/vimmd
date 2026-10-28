@@ -803,6 +803,416 @@ static void test_visual_text_objects(void) {
     vim_context_destroy(ctx6);
 }
 
+static void test_operator_inner_quotes(void) {
+    // 1. di'
+    {
+        const char *text = "const char *s = 'hello world';";
+        VimContextRef ctx = vim_context_create(text);
+        assert(ctx != NULL);
+        vim_context_set_cursor(ctx, 1, 20); // on 'o' in hello
+        vim_context_feed_keys(ctx, "di'");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "const char *s = '';") == 0);
+        free(ser);
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(yanked != NULL);
+        assert(strcmp(yanked, "hello world") == 0);
+        assert(linewise == false);
+        assert(vim_context_is_dirty(ctx));
+        VimBytePos pos = vim_context_get_cursor(ctx);
+        assert(pos.line == 1 && pos.byteCol == 18);
+        vim_context_destroy(ctx);
+    }
+
+    // 2. ci'
+    {
+        const char *text = "msg = 'foo';";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 8); // on 'f'
+        vim_context_feed_keys(ctx, "ci'bar\x1b");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "msg = 'bar';") == 0);
+        free(ser);
+        assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(strcmp(yanked, "foo") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx);
+    }
+
+    // 3. yi'
+    {
+        const char *text = "val = 'copied text';";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 9); // on 'c'
+        vim_context_feed_keys(ctx, "yi'");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, text) == 0);
+        free(ser);
+        assert(!vim_context_is_dirty(ctx));
+        assert(vim_context_get_cursor(ctx).line == 1 && vim_context_get_cursor(ctx).byteCol == 9);
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(strcmp(yanked, "copied text") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx);
+    }
+
+    // 4. di"
+    {
+        const char *text = "str = \"double quoted\";";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 9);
+        vim_context_feed_keys(ctx, "di\"");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "str = \"\";") == 0);
+        free(ser);
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(strcmp(yanked, "double quoted") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx);
+    }
+
+    // 5. ci"
+    {
+        const char *text = "str = \"old\";";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 8);
+        vim_context_feed_keys(ctx, "ci\"new\x1b");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "str = \"new\";") == 0);
+        free(ser);
+        vim_context_destroy(ctx);
+    }
+
+    // 6. yi"
+    {
+        const char *text = "str = \"yank me\";";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_feed_keys(ctx, "yi\"");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, text) == 0);
+        free(ser);
+        assert(!vim_context_is_dirty(ctx));
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(strcmp(yanked, "yank me") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx);
+    }
+
+    // 7. Empty quotes: '' and ""
+    {
+        const char *text = "empty = '';";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 9);
+        vim_context_feed_keys(ctx, "di'");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "empty = '';") == 0);
+        free(ser);
+
+        vim_context_feed_keys(ctx, "ci'inserted\x1b");
+        ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "empty = 'inserted';") == 0);
+        free(ser);
+        vim_context_destroy(ctx);
+    }
+}
+
+static void test_operator_inner_brackets(void) {
+    // 1. di( / di) / dib
+    {
+        VimContextRef ctx1 = vim_context_create("foo(1, 2, 3);");
+        vim_context_set_cursor(ctx1, 1, 7);
+        vim_context_feed_keys(ctx1, "di(");
+        char *ser1 = vim_context_serialize_buffer(ctx1, NULL);
+        assert(strcmp(ser1, "foo();") == 0);
+        free(ser1);
+        bool linewise = true;
+        assert(strcmp(vim_context_get_yank_buffer(ctx1, &linewise), "1, 2, 3") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx1);
+
+        VimContextRef ctx2 = vim_context_create("bar(alpha);");
+        vim_context_set_cursor(ctx2, 1, 6);
+        vim_context_feed_keys(ctx2, "di)");
+        char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+        assert(strcmp(ser2, "bar();") == 0);
+        free(ser2);
+        assert(strcmp(vim_context_get_yank_buffer(ctx2, &linewise), "alpha") == 0);
+        vim_context_destroy(ctx2);
+
+        VimContextRef ctx3 = vim_context_create("baz(test);");
+        vim_context_set_cursor(ctx3, 1, 6);
+        vim_context_feed_keys(ctx3, "dib");
+        char *ser3 = vim_context_serialize_buffer(ctx3, NULL);
+        assert(strcmp(ser3, "baz();") == 0);
+        free(ser3);
+        assert(strcmp(vim_context_get_yank_buffer(ctx3, &linewise), "test") == 0);
+        vim_context_destroy(ctx3);
+    }
+
+    // 2. di[ / di]
+    {
+        VimContextRef ctx1 = vim_context_create("items = [a, b, c];");
+        vim_context_set_cursor(ctx1, 1, 11);
+        vim_context_feed_keys(ctx1, "di[");
+        char *ser1 = vim_context_serialize_buffer(ctx1, NULL);
+        assert(strcmp(ser1, "items = [];") == 0);
+        free(ser1);
+        bool linewise = true;
+        assert(strcmp(vim_context_get_yank_buffer(ctx1, &linewise), "a, b, c") == 0);
+        vim_context_destroy(ctx1);
+
+        VimContextRef ctx2 = vim_context_create("items = [x, y];");
+        vim_context_set_cursor(ctx2, 1, 10);
+        vim_context_feed_keys(ctx2, "di]");
+        char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+        assert(strcmp(ser2, "items = [];") == 0);
+        free(ser2);
+        assert(strcmp(vim_context_get_yank_buffer(ctx2, &linewise), "x, y") == 0);
+        vim_context_destroy(ctx2);
+    }
+
+    // 3. di< / di>
+    {
+        VimContextRef ctx1 = vim_context_create("Template<TypeA, TypeB> x;");
+        vim_context_set_cursor(ctx1, 1, 12);
+        vim_context_feed_keys(ctx1, "di<");
+        char *ser1 = vim_context_serialize_buffer(ctx1, NULL);
+        assert(strcmp(ser1, "Template<> x;") == 0);
+        free(ser1);
+        bool linewise = true;
+        assert(strcmp(vim_context_get_yank_buffer(ctx1, &linewise), "TypeA, TypeB") == 0);
+        vim_context_destroy(ctx1);
+
+        VimContextRef ctx2 = vim_context_create("List<Element> y;");
+        vim_context_set_cursor(ctx2, 1, 7);
+        vim_context_feed_keys(ctx2, "di>");
+        char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+        assert(strcmp(ser2, "List<> y;") == 0);
+        free(ser2);
+        assert(strcmp(vim_context_get_yank_buffer(ctx2, &linewise), "Element") == 0);
+        vim_context_destroy(ctx2);
+    }
+
+    // 4. di{ / di} / diB
+    {
+        VimContextRef ctx1 = vim_context_create("int fn() { return 0; }");
+        vim_context_set_cursor(ctx1, 1, 14);
+        vim_context_feed_keys(ctx1, "di{");
+        char *ser1 = vim_context_serialize_buffer(ctx1, NULL);
+        assert(strcmp(ser1, "int fn() {}") == 0);
+        free(ser1);
+        bool linewise = true;
+        assert(strcmp(vim_context_get_yank_buffer(ctx1, &linewise), " return 0; ") == 0);
+        vim_context_destroy(ctx1);
+
+        VimContextRef ctx2 = vim_context_create("int fn() { x = 1; }");
+        vim_context_set_cursor(ctx2, 1, 13);
+        vim_context_feed_keys(ctx2, "di}");
+        char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+        assert(strcmp(ser2, "int fn() {}") == 0);
+        free(ser2);
+        assert(strcmp(vim_context_get_yank_buffer(ctx2, &linewise), " x = 1; ") == 0);
+        vim_context_destroy(ctx2);
+
+        VimContextRef ctx3 = vim_context_create("int fn() { y = 2; }");
+        vim_context_set_cursor(ctx3, 1, 13);
+        vim_context_feed_keys(ctx3, "diB");
+        char *ser3 = vim_context_serialize_buffer(ctx3, NULL);
+        assert(strcmp(ser3, "int fn() {}") == 0);
+        free(ser3);
+        assert(strcmp(vim_context_get_yank_buffer(ctx3, &linewise), " y = 2; ") == 0);
+        vim_context_destroy(ctx3);
+    }
+
+    // 5. Nested brackets: (foo (bar) baz)
+    {
+        VimContextRef ctx = vim_context_create("(foo (bar) baz)");
+        vim_context_set_cursor(ctx, 1, 8); // on 'b' in bar
+        vim_context_feed_keys(ctx, "di(");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "(foo () baz)") == 0);
+        free(ser);
+        bool linewise = true;
+        assert(strcmp(vim_context_get_yank_buffer(ctx, &linewise), "bar") == 0);
+        vim_context_destroy(ctx);
+    }
+
+    // 6. Empty brackets () and ci(
+    {
+        VimContextRef ctx = vim_context_create("run();");
+        vim_context_set_cursor(ctx, 1, 4); // on '('
+        vim_context_feed_keys(ctx, "di(");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "run();") == 0);
+        free(ser);
+
+        vim_context_feed_keys(ctx, "ci(param\x1b");
+        ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "run(param);") == 0);
+        free(ser);
+        vim_context_destroy(ctx);
+    }
+}
+
+static void test_operator_inner_multiline(void) {
+    // 1. Multiline parentheses: di(
+    {
+        const char *text = "call(\n    arg1,\n    arg2\n);";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 2, 6); // on 'arg1'
+        vim_context_feed_keys(ctx, "di(");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "call();") == 0);
+        free(ser);
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(yanked != NULL);
+        assert(strcmp(yanked, "\n    arg1,\n    arg2\n") == 0);
+        assert(linewise == false);
+
+        // Undo restores multiline text
+        assert(vim_context_undo(ctx));
+        char *ser_undo = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_undo, text) == 0);
+        free(ser_undo);
+        vim_context_destroy(ctx);
+    }
+
+    // 2. Multiline braces: ciB
+    {
+        const char *text = "struct Point {\n    int x;\n    int y;\n};";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 2, 5);
+        vim_context_feed_keys(ctx, "ciBfloat x; float y;\x1b");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, "struct Point {float x; float y;};") == 0);
+        free(ser);
+
+        // Undo restores original in a single step
+        assert(vim_context_undo(ctx));
+        char *ser_undo = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_undo, text) == 0);
+        free(ser_undo);
+        vim_context_destroy(ctx);
+    }
+
+    // 3. Multiline square brackets: yi[
+    {
+        const char *text = "[\n  1,\n  2\n]";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 2, 3);
+        vim_context_feed_keys(ctx, "yi[");
+        char *ser = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser, text) == 0); // buffer unmodified
+        free(ser);
+        assert(!vim_context_is_dirty(ctx));
+        bool linewise = true;
+        const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+        assert(strcmp(yanked, "\n  1,\n  2\n") == 0);
+        assert(linewise == false);
+        vim_context_destroy(ctx);
+    }
+}
+
+static void test_operator_inner_undo_redo(void) {
+    // 1. di' undo and redo
+    {
+        const char *text = "val = 'original';";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 9);
+        vim_context_feed_keys(ctx, "di'");
+        char *ser1 = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser1, "val = '';") == 0);
+        free(ser1);
+
+        // Undo
+        assert(vim_context_undo(ctx));
+        char *ser_u = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_u, text) == 0);
+        free(ser_u);
+
+        // Redo (Ctrl-R)
+        vim_context_feed_keys(ctx, "\x12");
+        char *ser_r = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_r, "val = '';") == 0);
+        free(ser_r);
+        vim_context_destroy(ctx);
+    }
+
+    // 2. ci' cohesive undo group
+    {
+        const char *text = "str = 'alpha';";
+        VimContextRef ctx = vim_context_create(text);
+        vim_context_set_cursor(ctx, 1, 9);
+        vim_context_feed_keys(ctx, "ci'beta\x1b");
+        char *ser1 = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser1, "str = 'beta';") == 0);
+        free(ser1);
+
+        // Single 'u' should restore 'alpha', NOT an intermediate empty ''
+        assert(vim_context_undo(ctx));
+        char *ser_u = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_u, text) == 0);
+        free(ser_u);
+
+        // Redo restores 'beta'
+        vim_context_feed_keys(ctx, "\x12");
+        char *ser_r = vim_context_serialize_buffer(ctx, NULL);
+        assert(strcmp(ser_r, "str = 'beta';") == 0);
+        free(ser_r);
+        vim_context_destroy(ctx);
+    }
+}
+
+static void test_operator_inner_esc_cancellation(void) {
+    const char *text = "name = 'test';";
+    VimContextRef ctx = vim_context_create(text);
+    vim_context_set_cursor(ctx, 1, 9);
+
+    // 1. d<Esc>
+    vim_context_feed_keys(ctx, "d\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(!vim_context_is_dirty(ctx));
+
+    // 2. di<Esc>
+    vim_context_feed_keys(ctx, "di\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(!vim_context_is_dirty(ctx));
+
+    // 3. c<Esc>
+    vim_context_feed_keys(ctx, "c\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(!vim_context_is_dirty(ctx));
+
+    // 4. ci<Esc>
+    vim_context_feed_keys(ctx, "ci\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(!vim_context_is_dirty(ctx));
+
+    // 5. y<Esc>
+    vim_context_feed_keys(ctx, "y\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // 6. yi<Esc>
+    vim_context_feed_keys(ctx, "yi\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    // Subsequent normal motion works
+    vim_context_feed_keys(ctx, "0");
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, text) == 0);
+    free(ser);
+    vim_context_destroy(ctx);
+}
+
 static void test_search_forward_n_N(void) {
     const char *text = "apple banana cherry\napple date elderberry\nfig grape apple";
     VimContextRef ctx = vim_context_create(text);
@@ -1496,6 +1906,11 @@ int main(void) {
     RUN_TEST(test_gg_motion_streaming);
     RUN_TEST(test_G_motion);
     RUN_TEST(test_visual_text_objects);
+    RUN_TEST(test_operator_inner_quotes);
+    RUN_TEST(test_operator_inner_brackets);
+    RUN_TEST(test_operator_inner_multiline);
+    RUN_TEST(test_operator_inner_undo_redo);
+    RUN_TEST(test_operator_inner_esc_cancellation);
     RUN_TEST(test_search_forward_n_N);
     RUN_TEST(test_ex_commands_streaming_and_ZZ);
     RUN_TEST(test_navigation_motions_and_counts);
