@@ -365,6 +365,330 @@ func testVimSessionSetCursorAndModeNotifications() throws {
     }
 }
 
+func testVimSessionStreamingGGAndG() throws {
+    let session = VimSession(initialText: "First line\nSecond line\n    Third line with spaces")
+    session.setCursor(line: 3, byteCol: 2)
+
+    // Feed first 'g'
+    session.feedKeys("g")
+    guard session.cursorPosition.line == 3 && session.cursorPosition.byteCol == 2 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Pending 'g' should not move cursor immediately"])
+    }
+
+    // Feed second 'g'
+    session.feedKeys("g")
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "'gg' should move cursor to line 1, col 1, got \(session.cursorPosition)"])
+    }
+
+    // Feed 'G': should move to line 3, first non-blank col 5
+    session.feedKeys("G")
+    guard session.cursorPosition.line == 3 && session.cursorPosition.byteCol == 5 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "'G' should move cursor to last line first non-blank, got \(session.cursorPosition)"])
+    }
+}
+
+func testVimSessionVisualTextObjects() throws {
+    // 1. vi'
+    let s1 = VimSession(initialText: "let key = 'secret_value';")
+    s1.setCursor(line: 1, byteCol: 15)
+    s1.feedKeys("v")
+    s1.feedKeys("i")
+    s1.feedKeys("'")
+    guard s1.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected VISUAL mode after vi'"])
+    }
+    guard let r1 = s1.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil visualSelectionRange"])
+    }
+    let sub1 = (s1.serializeBuffer() as NSString).substring(with: r1)
+    guard sub1 == "secret_value" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "vi' expected 'secret_value', got '\(sub1)'"])
+    }
+
+    // 2. vi"
+    let s2 = VimSession(initialText: "let title = \"Super VimMD\";")
+    s2.setCursor(line: 1, byteCol: 16)
+    s2.feedKeys("v")
+    s2.feedKeys("i")
+    s2.feedKeys("\"")
+    guard let r2 = s2.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil visualSelectionRange"])
+    }
+    let sub2 = (s2.serializeBuffer() as NSString).substring(with: r2)
+    guard sub2 == "Super VimMD" else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "vi\" expected 'Super VimMD', got '\(sub2)'"])
+    }
+
+    // 3. vi( and vib
+    let s3 = VimSession(initialText: "print(hello, world)")
+    s3.setCursor(line: 1, byteCol: 10)
+    s3.feedKeys("v")
+    s3.feedKeys("i")
+    s3.feedKeys("(")
+    guard let r3 = s3.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil visualSelectionRange"])
+    }
+    let sub3 = (s3.serializeBuffer() as NSString).substring(with: r3)
+    guard sub3 == "hello, world" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "vi( expected 'hello, world', got '\(sub3)'"])
+    }
+
+    s3.feedKeys("\u{1b}")
+    s3.setCursor(line: 1, byteCol: 10)
+    s3.feedKeys("v")
+    s3.feedKeys("i")
+    s3.feedKeys("b")
+    guard let r3b = s3.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil visualSelectionRange"])
+    }
+    guard (s3.serializeBuffer() as NSString).substring(with: r3b) == "hello, world" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "vib expected 'hello, world'"])
+    }
+
+    // 4. vi[
+    let s4 = VimSession(initialText: "items = [first, second]")
+    s4.setCursor(line: 1, byteCol: 12)
+    s4.feedKeys("v")
+    s4.feedKeys("i")
+    s4.feedKeys("[")
+    guard let r4 = s4.visualSelectionRange, (s4.serializeBuffer() as NSString).substring(with: r4) == "first, second" else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "vi[ mismatch"])
+    }
+
+    // 5. vi<
+    let s5 = VimSession(initialText: "Array<String>")
+    s5.setCursor(line: 1, byteCol: 8)
+    s5.feedKeys("v")
+    s5.feedKeys("i")
+    s5.feedKeys("<")
+    guard let r5 = s5.visualSelectionRange, (s5.serializeBuffer() as NSString).substring(with: r5) == "String" else {
+        throw NSError(domain: "EngineTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "vi< mismatch"])
+    }
+
+    // 6. vi{ and viB
+    let s6 = VimSession(initialText: "function() { doTask(); }")
+    s6.setCursor(line: 1, byteCol: 16)
+    s6.feedKeys("v")
+    s6.feedKeys("i")
+    s6.feedKeys("{")
+    guard let r6 = s6.visualSelectionRange, (s6.serializeBuffer() as NSString).substring(with: r6) == " doTask(); " else {
+        throw NSError(domain: "EngineTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "vi{ mismatch"])
+    }
+
+    s6.feedKeys("\u{1b}")
+    s6.setCursor(line: 1, byteCol: 16)
+    s6.feedKeys("v")
+    s6.feedKeys("i")
+    s6.feedKeys("B")
+    guard let r6B = s6.visualSelectionRange, (s6.serializeBuffer() as NSString).substring(with: r6B) == " doTask(); " else {
+        throw NSError(domain: "EngineTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "viB mismatch"])
+    }
+}
+
+func testVimSessionSearchAndNavigation() throws {
+    let session = VimSession(initialText: "target one\nsecond target\ntarget three")
+
+    // Stream /target\r
+    let searchInput = "/target\r"
+    for ch in searchInput {
+        session.feedKeys(String(ch))
+    }
+
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Mode should return to NORMAL after <CR>"])
+    }
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Search match 1 mismatch: \(session.cursorPosition)"])
+    }
+    guard session.lastSearchPattern == "target" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "lastSearchPattern mismatch: \(String(describing: session.lastSearchPattern))"])
+    }
+
+    // n -> next match at line 2, col 8
+    session.searchNext()
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 8 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "n match 2 mismatch: \(session.cursorPosition)"])
+    }
+
+    // n -> next match at line 3, col 1
+    session.searchNext()
+    guard session.cursorPosition.line == 3 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "n match 3 mismatch: \(session.cursorPosition)"])
+    }
+
+    // n -> wrap around to line 1, col 1
+    session.searchNext()
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "n wrap mismatch: \(session.cursorPosition)"])
+    }
+
+    // N -> backward to line 3, col 1
+    session.searchPrevious()
+    guard session.cursorPosition.line == 3 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "N backwards mismatch: \(session.cursorPosition)"])
+    }
+}
+
+func testVimSessionExCommandsAndZZ() throws {
+    let session = VimSession(initialText: "foo apple foo\nsecond line foo")
+
+    // 1. Stream :%s/foo/bar/g\r
+    let subCmd = ":%s/foo/bar/g\r"
+    for ch in subCmd {
+        session.feedKeys(String(ch))
+    }
+    guard session.serializeBuffer() == "bar apple bar\nsecond line bar" else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Streaming :%s failed: \(session.serializeBuffer())"])
+    }
+
+    // 2. Stream :w\r
+    var actions: [VimSystemAction] = []
+    session.onSystemAction = { act in actions.append(act) }
+    for ch in ":w\r" {
+        session.feedKeys(String(ch))
+    }
+    guard actions.contains(VIM_ACTION_SAVE) else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_ACTION_SAVE"])
+    }
+    session.clearPendingAction()
+    actions.removeAll()
+
+    // 3. Stream :w!\r
+    for ch in ":w!\r" {
+        session.feedKeys(String(ch))
+    }
+    guard actions.contains(VIM_ACTION_SAVE_FORCE) else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_ACTION_SAVE_FORCE"])
+    }
+    session.clearPendingAction()
+    actions.removeAll()
+
+    // 4. Stream ZZ character-by-character
+    session.feedKeys("Z")
+    guard !session.shouldQuit else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Single 'Z' should not quit"])
+    }
+    session.feedKeys("Z")
+    guard session.shouldQuit else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "'ZZ' should set shouldQuit"])
+    }
+
+    // 5. Ex command :ZZ
+    let cleanSession = VimSession(initialText: "clean")
+    cleanSession.executeEx("ZZ")
+    guard cleanSession.shouldQuit else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: ":ZZ should set shouldQuit"])
+    }
+}
+
+func testVimSessionCore8020Commands() throws {
+    let text = "alpha beta gamma\none two three\nfoo bar baz"
+    let session = VimSession(initialText: text)
+
+    // 1. Navigation: 0, ^, $, w, b, e, ge, f, t, counts
+    session.setCursor(line: 1, byteCol: 10)
+    session.feedKeys("0")
+    guard session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "'0' motion failed"])
+    }
+    session.feedKeys("$")
+    guard session.cursorPosition.byteCol == 16 else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "'$' motion failed"])
+    }
+    session.feedKeys("b")
+    guard session.cursorPosition.byteCol == 12 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "'b' motion failed"])
+    }
+    session.feedKeys("e")
+    guard session.cursorPosition.byteCol == 16 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "'e' motion failed"])
+    }
+    session.feedKeys("w")
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "'w' motion to next line failed"])
+    }
+
+    // Inline find 'b'
+    session.setCursor(line: 1, byteCol: 1)
+    session.feedKeys("f")
+    session.feedKeys("b")
+    guard session.cursorPosition.byteCol == 7 else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "'fb' motion failed"])
+    }
+
+    // Counts: 2j
+    session.feedKeys("2")
+    session.feedKeys("j")
+    guard session.cursorPosition.line == 3 else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "'2j' motion failed"])
+    }
+
+    // 2. Operators: dd, p
+    session.setCursor(line: 2, byteCol: 1)
+    session.feedKeys("d")
+    session.feedKeys("d")
+    guard session.serializeBuffer() == "alpha beta gamma\nfoo bar baz" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "'dd' failed: \(session.serializeBuffer())"])
+    }
+    session.feedKeys("p")
+    guard session.serializeBuffer() == "alpha beta gamma\nfoo bar baz\none two three" else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "'p' paste failed: \(session.serializeBuffer())"])
+    }
+
+    // 3. dw, r<char>, x, s, J
+    let s2 = VimSession(initialText: "word1 word2\nline2")
+    s2.feedKeys("d")
+    s2.feedKeys("w")
+    guard s2.serializeBuffer() == "word2\nline2" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "'dw' failed"])
+    }
+    s2.feedKeys("r")
+    s2.feedKeys("W")
+    guard s2.serializeBuffer() == "Word2\nline2" else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "'r' failed"])
+    }
+    s2.feedKeys("x")
+    guard s2.serializeBuffer() == "ord2\nline2" else {
+        throw NSError(domain: "EngineTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "'x' failed"])
+    }
+    s2.feedKeys("J")
+    guard s2.serializeBuffer() == "ord2 line2" else {
+        throw NSError(domain: "EngineTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "'J' failed"])
+    }
+}
+
+func testVimSessionEscCancellation() throws {
+    let session = VimSession(initialText: "Line 1\nLine 2\nLine 3")
+    session.setCursor(line: 2, byteCol: 1)
+
+    // Cancel pending 'g'
+    session.feedKeys("g")
+    session.feedKeys("\u{1b}")
+    session.feedKeys("g")
+    guard session.cursorPosition.line == 2 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Pending 'g' was not cancelled"])
+    }
+    session.feedKeys("\u{1b}")
+
+    // Cancel pending operator 'd'
+    session.feedKeys("d")
+    session.feedKeys("\u{1b}")
+    session.feedKeys("d")
+    guard session.serializeBuffer() == "Line 1\nLine 2\nLine 3" else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Pending 'd' was not cancelled"])
+    }
+    session.feedKeys("\u{1b}")
+
+    // Cancel count
+    session.feedKeys("5")
+    session.feedKeys("\u{1b}")
+    session.feedKeys("j")
+    guard session.cursorPosition.line == 3 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Count was not cancelled"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -385,7 +709,13 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionInsertModeLineMutations", testVimSessionInsertModeLineMutations),
     ("testVimSessionQuitVariations", testVimSessionQuitVariations),
     ("testVimSessionSystemActionsAndErrors", testVimSessionSystemActionsAndErrors),
-    ("testVimSessionSetCursorAndModeNotifications", testVimSessionSetCursorAndModeNotifications)
+    ("testVimSessionSetCursorAndModeNotifications", testVimSessionSetCursorAndModeNotifications),
+    ("testVimSessionStreamingGGAndG", testVimSessionStreamingGGAndG),
+    ("testVimSessionVisualTextObjects", testVimSessionVisualTextObjects),
+    ("testVimSessionSearchAndNavigation", testVimSessionSearchAndNavigation),
+    ("testVimSessionExCommandsAndZZ", testVimSessionExCommandsAndZZ),
+    ("testVimSessionCore8020Commands", testVimSessionCore8020Commands),
+    ("testVimSessionEscCancellation", testVimSessionEscCancellation)
 ]
 
 for (name, test) in tests {

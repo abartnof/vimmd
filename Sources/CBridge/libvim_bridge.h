@@ -59,9 +59,16 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command);
 VimEngineMode vim_context_get_mode(VimContextRef ctx);
 VimBytePos vim_context_get_cursor(VimContextRef ctx);
 void vim_context_set_cursor(VimContextRef ctx, int32_t line, int32_t byteCol);
+VimBytePos vim_context_get_visual_anchor(VimContextRef ctx);
+void vim_context_set_visual_anchor(VimContextRef ctx, int32_t line, int32_t byteCol);
+bool vim_context_is_visual_linewise(VimContextRef ctx);
 bool vim_context_is_dirty(VimContextRef ctx);
 void vim_context_clear_dirty(VimContextRef ctx);
 bool vim_context_should_quit(VimContextRef ctx);
+
+// Search State
+const char* vim_context_get_last_search(VimContextRef ctx);
+void vim_context_set_last_search(VimContextRef ctx, const char *pattern);
 
 // System Actions & Error State
 VimSystemAction vim_context_get_pending_action(VimContextRef ctx);

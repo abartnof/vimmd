@@ -617,6 +617,64 @@ func testTextViewCaretAlignmentMatchesRawOffsets() throws {
     }
 }
 
+func testTextViewVisualTextObjectSelection() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "let value = 'highlighted text';")
+    textView.session = session
+
+    // Position cursor inside single quotes
+    session.setCursor(line: 1, byteCol: 18)
+    textView.synchronizeCaretWithSession()
+
+    // Feed 'v', 'i', '\''
+    session.feedKeys("v")
+    session.feedKeys("i")
+    session.feedKeys("'")
+    textView.synchronizeCaretWithSession()
+
+    guard session.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected Visual mode"])
+    }
+    let selected = textView.selectedRange()
+    guard selected.location != NSNotFound && selected.length == 16 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected selection length 16 for 'highlighted text', got \(selected)"])
+    }
+    let sub = (textView.string as NSString).substring(with: selected)
+    guard sub == "highlighted text" else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Selected text mismatch: '\(sub)'"])
+    }
+}
+
+func testTextViewSearchKeyNavigation() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "first target\nsecond target\nthird target")
+    textView.session = session
+
+    // Send '/' via keyDown
+    let eventSlash = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "/", charactersIgnoringModifiers: "/", isARepeat: false, keyCode: 44)!
+    textView.keyDown(with: eventSlash)
+    guard session.mode == VIM_MODE_COMMAND else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected Command mode after '/'"])
+    }
+
+    // Type 't', 'a', 'r', 'g', 'e', 't', '\r'
+    let eventWord = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "target\r", charactersIgnoringModifiers: "target\r", isARepeat: false, keyCode: 36)!
+    textView.keyDown(with: eventWord)
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected Normal mode after Return"])
+    }
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 7 else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cursor mismatch after search: \(session.cursorPosition)"])
+    }
+
+    // Press 'n' via keyDown
+    let eventN = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "n", charactersIgnoringModifiers: "n", isARepeat: false, keyCode: 45)!
+    textView.keyDown(with: eventN)
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 8 else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Cursor mismatch after 'n': \(session.cursorPosition)"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -642,7 +700,9 @@ let tests: [(String, () throws -> Void)] = [
     ("testCaretAutoScrollInvocation", testCaretAutoScrollInvocation),
     ("testResponsiveTypingInInsertModeMarkdownStyling", testResponsiveTypingInInsertModeMarkdownStyling),
     ("testScrollWheelForwarding", testScrollWheelForwarding),
-    ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets)
+    ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets),
+    ("testTextViewVisualTextObjectSelection", testTextViewVisualTextObjectSelection),
+    ("testTextViewSearchKeyNavigation", testTextViewSearchKeyNavigation)
 ]
 
 for (name, test) in tests {

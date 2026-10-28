@@ -113,6 +113,69 @@ public final class VimSession {
         return lineIndexTable.documentUtf16Offset(line: pos.line, vimByteCol: pos.byteCol)
     }
 
+    public var visualAnchor: VimBytePos {
+        guard let ctx = context else { return VimBytePos(line: 1, byteCol: 1) }
+        return vim_context_get_visual_anchor(ctx)
+    }
+
+    public var visualAnchorPosition: (line: Int, byteCol: Int) {
+        let a = visualAnchor
+        return (Int(a.line), Int(a.byteCol))
+    }
+
+    public var isVisualLinewise: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_is_visual_linewise(ctx)
+    }
+
+    public var visualSelectionRange: NSRange? {
+        guard mode == VIM_MODE_VISUAL else { return nil }
+        let aPos = visualAnchorPosition
+        let cPos = cursorPosition
+
+        if isVisualLinewise {
+            let startLine = min(aPos.line, cPos.line)
+            let endLine = max(aPos.line, cPos.line)
+            return lineIndexTable.characterRange(startLine: startLine, count: endLine - startLine + 1)
+        }
+
+        let aOffset = lineIndexTable.documentUtf16Offset(line: aPos.line, vimByteCol: aPos.byteCol)
+        let cOffset = lineIndexTable.documentUtf16Offset(line: cPos.line, vimByteCol: cPos.byteCol)
+
+        let docLength = lineIndexTable.totalUtf16Length
+        if aPos.line == cPos.line && aPos.byteCol > cPos.byteCol {
+            // Empty inner text object (e.g. "")
+            let clampedLoc = min(max(0, aOffset), docLength)
+            return NSRange(location: clampedLoc, length: 0)
+        }
+
+        let start = min(aOffset, cOffset)
+        let end = max(aOffset, cOffset)
+        let length = max(0, end - start + 1)
+        let clampedStart = min(max(0, start), docLength)
+        let clampedLength = min(length, max(0, docLength - clampedStart))
+        return NSRange(location: clampedStart, length: clampedLength)
+    }
+
+    public var lastSearchPattern: String? {
+        guard let ctx = context else { return nil }
+        guard let cStr = vim_context_get_last_search(ctx) else { return nil }
+        let s = String(cString: cStr)
+        return s.isEmpty ? nil : s
+    }
+
+    public func searchForward(_ pattern: String) {
+        feedKeys("/" + pattern + "\r")
+    }
+
+    public func searchNext() {
+        feedKeys("n")
+    }
+
+    public func searchPrevious() {
+        feedKeys("N")
+    }
+
     public var shouldQuit: Bool {
         guard let ctx = context else { return false }
         return vim_context_should_quit(ctx)

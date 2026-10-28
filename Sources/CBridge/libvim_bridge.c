@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <regex.h>
 
 struct VimDocumentContext {
     char **lines;
@@ -10,12 +11,29 @@ struct VimDocumentContext {
     size_t line_capacity;
     VimEngineMode mode;
     VimBytePos cursor;
+    VimBytePos visual_anchor;
+    bool visual_is_linewise;
     bool is_dirty;
     bool should_quit;
     VimSystemAction pending_action;
     char last_error[256];
     char cmd_buf[512];
     size_t cmd_len;
+    char last_search[256];
+    bool is_search_cmd;
+
+    // Multi-key & pending state
+    char pending_leader;
+    char pending_operator;
+    char pending_find;
+    char pending_replace;
+    char pending_text_object;
+    int count_accumulator;
+
+    // Yank register
+    char *yank_buffer;
+    bool yank_is_linewise;
+
     VimLineDeltaCallback delta_cb;
     void *user_info;
 
@@ -130,12 +148,25 @@ VimContextRef vim_context_create(const char *initial_utf8) {
     ctx->mode_state = (int)VIM_MODE_NORMAL;
     ctx->cursor.line = 1;
     ctx->cursor.byteCol = 1;
+    ctx->visual_anchor.line = 1;
+    ctx->visual_anchor.byteCol = 1;
+    ctx->visual_is_linewise = false;
     ctx->is_dirty = false;
     ctx->should_quit = false;
     ctx->pending_action = VIM_ACTION_NONE;
     ctx->last_error[0] = '\0';
     ctx->cmd_buf[0] = '\0';
     ctx->cmd_len = 0;
+    ctx->last_search[0] = '\0';
+    ctx->is_search_cmd = false;
+    ctx->pending_leader = 0;
+    ctx->pending_operator = 0;
+    ctx->pending_find = 0;
+    ctx->pending_replace = 0;
+    ctx->pending_text_object = 0;
+    ctx->count_accumulator = 0;
+    ctx->yank_buffer = NULL;
+    ctx->yank_is_linewise = false;
 
     if (!initial_utf8 || strlen(initial_utf8) == 0) {
         if (!ensure_line_capacity(ctx, 1)) {
@@ -145,7 +176,6 @@ VimContextRef vim_context_create(const char *initial_utf8) {
         ctx->lines[0] = duplicate_string("");
         ctx->line_count = 1;
     } else {
-        // Split by \n, stripping any \r
         const char *p = initial_utf8;
         const char *line_start = p;
 
@@ -176,7 +206,6 @@ VimContextRef vim_context_create(const char *initial_utf8) {
             p++;
         }
 
-        // Final line after last \n
         size_t len = p - line_start;
         if (len > 0 && line_start[len - 1] == '\r') {
             len--;
@@ -210,6 +239,10 @@ void vim_context_destroy(VimContextRef ctx) {
     if (g_active_ctx == ctx) {
         g_active_ctx = NULL;
     }
+    if (ctx->yank_buffer) {
+        free(ctx->yank_buffer);
+        ctx->yank_buffer = NULL;
+    }
     free_lines(ctx->lines, ctx->line_count);
     free(ctx);
 }
@@ -232,6 +265,36 @@ void vim_context_set_cursor(VimContextRef ctx, int32_t line, int32_t byteCol) {
     ctx->cursor.line = line;
     ctx->cursor.byteCol = byteCol;
     clamp_cursor(ctx);
+}
+
+VimBytePos vim_context_get_visual_anchor(VimContextRef ctx) {
+    if (!ctx) {
+        VimBytePos def = { .line = 1, .byteCol = 1 };
+        return def;
+    }
+    return ctx->visual_anchor;
+}
+
+void vim_context_set_visual_anchor(VimContextRef ctx, int32_t line, int32_t byteCol) {
+    if (!ctx) return;
+    ctx->visual_anchor.line = line;
+    ctx->visual_anchor.byteCol = byteCol;
+}
+
+bool vim_context_is_visual_linewise(VimContextRef ctx) {
+    if (!ctx) return false;
+    return ctx->visual_is_linewise;
+}
+
+const char* vim_context_get_last_search(VimContextRef ctx) {
+    if (!ctx || ctx->last_search[0] == '\0') return NULL;
+    return ctx->last_search;
+}
+
+void vim_context_set_last_search(VimContextRef ctx, const char *pattern) {
+    if (!ctx || !pattern) return;
+    strncpy(ctx->last_search, pattern, sizeof(ctx->last_search) - 1);
+    ctx->last_search[sizeof(ctx->last_search) - 1] = '\0';
 }
 
 bool vim_context_is_dirty(VimContextRef ctx) {
@@ -293,6 +356,560 @@ static void emit_line_delta(struct VimDocumentContext *ctx, int32_t startLine, i
     }
 }
 
+// MARK: - Word Category & Motions
+static inline bool is_word_char(char c) {
+    return (isalnum((unsigned char)c) || c == '_');
+}
+
+static inline int char_category(char c) {
+    if (c == ' ' || c == '\t' || c == '\0' || c == '\r' || c == '\n') return 0; // whitespace
+    if (is_word_char(c)) return 1; // word
+    return 2; // punctuation
+}
+
+static void motion_caret(struct VimDocumentContext *ctx) {
+    if (ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return;
+    const char *line = ctx->lines[ctx->cursor.line - 1];
+    size_t c = 0;
+    while (line[c] == ' ' || line[c] == '\t') c++;
+    ctx->cursor.byteCol = (line[c] != '\0') ? (int32_t)(c + 1) : 1;
+}
+
+static void motion_dollar(struct VimDocumentContext *ctx) {
+    if (ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return;
+    size_t len = strlen(ctx->lines[ctx->cursor.line - 1]);
+    ctx->cursor.byteCol = len > 0 ? (int32_t)len : 1;
+}
+
+static void motion_G(struct VimDocumentContext *ctx, int target_line) {
+    if (target_line < 1 || (size_t)target_line > ctx->line_count) {
+        target_line = (int)ctx->line_count;
+    }
+    ctx->cursor.line = target_line;
+    motion_caret(ctx);
+    clamp_cursor(ctx);
+}
+
+static void motion_w(struct VimDocumentContext *ctx, int count) {
+    for (int rep = 0; rep < count; rep++) {
+        if ((size_t)ctx->cursor.line > ctx->line_count) break;
+        const char *line = ctx->lines[ctx->cursor.line - 1];
+        size_t len = strlen(line);
+        size_t idx = (ctx->cursor.byteCol > 0) ? (size_t)(ctx->cursor.byteCol - 1) : 0;
+
+        if (idx >= len) {
+            // At or past end of line, advance to next line
+            if ((size_t)ctx->cursor.line < ctx->line_count) {
+                ctx->cursor.line++;
+                line = ctx->lines[ctx->cursor.line - 1];
+                len = strlen(line);
+                idx = 0;
+                while (idx < len && (line[idx] == ' ' || line[idx] == '\t')) idx++;
+                ctx->cursor.byteCol = (int32_t)(idx + 1);
+            }
+            continue;
+        }
+
+        int cat = char_category(line[idx]);
+        if (cat != 0) {
+            while (idx < len && char_category(line[idx]) == cat) idx++;
+        }
+        while (idx < len && char_category(line[idx]) == 0) idx++;
+
+        if (idx >= len) {
+            if ((size_t)ctx->cursor.line < ctx->line_count) {
+                ctx->cursor.line++;
+                line = ctx->lines[ctx->cursor.line - 1];
+                len = strlen(line);
+                idx = 0;
+                while (idx < len && (line[idx] == ' ' || line[idx] == '\t')) idx++;
+                ctx->cursor.byteCol = (int32_t)(idx + 1);
+            } else {
+                ctx->cursor.byteCol = len > 0 ? (int32_t)len : 1;
+            }
+        } else {
+            ctx->cursor.byteCol = (int32_t)(idx + 1);
+        }
+    }
+    clamp_cursor(ctx);
+}
+
+static void motion_b(struct VimDocumentContext *ctx, int count) {
+    for (int rep = 0; rep < count; rep++) {
+        if (ctx->cursor.line == 1 && ctx->cursor.byteCol <= 1) break;
+        size_t line_idx = (size_t)(ctx->cursor.line - 1);
+        const char *line = ctx->lines[line_idx];
+        size_t idx = (ctx->cursor.byteCol > 1) ? (size_t)(ctx->cursor.byteCol - 2) : 0;
+
+        if (ctx->cursor.byteCol <= 1) {
+            if (ctx->cursor.line > 1) {
+                ctx->cursor.line--;
+                line = ctx->lines[ctx->cursor.line - 1];
+                size_t len = strlen(line);
+                ctx->cursor.byteCol = len > 0 ? (int32_t)len : 1;
+            }
+            continue;
+        }
+
+        while (idx > 0 && char_category(line[idx]) == 0) idx--;
+        int cat = char_category(line[idx]);
+        while (idx > 0 && char_category(line[idx - 1]) == cat) idx--;
+
+        ctx->cursor.byteCol = (int32_t)(idx + 1);
+    }
+    clamp_cursor(ctx);
+}
+
+static void motion_e(struct VimDocumentContext *ctx, int count) {
+    for (int rep = 0; rep < count; rep++) {
+        if ((size_t)ctx->cursor.line > ctx->line_count) break;
+        const char *line = ctx->lines[ctx->cursor.line - 1];
+        size_t len = strlen(line);
+        size_t idx = (size_t)(ctx->cursor.byteCol - 1);
+
+        if (idx + 1 < len) {
+            idx++;
+        } else if ((size_t)ctx->cursor.line < ctx->line_count) {
+            ctx->cursor.line++;
+            line = ctx->lines[ctx->cursor.line - 1];
+            len = strlen(line);
+            idx = 0;
+        } else {
+            break;
+        }
+
+        while (idx < len && char_category(line[idx]) == 0) idx++;
+        if (idx < len) {
+            int cat = char_category(line[idx]);
+            while (idx + 1 < len && char_category(line[idx + 1]) == cat) idx++;
+        }
+        ctx->cursor.byteCol = (int32_t)(idx + 1);
+    }
+    clamp_cursor(ctx);
+}
+
+static void motion_ge(struct VimDocumentContext *ctx, int count) {
+    for (int rep = 0; rep < count; rep++) {
+        if (ctx->cursor.line == 1 && ctx->cursor.byteCol <= 1) break;
+        if (ctx->cursor.byteCol <= 1) {
+            if (ctx->cursor.line > 1) {
+                ctx->cursor.line--;
+                const char *line = ctx->lines[ctx->cursor.line - 1];
+                size_t len = strlen(line);
+                ctx->cursor.byteCol = len > 0 ? (int32_t)len : 1;
+            }
+            continue;
+        }
+
+        const char *line = ctx->lines[ctx->cursor.line - 1];
+        size_t idx = (size_t)(ctx->cursor.byteCol - 2);
+
+        // If currently in a word, skip to preceding non-word or start
+        while (idx > 0 && char_category(line[idx]) != 0) idx--;
+        while (idx > 0 && char_category(line[idx]) == 0) idx--;
+
+        ctx->cursor.byteCol = (int32_t)(idx + 1);
+    }
+    clamp_cursor(ctx);
+}
+
+static void motion_find(struct VimDocumentContext *ctx, char target, bool till) {
+    if (ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return;
+    const char *line = ctx->lines[ctx->cursor.line - 1];
+    size_t len = strlen(line);
+    size_t start = (size_t)ctx->cursor.byteCol; // 0-based index of character after cursor
+
+    for (size_t i = start; i < len; i++) {
+        if (line[i] == target) {
+            if (till) {
+                ctx->cursor.byteCol = (i > 0) ? (int32_t)i : 1;
+            } else {
+                ctx->cursor.byteCol = (int32_t)(i + 1);
+            }
+            break;
+        }
+    }
+    clamp_cursor(ctx);
+}
+
+// MARK: - Search Engine
+static bool search_line_forward(const char *line, const char *pattern, size_t start_col, size_t *out_col) {
+    if (!line || !pattern) return false;
+    size_t line_len = strlen(line);
+    if (start_col >= line_len) return false;
+
+    regex_t re;
+    if (regcomp(&re, pattern, REG_EXTENDED) == 0) {
+        regmatch_t pmatch;
+        size_t cur = start_col;
+        bool found = false;
+        while (cur < line_len) {
+            if (regexec(&re, line + cur, 1, &pmatch, 0) == 0 && pmatch.rm_so != -1) {
+                *out_col = cur + pmatch.rm_so;
+                found = true;
+                break;
+            }
+            cur++;
+        }
+        regfree(&re);
+        return found;
+    } else {
+        const char *sub = strstr(line + start_col, pattern);
+        if (sub) {
+            *out_col = (size_t)(sub - line);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vim_search_forward(struct VimDocumentContext *ctx, const char *pattern, bool advance_first) {
+    if (!ctx || !pattern || strlen(pattern) == 0) return false;
+    size_t cur_line = (size_t)ctx->cursor.line;
+    size_t cur_col = (size_t)(ctx->cursor.byteCol - 1);
+    if (advance_first) cur_col++;
+
+    // 1. Search from current line/col to end of buffer
+    for (size_t l = cur_line; l <= ctx->line_count; l++) {
+        size_t start = (l == cur_line) ? cur_col : 0;
+        size_t match_col = 0;
+        if (search_line_forward(ctx->lines[l - 1], pattern, start, &match_col)) {
+            ctx->cursor.line = (int32_t)l;
+            ctx->cursor.byteCol = (int32_t)(match_col + 1);
+            clamp_cursor(ctx);
+            return true;
+        }
+    }
+
+    // 2. Wrap around from line 1 to cur_line
+    for (size_t l = 1; l <= cur_line; l++) {
+        size_t match_col = 0;
+        if (search_line_forward(ctx->lines[l - 1], pattern, 0, &match_col)) {
+            if (l == cur_line && match_col >= cur_col) break; // Don't match past where we started
+            ctx->cursor.line = (int32_t)l;
+            ctx->cursor.byteCol = (int32_t)(match_col + 1);
+            clamp_cursor(ctx);
+            return true;
+        }
+    }
+
+    snprintf(ctx->last_error, sizeof(ctx->last_error), "E486: Pattern not found: %s", pattern);
+    return false;
+}
+
+static bool search_line_backward(const char *line, const char *pattern, size_t max_col, size_t *out_col) {
+    if (!line || !pattern) return false;
+    size_t line_len = strlen(line);
+    if (line_len == 0) return false;
+
+    regex_t re;
+    bool found = false;
+    size_t best = 0;
+
+    if (regcomp(&re, pattern, REG_EXTENDED) == 0) {
+        regmatch_t pmatch;
+        size_t cur = 0;
+        while (cur < line_len) {
+            if (regexec(&re, line + cur, 1, &pmatch, 0) == 0 && pmatch.rm_so != -1) {
+                size_t m = cur + pmatch.rm_so;
+                if (m <= max_col) {
+                    best = m;
+                    found = true;
+                }
+                cur = m + 1;
+            } else {
+                break;
+            }
+        }
+        regfree(&re);
+    } else {
+        const char *sub = line;
+        while ((sub = strstr(sub, pattern)) != NULL) {
+            size_t m = (size_t)(sub - line);
+            if (m <= max_col) {
+                best = m;
+                found = true;
+            }
+            sub += 1;
+        }
+    }
+
+    if (found) {
+        *out_col = best;
+        return true;
+    }
+    return false;
+}
+
+static bool vim_search_backward(struct VimDocumentContext *ctx, const char *pattern) {
+    if (!ctx || !pattern || strlen(pattern) == 0) return false;
+    size_t cur_line = (size_t)ctx->cursor.line;
+    size_t cur_col = (ctx->cursor.byteCol > 1) ? (size_t)(ctx->cursor.byteCol - 2) : 0;
+
+    // 1. Search backwards on current line
+    if (ctx->cursor.byteCol > 1) {
+        size_t match_col = 0;
+        if (search_line_backward(ctx->lines[cur_line - 1], pattern, cur_col, &match_col)) {
+            ctx->cursor.line = (int32_t)cur_line;
+            ctx->cursor.byteCol = (int32_t)(match_col + 1);
+            clamp_cursor(ctx);
+            return true;
+        }
+    }
+
+    // 2. Search backwards from cur_line - 1 down to 1
+    if (cur_line > 1) {
+        for (size_t l = cur_line - 1; l >= 1; l--) {
+            size_t len = strlen(ctx->lines[l - 1]);
+            size_t max_c = len > 0 ? len - 1 : 0;
+            size_t match_col = 0;
+            if (search_line_backward(ctx->lines[l - 1], pattern, max_c, &match_col)) {
+                ctx->cursor.line = (int32_t)l;
+                ctx->cursor.byteCol = (int32_t)(match_col + 1);
+                clamp_cursor(ctx);
+                return true;
+            }
+        }
+    }
+
+    // 3. Wrap around from line_count down to cur_line
+    for (size_t l = ctx->line_count; l >= cur_line; l--) {
+        size_t len = strlen(ctx->lines[l - 1]);
+        size_t max_c = len > 0 ? len - 1 : 0;
+        if (l == cur_line) {
+            if (ctx->cursor.byteCol <= 1) break;
+            max_c = cur_col;
+        }
+        size_t match_col = 0;
+        if (search_line_backward(ctx->lines[l - 1], pattern, max_c, &match_col)) {
+            ctx->cursor.line = (int32_t)l;
+            ctx->cursor.byteCol = (int32_t)(match_col + 1);
+            clamp_cursor(ctx);
+            return true;
+        }
+    }
+
+    snprintf(ctx->last_error, sizeof(ctx->last_error), "E486: Pattern not found: %s", pattern);
+    return false;
+}
+
+// MARK: - Visual Text Objects
+static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim) {
+    if (!ctx || ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return false;
+
+    if (delim == '\'' || delim == '"') {
+        const char *line = ctx->lines[ctx->cursor.line - 1];
+        size_t len = strlen(line);
+        if (len < 2) return false;
+
+        size_t cur = (size_t)(ctx->cursor.byteCol - 1);
+        int open_idx = -1;
+        int close_idx = -1;
+
+        // Find pairs of quotes on this line
+        int first_q = -1;
+        for (size_t i = 0; i < len; i++) {
+            if (line[i] == delim) {
+                if (first_q == -1) {
+                    first_q = (int)i;
+                } else {
+                    int p_open = first_q;
+                    int p_close = (int)i;
+                    first_q = -1;
+
+                    // If cursor is within or adjacent to this pair
+                    if ((int)cur >= p_open && (int)cur <= p_close) {
+                        open_idx = p_open;
+                        close_idx = p_close;
+                        break;
+                    }
+                    // If cursor is before this pair and we don't have one yet
+                    if ((int)cur < p_open && open_idx == -1) {
+                        open_idx = p_open;
+                        close_idx = p_close;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (open_idx != -1 && close_idx != -1) {
+            int32_t line_num = ctx->cursor.line;
+            int32_t inner_start = open_idx + 2; // 1-based col of first inner char
+            int32_t inner_end = close_idx;     // 1-based col of last inner char
+
+            if (inner_start > inner_end) {
+                // Empty string "" or ''
+                ctx->visual_anchor.line = line_num;
+                ctx->visual_anchor.byteCol = inner_start;
+                ctx->cursor.line = line_num;
+                ctx->cursor.byteCol = inner_start - 1;
+            } else {
+                ctx->visual_anchor.line = line_num;
+                ctx->visual_anchor.byteCol = inner_start;
+                ctx->cursor.line = line_num;
+                ctx->cursor.byteCol = inner_end;
+            }
+            clamp_cursor(ctx);
+            return true;
+        }
+        return false;
+    }
+
+    char open_ch = '(';
+    char close_ch = ')';
+    if (delim == '[' || delim == ']') {
+        open_ch = '['; close_ch = ']';
+    } else if (delim == '<' || delim == '>') {
+        open_ch = '<'; close_ch = '>';
+    } else if (delim == '{' || delim == '}' || delim == 'B') {
+        open_ch = '{'; close_ch = '}';
+    } else if (delim == '(' || delim == ')' || delim == 'b') {
+        open_ch = '('; close_ch = ')';
+    } else {
+        return false;
+    }
+
+    // Search backward from cursor for open_ch
+    int open_line = -1;
+    int open_col = -1;
+    int depth = 0;
+
+    for (int l = ctx->cursor.line; l >= 1; l--) {
+        const char *line = ctx->lines[l - 1];
+        size_t len = strlen(line);
+        int start = (l == ctx->cursor.line) ? (ctx->cursor.byteCol - 1) : ((int)len - 1);
+
+        for (int c = start; c >= 0; c--) {
+            if (line[c] == close_ch) {
+                depth++;
+            } else if (line[c] == open_ch) {
+                if (depth > 0) {
+                    depth--;
+                } else {
+                    open_line = l;
+                    open_col = c + 1; // 1-based
+                    goto found_open;
+                }
+            }
+        }
+    }
+
+    // If not found backward, try search forward on current line for first open_ch
+    {
+        const char *line = ctx->lines[ctx->cursor.line - 1];
+        size_t len = strlen(line);
+        for (size_t c = (size_t)(ctx->cursor.byteCol - 1); c < len; c++) {
+            if (line[c] == open_ch) {
+                open_line = ctx->cursor.line;
+                open_col = (int)(c + 1);
+                goto found_open;
+            }
+        }
+    }
+
+found_open:
+    if (open_line == -1) return false;
+
+    // Search forward from open_line, open_col for matching close_ch
+    int close_line = -1;
+    int close_col = -1;
+    depth = 1;
+
+    for (size_t l = (size_t)open_line; l <= ctx->line_count; l++) {
+        const char *line = ctx->lines[l - 1];
+        size_t len = strlen(line);
+        size_t start = (l == (size_t)open_line) ? (size_t)open_col : 0;
+
+        for (size_t c = start; c < len; c++) {
+            if (line[c] == open_ch) {
+                depth++;
+            } else if (line[c] == close_ch) {
+                depth--;
+                if (depth == 0) {
+                    close_line = (int)l;
+                    close_col = (int)(c + 1); // 1-based
+                    goto found_close;
+                }
+            }
+        }
+    }
+
+found_close:
+    if (close_line == -1) return false;
+
+    // Inner range
+    int32_t a_line = open_line;
+    int32_t a_col = open_col + 1;
+    int32_t c_line = close_line;
+    int32_t c_col = close_col - 1;
+
+    ctx->visual_anchor.line = a_line;
+    ctx->visual_anchor.byteCol = a_col;
+    ctx->cursor.line = c_line;
+    ctx->cursor.byteCol = c_col;
+    clamp_cursor(ctx);
+    return true;
+}
+
+// MARK: - Operators, Yank & Paste
+static void set_yank_buffer(struct VimDocumentContext *ctx, const char *str, bool linewise) {
+    if (!ctx) return;
+    if (ctx->yank_buffer) {
+        free(ctx->yank_buffer);
+        ctx->yank_buffer = NULL;
+    }
+    ctx->yank_buffer = duplicate_string(str ? str : "");
+    ctx->yank_is_linewise = linewise;
+}
+
+static void paste_text(struct VimDocumentContext *ctx, bool after) {
+    if (!ctx || !ctx->yank_buffer) return;
+
+    if (ctx->yank_is_linewise) {
+        int32_t insert_line = after ? ctx->cursor.line + 1 : ctx->cursor.line;
+        if (!ensure_line_capacity(ctx, ctx->line_count + 1)) return;
+
+        char *new_line = duplicate_string(ctx->yank_buffer);
+        if (!new_line) return;
+
+        size_t idx = (size_t)(insert_line - 1);
+        if (idx > ctx->line_count) idx = ctx->line_count;
+
+        memmove(&ctx->lines[idx + 1], &ctx->lines[idx], (ctx->line_count - idx) * sizeof(char *));
+        ctx->lines[idx] = new_line;
+        ctx->line_count++;
+
+        ctx->cursor.line = insert_line;
+        ctx->cursor.byteCol = 1;
+        ctx->is_dirty = true;
+        emit_line_delta(ctx, insert_line, 0, 1);
+    } else {
+        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+        char *line = ctx->lines[l_idx];
+        size_t line_len = strlen(line);
+        size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+        if (after && line_len > 0) pos++;
+        if (pos > line_len) pos = line_len;
+
+        size_t y_len = strlen(ctx->yank_buffer);
+        char *new_line = (char *)malloc(line_len + y_len + 1);
+        if (!new_line) return;
+
+        memcpy(new_line, line, pos);
+        memcpy(new_line + pos, ctx->yank_buffer, y_len);
+        memcpy(new_line + pos + y_len, line + pos, line_len - pos + 1);
+
+        free(line);
+        ctx->lines[l_idx] = new_line;
+        ctx->cursor.byteCol = (int32_t)(pos + y_len);
+        ctx->is_dirty = true;
+        emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+    }
+    clamp_cursor(ctx);
+}
+
+// MARK: - Key Dispatch Loop
 void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
     if (!ctx || !keys) return;
     vim_activate_context(ctx);
@@ -300,12 +917,267 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
     const char *p = keys;
     while (*p) {
         if (ctx->mode == VIM_MODE_NORMAL) {
+            // 1. Global escape cancels pending leader, operator, find, replace, count
+            if (*p == '\x1b') {
+                ctx->pending_leader = 0;
+                ctx->pending_operator = 0;
+                ctx->pending_find = 0;
+                ctx->pending_replace = 0;
+                ctx->pending_text_object = 0;
+                ctx->count_accumulator = 0;
+                p++;
+                continue;
+            }
+
+            // 2. Pending find / till
+            if (ctx->pending_find != 0) {
+                bool till = (ctx->pending_find == 't');
+                motion_find(ctx, *p, till);
+                ctx->pending_find = 0;
+                ctx->count_accumulator = 0;
+                p++;
+                continue;
+            }
+
+            // 3. Pending replace (r<char>)
+            if (ctx->pending_replace != 0) {
+                size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                char *line = ctx->lines[l_idx];
+                size_t len = strlen(line);
+                if (len > 0 && (size_t)ctx->cursor.byteCol <= len) {
+                    line[ctx->cursor.byteCol - 1] = *p;
+                    ctx->is_dirty = true;
+                    emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                }
+                ctx->pending_replace = 0;
+                ctx->count_accumulator = 0;
+                p++;
+                continue;
+            }
+
+            // 4. Pending multi-key leader ('g' or 'Z')
+            if (ctx->pending_leader != 0) {
+                char leader = ctx->pending_leader;
+                ctx->pending_leader = 0;
+                if (leader == 'g') {
+                    if (*p == 'g') {
+                        int target = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                        ctx->cursor.line = target;
+                        ctx->cursor.byteCol = 1;
+                        ctx->count_accumulator = 0;
+                        clamp_cursor(ctx);
+                        p++;
+                        continue;
+                    } else if (*p == 'e') {
+                        int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                        motion_ge(ctx, count);
+                        ctx->count_accumulator = 0;
+                        p++;
+                        continue;
+                    }
+                    // Any other key cancelled 'g' leader, fall through to process *p normally
+                } else if (leader == 'Z') {
+                    if (*p == 'Z') {
+                        if (ctx->is_dirty) {
+                            ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
+                        } else {
+                            ctx->pending_action = VIM_ACTION_QUIT;
+                        }
+                        ctx->should_quit = true;
+                        p++;
+                        continue;
+                    } else if (*p == 'Q') {
+                        ctx->pending_action = VIM_ACTION_QUIT_FORCE;
+                        ctx->should_quit = true;
+                        p++;
+                        continue;
+                    }
+                    // Other key cancelled 'Z' leader
+                }
+            }
+
+            // 5. Pending operator ('d', 'y', 'c')
+            if (ctx->pending_operator != 0) {
+                char op = ctx->pending_operator;
+                ctx->pending_operator = 0;
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->count_accumulator = 0;
+
+                if (op == 'd') {
+                    if (*p == 'd') { // dd: delete line(s)
+                        size_t start_idx = (size_t)(ctx->cursor.line - 1);
+                        size_t del_count = (size_t)count;
+                        if (start_idx + del_count > ctx->line_count) {
+                            del_count = ctx->line_count - start_idx;
+                        }
+
+                        // Yank deleted line
+                        set_yank_buffer(ctx, ctx->lines[start_idx], true);
+
+                        for (size_t i = 0; i < del_count; i++) {
+                            free(ctx->lines[start_idx + i]);
+                        }
+                        memmove(&ctx->lines[start_idx], &ctx->lines[start_idx + del_count], (ctx->line_count - (start_idx + del_count)) * sizeof(char *));
+                        ctx->line_count -= del_count;
+
+                        if (ctx->line_count == 0) {
+                            ctx->lines[0] = duplicate_string("");
+                            ctx->line_count = 1;
+                            emit_line_delta(ctx, (int32_t)(start_idx + 1), (int32_t)del_count, 1);
+                        } else {
+                            emit_line_delta(ctx, (int32_t)(start_idx + 1), (int32_t)del_count, 0);
+                        }
+                        ctx->is_dirty = true;
+                        clamp_cursor(ctx);
+                        p++;
+                        continue;
+                    } else if (*p == 'w') { // dw: delete word
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+
+                        // Find end of word motion
+                        VimBytePos orig = ctx->cursor;
+                        motion_w(ctx, count);
+                        size_t end = (ctx->cursor.line == orig.line) ? (size_t)(ctx->cursor.byteCol - 1) : len;
+                        ctx->cursor = orig;
+
+                        if (end > start) {
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                            memmove(line + start, line + end, len - end + 1);
+                            ctx->is_dirty = true;
+                            clamp_cursor(ctx);
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                        p++;
+                        continue;
+                    } else if (*p == '$') { // d$: delete to end of line
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+                        set_yank_buffer(ctx, line + start, false);
+                        line[start] = '\0';
+                        ctx->is_dirty = true;
+                        clamp_cursor(ctx);
+                        emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        p++;
+                        continue;
+                    } else if (*p == '0') { // d0: delete to start of line
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t end = (size_t)(ctx->cursor.byteCol - 1);
+                        if (end > 0) {
+                            char *yanked = (char *)malloc(end + 1);
+                            if (yanked) {
+                                memcpy(yanked, line, end);
+                                yanked[end] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                            memmove(line, line + end, len - end + 1);
+                            ctx->cursor.byteCol = 1;
+                            ctx->is_dirty = true;
+                            clamp_cursor(ctx);
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                        p++;
+                        continue;
+                    }
+                } else if (op == 'y') {
+                    if (*p == 'y') { // yy: yank line
+                        set_yank_buffer(ctx, ctx->lines[ctx->cursor.line - 1], true);
+                        p++;
+                        continue;
+                    } else if (*p == 'w') { // yw: yank word
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        const char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+
+                        VimBytePos orig = ctx->cursor;
+                        motion_w(ctx, count);
+                        size_t end = (ctx->cursor.line == orig.line) ? (size_t)(ctx->cursor.byteCol - 1) : len;
+                        ctx->cursor = orig;
+
+                        if (end > start) {
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                        }
+                        p++;
+                        continue;
+                    } else if (*p == '$') { // y$: yank to end of line
+                        const char *line = ctx->lines[ctx->cursor.line - 1];
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+                        set_yank_buffer(ctx, line + start, false);
+                        p++;
+                        continue;
+                    }
+                } else if (op == 'c') {
+                    if (*p == 'c') { // cc: change line
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        free(ctx->lines[l_idx]);
+                        ctx->lines[l_idx] = duplicate_string("");
+                        ctx->cursor.byteCol = 1;
+                        ctx->mode = VIM_MODE_INSERT;
+                        ctx->is_dirty = true;
+                        emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        p++;
+                        continue;
+                    } else if (*p == 'w') { // cw: change word
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+
+                        VimBytePos orig = ctx->cursor;
+                        motion_e(ctx, count);
+                        size_t end = (ctx->cursor.line == orig.line) ? (size_t)ctx->cursor.byteCol : len;
+                        ctx->cursor = orig;
+
+                        if (end > start) {
+                            memmove(line + start, line + end, len - end + 1);
+                            ctx->mode = VIM_MODE_INSERT;
+                            ctx->is_dirty = true;
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                        p++;
+                        continue;
+                    }
+                }
+            }
+
+            // 6. Number count accumulator (1-9 or 0 if count > 0)
+            if ((*p >= '1' && *p <= '9') || (ctx->count_accumulator > 0 && *p == '0')) {
+                ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                p++;
+                continue;
+            }
+
+            // Resolve effective count for standard motions
+            int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+
+            // 7. Standard Normal Mode Keystrokes
             if (*p == 'i') {
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'I') {
                 ctx->cursor.byteCol = 1;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'a') {
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
@@ -313,22 +1185,18 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     ctx->cursor.byteCol++;
                 }
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'A') {
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
                 ctx->cursor.byteCol = (int32_t)line_len + 1;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'o') {
-                if (!ensure_line_capacity(ctx, ctx->line_count + 1)) {
-                    p++;
-                    continue;
-                }
+                if (!ensure_line_capacity(ctx, ctx->line_count + 1)) { p++; continue; }
                 char *new_line = duplicate_string("");
-                if (!new_line) {
-                    p++;
-                    continue;
-                }
+                if (!new_line) { p++; continue; }
                 int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)ctx->cursor.line;
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
@@ -338,18 +1206,13 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->cursor.byteCol = 1;
                 ctx->is_dirty = true;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 emit_line_delta(ctx, orig_line, 1, 2);
                 p++;
             } else if (*p == 'O') {
-                if (!ensure_line_capacity(ctx, ctx->line_count + 1)) {
-                    p++;
-                    continue;
-                }
+                if (!ensure_line_capacity(ctx, ctx->line_count + 1)) { p++; continue; }
                 char *new_line = duplicate_string("");
-                if (!new_line) {
-                    p++;
-                    continue;
-                }
+                if (!new_line) { p++; continue; }
                 int32_t orig_line = ctx->cursor.line;
                 size_t insert_idx = (size_t)(ctx->cursor.line - 1);
                 memmove(&ctx->lines[insert_idx + 1], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
@@ -358,83 +1221,196 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->cursor.byteCol = 1;
                 ctx->is_dirty = true;
                 ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
                 emit_line_delta(ctx, orig_line, 1, 2);
                 p++;
-            } else if (*p == 'v' || *p == 'V') {
+            } else if (*p == 'v') {
                 ctx->mode = VIM_MODE_VISUAL;
+                ctx->visual_anchor = ctx->cursor;
+                ctx->visual_is_linewise = false;
+                ctx->pending_text_object = 0;
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'V') {
+                ctx->mode = VIM_MODE_VISUAL;
+                ctx->visual_anchor = ctx->cursor;
+                ctx->visual_is_linewise = true;
+                ctx->pending_text_object = 0;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == ':') {
                 ctx->mode = VIM_MODE_COMMAND;
+                ctx->is_search_cmd = false;
                 ctx->cmd_len = 0;
                 ctx->cmd_buf[0] = '\0';
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == '/') {
+                ctx->mode = VIM_MODE_COMMAND;
+                ctx->is_search_cmd = true;
+                ctx->cmd_buf[0] = '/';
+                ctx->cmd_buf[1] = '\0';
+                ctx->cmd_len = 1;
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'n') {
+                if (ctx->last_search[0] != '\0') {
+                    vim_search_forward(ctx, ctx->last_search, true);
+                }
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'N') {
+                if (ctx->last_search[0] != '\0') {
+                    vim_search_backward(ctx, ctx->last_search);
+                }
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'h') {
-                if (ctx->cursor.byteCol > 1) ctx->cursor.byteCol--;
+                if (ctx->cursor.byteCol > count) ctx->cursor.byteCol -= count;
+                else ctx->cursor.byteCol = 1;
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'l') {
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
-                if ((size_t)ctx->cursor.byteCol < line_len) ctx->cursor.byteCol++;
+                ctx->cursor.byteCol += count;
+                if ((size_t)ctx->cursor.byteCol > line_len) {
+                    ctx->cursor.byteCol = line_len > 0 ? (int32_t)line_len : 1;
+                }
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'j') {
-                if ((size_t)ctx->cursor.line < ctx->line_count) {
-                    ctx->cursor.line++;
-                    clamp_cursor(ctx);
-                }
+                ctx->cursor.line += count;
+                clamp_cursor(ctx);
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'k') {
-                if (ctx->cursor.line > 1) {
-                    ctx->cursor.line--;
-                    clamp_cursor(ctx);
-                }
+                ctx->cursor.line -= count;
+                clamp_cursor(ctx);
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == '0') {
                 ctx->cursor.byteCol = 1;
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == '^') {
+                motion_caret(ctx);
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == '$') {
-                size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
-                ctx->cursor.byteCol = line_len > 0 ? (int32_t)line_len : 1;
+                motion_dollar(ctx);
+                ctx->count_accumulator = 0;
                 p++;
-            } else if (*p == 'G') {
-                ctx->cursor.line = (int32_t)ctx->line_count;
-                clamp_cursor(ctx);
+            } else if (*p == 'w') {
+                motion_w(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'b') {
+                motion_b(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'e') {
+                motion_e(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'f' || *p == 't') {
+                ctx->pending_find = *p;
+                p++;
+            } else if (*p == 'r') {
+                ctx->pending_replace = 'r';
                 p++;
             } else if (*p == 'g') {
-                if (*(p + 1) == 'g') {
-                    ctx->cursor.line = 1;
-                    ctx->cursor.byteCol = 1;
-                    p += 2;
-                } else {
-                    p++;
-                }
+                ctx->pending_leader = 'g';
+                p++;
+            } else if (*p == 'G') {
+                int target = (ctx->count_accumulator > 0) ? ctx->count_accumulator : (int)ctx->line_count;
+                motion_G(ctx, target);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'd') {
+                ctx->pending_operator = 'd';
+                p++;
+            } else if (*p == 'y') {
+                ctx->pending_operator = 'y';
+                p++;
+            } else if (*p == 'c') {
+                ctx->pending_operator = 'c';
+                p++;
+            } else if (*p == 'p') {
+                paste_text(ctx, true);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'P') {
+                paste_text(ctx, false);
+                ctx->count_accumulator = 0;
+                p++;
             } else if (*p == 'x') {
-                size_t line_idx = (size_t)(ctx->cursor.line - 1);
-                char *line = ctx->lines[line_idx];
+                size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                char *line = ctx->lines[l_idx];
                 size_t line_len = strlen(line);
                 if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
-                    size_t char_pos = (size_t)(ctx->cursor.byteCol - 1);
-                    memmove(&line[char_pos], &line[char_pos + 1], line_len - char_pos);
+                    size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+                    memmove(&line[pos], &line[pos + 1], line_len - pos);
                     ctx->is_dirty = true;
                     clamp_cursor(ctx);
                     emit_line_delta(ctx, ctx->cursor.line, 1, 1);
                 }
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 's') { // substitute char (delete char and enter insert)
+                size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                char *line = ctx->lines[l_idx];
+                size_t line_len = strlen(line);
+                if (line_len > 0 && (size_t)ctx->cursor.byteCol <= line_len) {
+                    size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+                    memmove(&line[pos], &line[pos + 1], line_len - pos);
+                    ctx->is_dirty = true;
+                    emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                }
+                ctx->mode = VIM_MODE_INSERT;
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'J') { // join lines
+                if ((size_t)ctx->cursor.line < ctx->line_count) {
+                    size_t idx1 = (size_t)(ctx->cursor.line - 1);
+                    size_t idx2 = idx1 + 1;
+                    char *line1 = ctx->lines[idx1];
+                    char *line2 = ctx->lines[idx2];
+                    size_t len1 = strlen(line1);
+
+                    // Skip leading whitespace of line2
+                    size_t lead2 = 0;
+                    while (line2[lead2] == ' ' || line2[lead2] == '\t') lead2++;
+                    size_t len2 = strlen(line2 + lead2);
+
+                    bool need_space = (len1 > 0 && line1[len1 - 1] != ' ');
+                    size_t new_len = len1 + (need_space ? 1 : 0) + len2;
+
+                    char *joined = (char *)malloc(new_len + 1);
+                    if (joined) {
+                        memcpy(joined, line1, len1);
+                        if (need_space) joined[len1] = ' ';
+                        memcpy(joined + len1 + (need_space ? 1 : 0), line2 + lead2, len2);
+                        joined[new_len] = '\0';
+
+                        free(line1);
+                        free(line2);
+                        ctx->lines[idx1] = joined;
+                        memmove(&ctx->lines[idx2], &ctx->lines[idx2 + 1], (ctx->line_count - (idx2 + 1)) * sizeof(char *));
+                        ctx->line_count--;
+
+                        ctx->cursor.byteCol = len1 > 0 ? (int32_t)(len1 + (need_space ? 1 : 0)) : 1;
+                        ctx->is_dirty = true;
+                        clamp_cursor(ctx);
+                        emit_line_delta(ctx, ctx->cursor.line, 2, 1);
+                    }
+                }
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'Z') {
-                if (*(p + 1) == 'Z') {
-                    if (ctx->is_dirty) {
-                        ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
-                    } else {
-                        ctx->pending_action = VIM_ACTION_QUIT;
-                    }
-                    ctx->should_quit = true;
-                    p += 2;
-                } else if (*(p + 1) == 'Q') {
-                    ctx->pending_action = VIM_ACTION_QUIT_FORCE;
-                    ctx->should_quit = true;
-                    p += 2;
-                } else {
-                    p++;
-                }
+                ctx->pending_leader = 'Z';
+                p++;
             } else {
+                ctx->count_accumulator = 0;
                 p++;
             }
         } else if (ctx->mode == VIM_MODE_INSERT) {
@@ -485,7 +1461,6 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 emit_line_delta(ctx, ctx->cursor.line - 1, 1, 2);
                 p++;
             } else {
-                // Insert character
                 size_t line_idx = (size_t)(ctx->cursor.line - 1);
                 char *line = ctx->lines[line_idx];
                 size_t line_len = strlen(line);
@@ -508,6 +1483,88 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
         } else if (ctx->mode == VIM_MODE_VISUAL) {
             if (*p == '\x1b') {
                 ctx->mode = VIM_MODE_NORMAL;
+                ctx->pending_text_object = 0;
+                p++;
+            } else if (ctx->pending_text_object == 'i') {
+                handle_visual_text_object(ctx, *p);
+                ctx->pending_text_object = 0;
+                p++;
+            } else if (*p == 'i') {
+                ctx->pending_text_object = 'i';
+                p++;
+            } else if (*p == 'd') { // Visual delete
+                if (ctx->visual_is_linewise) {
+                    int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
+                    int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
+                    size_t start_idx = (size_t)(start_l - 1);
+                    size_t del_count = (size_t)(end_l - start_l + 1);
+
+                    set_yank_buffer(ctx, ctx->lines[start_idx], true);
+                    for (size_t i = 0; i < del_count; i++) free(ctx->lines[start_idx + i]);
+                    memmove(&ctx->lines[start_idx], &ctx->lines[start_idx + del_count], (ctx->line_count - (start_idx + del_count)) * sizeof(char *));
+                    ctx->line_count -= del_count;
+
+                    if (ctx->line_count == 0) {
+                        ctx->lines[0] = duplicate_string("");
+                        ctx->line_count = 1;
+                        emit_line_delta(ctx, start_l, (int32_t)del_count, 1);
+                    } else {
+                        emit_line_delta(ctx, start_l, (int32_t)del_count, 0);
+                    }
+                    ctx->cursor.line = start_l;
+                    ctx->cursor.byteCol = 1;
+                } else {
+                    if (ctx->visual_anchor.line == ctx->cursor.line) {
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        size_t col1 = (size_t)ctx->visual_anchor.byteCol;
+                        size_t col2 = (size_t)ctx->cursor.byteCol;
+                        size_t start = (col1 < col2 ? col1 : col2) - 1;
+                        size_t end = (col1 > col2 ? col1 : col2);
+                        if (end > len) end = len;
+
+                        if (end > start) {
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                            memmove(line + start, line + end, len - end + 1);
+                            ctx->cursor.byteCol = (int32_t)(start + 1);
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                    }
+                }
+                ctx->is_dirty = true;
+                ctx->mode = VIM_MODE_NORMAL;
+                clamp_cursor(ctx);
+                p++;
+            } else if (*p == 'y') { // Visual yank
+                if (ctx->visual_is_linewise) {
+                    int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
+                    set_yank_buffer(ctx, ctx->lines[start_l - 1], true);
+                } else if (ctx->visual_anchor.line == ctx->cursor.line) {
+                    const char *line = ctx->lines[ctx->cursor.line - 1];
+                    size_t col1 = (size_t)ctx->visual_anchor.byteCol;
+                    size_t col2 = (size_t)ctx->cursor.byteCol;
+                    size_t start = (col1 < col2 ? col1 : col2) - 1;
+                    size_t end = (col1 > col2 ? col1 : col2);
+                    size_t len = strlen(line);
+                    if (end > len) end = len;
+                    if (end > start) {
+                        char *yanked = (char *)malloc(end - start + 1);
+                        if (yanked) {
+                            memcpy(yanked, line + start, end - start);
+                            yanked[end - start] = '\0';
+                            set_yank_buffer(ctx, yanked, false);
+                            free(yanked);
+                        }
+                    }
+                }
+                ctx->mode = VIM_MODE_NORMAL;
                 p++;
             } else if (*p == 'h') {
                 if (ctx->cursor.byteCol > 1) ctx->cursor.byteCol--;
@@ -528,19 +1585,38 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     clamp_cursor(ctx);
                 }
                 p++;
+            } else if (*p == '0') {
+                ctx->cursor.byteCol = 1;
+                p++;
+            } else if (*p == '$') {
+                motion_dollar(ctx);
+                p++;
             } else {
                 p++;
             }
         } else if (ctx->mode == VIM_MODE_COMMAND) {
             if (*p == '\r' || *p == '\n') {
                 ctx->cmd_buf[ctx->cmd_len] = '\0';
-                vim_context_execute_ex(ctx, ctx->cmd_buf);
+                if (ctx->cmd_buf[0] == '/') {
+                    const char *pattern = ctx->cmd_buf + 1;
+                    if (strlen(pattern) > 0) {
+                        strncpy(ctx->last_search, pattern, sizeof(ctx->last_search) - 1);
+                        ctx->last_search[sizeof(ctx->last_search) - 1] = '\0';
+                    }
+                    if (ctx->last_search[0] != '\0') {
+                        vim_search_forward(ctx, ctx->last_search, false);
+                    }
+                } else {
+                    vim_context_execute_ex(ctx, ctx->cmd_buf);
+                }
                 ctx->mode = VIM_MODE_NORMAL;
+                ctx->is_search_cmd = false;
                 ctx->cmd_len = 0;
                 ctx->cmd_buf[0] = '\0';
                 p++;
             } else if (*p == '\x1b') {
                 ctx->mode = VIM_MODE_NORMAL;
+                ctx->is_search_cmd = false;
                 ctx->cmd_len = 0;
                 ctx->cmd_buf[0] = '\0';
                 p++;
@@ -548,8 +1624,13 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 if (ctx->cmd_len > 0) {
                     ctx->cmd_len--;
                     ctx->cmd_buf[ctx->cmd_len] = '\0';
+                    if (ctx->cmd_len == 0) {
+                        ctx->mode = VIM_MODE_NORMAL;
+                        ctx->is_search_cmd = false;
+                    }
                 } else {
                     ctx->mode = VIM_MODE_NORMAL;
+                    ctx->is_search_cmd = false;
                 }
                 p++;
             } else {
@@ -657,6 +1738,14 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command) {
         ctx->should_quit = true;
         ctx->last_error[0] = '\0';
     } else if (strcmp(cmd, "x") == 0 || strcmp(cmd, "xit") == 0) {
+        if (ctx->is_dirty) {
+            ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
+        } else {
+            ctx->pending_action = VIM_ACTION_QUIT;
+        }
+        ctx->should_quit = true;
+        ctx->last_error[0] = '\0';
+    } else if (strcmp(cmd, "ZZ") == 0) {
         if (ctx->is_dirty) {
             ctx->pending_action = VIM_ACTION_SAVE_AND_QUIT;
         } else {

@@ -146,12 +146,18 @@ open class VimMDTextView: NSTextView {
 
     public func synchronizeCaretWithSession() {
         guard let session = session else { return }
-        let offset = session.cursorUtf16Offset
-        let docLength = (self.string as NSString).length
-        let clamped = max(0, min(docLength, offset))
-        self.currentSelectedRange = NSRange(location: clamped, length: 0)
-        self.setSelectedRange(self.currentSelectedRange)
-        self.scrollRangeToVisible(self.currentSelectedRange)
+        if session.mode == VIM_MODE_VISUAL, let visualRange = session.visualSelectionRange {
+            self.currentSelectedRange = visualRange
+            self.setSelectedRange(visualRange)
+            self.scrollRangeToVisible(visualRange)
+        } else {
+            let offset = session.cursorUtf16Offset
+            let docLength = (self.string as NSString).length
+            let clamped = max(0, min(docLength, offset))
+            self.currentSelectedRange = NSRange(location: clamped, length: 0)
+            self.setSelectedRange(self.currentSelectedRange)
+            self.scrollRangeToVisible(self.currentSelectedRange)
+        }
         if session.mode == VIM_MODE_INSERT {
             updateSyntaxStyling()
         }

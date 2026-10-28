@@ -643,6 +643,501 @@ static void test_set_cursor(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_gg_motion_streaming(void) {
+    const char *text = "Line 1 Header\nLine 2 Middle\nLine 3 Footer";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Place cursor at line 3, col 4
+    vim_context_set_cursor(ctx, 3, 4);
+    assert(vim_context_get_cursor(ctx).line == 3);
+
+    // Feed first 'g' character-by-character
+    vim_context_feed_keys(ctx, "g");
+    // Leader is pending, cursor MUST still be at line 3, col 4
+    assert(vim_context_get_cursor(ctx).line == 3);
+    assert(vim_context_get_cursor(ctx).byteCol == 4);
+
+    // Feed second 'g' character-by-character
+    vim_context_feed_keys(ctx, "g");
+    // Now 'gg' is complete -> cursor must jump to line 1, col 1
+    assert(vim_context_get_cursor(ctx).line == 1);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    // Test pending leader cancellation with non-'g' key
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "g");
+    assert(vim_context_get_cursor(ctx).line == 2);
+    // Feed 'j' instead of 'g'
+    vim_context_feed_keys(ctx, "j");
+    // Leader cancelled and 'j' executed -> moved to line 3
+    assert(vim_context_get_cursor(ctx).line == 3);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_G_motion(void) {
+    const char *text = "Line 1\nLine 2\n   First non blank on line 3";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    assert(vim_context_get_cursor(ctx).line == 1);
+    vim_context_feed_keys(ctx, "G");
+    // Line 3 has 3 leading spaces; first non-blank char 'F' is at 1-based col 4
+    assert(vim_context_get_cursor(ctx).line == 3);
+    assert(vim_context_get_cursor(ctx).byteCol == 4);
+
+    // Test G on empty / all-whitespace last line -> col 1
+    vim_context_destroy(ctx);
+    VimContextRef ctx2 = vim_context_create("Alpha\nBeta\n");
+    vim_context_feed_keys(ctx2, "G");
+    assert(vim_context_get_cursor(ctx2).line == 3);
+    assert(vim_context_get_cursor(ctx2).byteCol == 1);
+    vim_context_destroy(ctx2);
+}
+
+static void test_visual_text_objects(void) {
+    // 1. vi' (single quote)
+    const char *text1 = "let greeting = 'hello world';";
+    VimContextRef ctx1 = vim_context_create(text1);
+    // Cursor on 'w' in 'world' (col 22)
+    vim_context_set_cursor(ctx1, 1, 22);
+    vim_context_feed_keys(ctx1, "v");
+    vim_context_feed_keys(ctx1, "i");
+    vim_context_feed_keys(ctx1, "'");
+    assert(vim_context_get_mode(ctx1) == VIM_MODE_VISUAL);
+    VimBytePos a1 = vim_context_get_visual_anchor(ctx1);
+    VimBytePos c1 = vim_context_get_cursor(ctx1);
+    // 'hello world' is from col 17 to col 27 (inside quotes at 16 and 28)
+    assert(a1.line == 1 && a1.byteCol == 17);
+    assert(c1.line == 1 && c1.byteCol == 27);
+    vim_context_destroy(ctx1);
+
+    // 2. vi" (double quote)
+    const char *text2 = "let msg = \"test double quote\";";
+    VimContextRef ctx2 = vim_context_create(text2);
+    vim_context_set_cursor(ctx2, 1, 15);
+    vim_context_feed_keys(ctx2, "v");
+    vim_context_feed_keys(ctx2, "i");
+    vim_context_feed_keys(ctx2, "\"");
+    assert(vim_context_get_mode(ctx2) == VIM_MODE_VISUAL);
+    VimBytePos a2 = vim_context_get_visual_anchor(ctx2);
+    VimBytePos c2 = vim_context_get_cursor(ctx2);
+    // "test double quote" is from col 12 to 28 (quotes at 11 and 29)
+    assert(a2.line == 1 && a2.byteCol == 12);
+    assert(c2.line == 1 && c2.byteCol == 28);
+    vim_context_destroy(ctx2);
+
+    // 3. vi( / vi) / vib (parentheses)
+    const char *text3 = "call(param1, param2);";
+    VimContextRef ctx3 = vim_context_create(text3);
+    vim_context_set_cursor(ctx3, 1, 8);
+    vim_context_feed_keys(ctx3, "v");
+    vim_context_feed_keys(ctx3, "i");
+    vim_context_feed_keys(ctx3, "(");
+    assert(vim_context_get_mode(ctx3) == VIM_MODE_VISUAL);
+    VimBytePos a3 = vim_context_get_visual_anchor(ctx3);
+    VimBytePos c3 = vim_context_get_cursor(ctx3);
+    // '(' at 5, ')' at 20 -> inner is 6 to 19
+    assert(a3.line == 1 && a3.byteCol == 6);
+    assert(c3.line == 1 && c3.byteCol == 19);
+
+    // Also test vib
+    vim_context_feed_keys(ctx3, "\x1b"); // Back to normal
+    vim_context_set_cursor(ctx3, 1, 8);
+    vim_context_feed_keys(ctx3, "v");
+    vim_context_feed_keys(ctx3, "i");
+    vim_context_feed_keys(ctx3, "b");
+    assert(vim_context_get_mode(ctx3) == VIM_MODE_VISUAL);
+    assert(vim_context_get_visual_anchor(ctx3).byteCol == 6);
+    assert(vim_context_get_cursor(ctx3).byteCol == 19);
+    vim_context_destroy(ctx3);
+
+    // 4. vi[ / vi] (square brackets)
+    const char *text4 = "arr = [itemA, itemB];";
+    VimContextRef ctx4 = vim_context_create(text4);
+    vim_context_set_cursor(ctx4, 1, 10);
+    vim_context_feed_keys(ctx4, "v");
+    vim_context_feed_keys(ctx4, "i");
+    vim_context_feed_keys(ctx4, "[");
+    assert(vim_context_get_mode(ctx4) == VIM_MODE_VISUAL);
+    // '[' at 7, ']' at 20 -> inner is 8 to 19
+    assert(vim_context_get_visual_anchor(ctx4).byteCol == 8);
+    assert(vim_context_get_cursor(ctx4).byteCol == 19);
+    vim_context_destroy(ctx4);
+
+    // 5. vi< / vi> (angle brackets)
+    const char *text5 = "vector<uint32_t> numbers;";
+    VimContextRef ctx5 = vim_context_create(text5);
+    vim_context_set_cursor(ctx5, 1, 10);
+    vim_context_feed_keys(ctx5, "v");
+    vim_context_feed_keys(ctx5, "i");
+    vim_context_feed_keys(ctx5, "<");
+    assert(vim_context_get_mode(ctx5) == VIM_MODE_VISUAL);
+    // '<' at 7, '>' at 16 -> inner is 8 to 15
+    assert(vim_context_get_visual_anchor(ctx5).byteCol == 8);
+    assert(vim_context_get_cursor(ctx5).byteCol == 15);
+    vim_context_destroy(ctx5);
+
+    // 6. vi{ / vi} / viB (braces)
+    const char *text6 = "void fn() { return 42; }";
+    VimContextRef ctx6 = vim_context_create(text6);
+    vim_context_set_cursor(ctx6, 1, 15);
+    vim_context_feed_keys(ctx6, "v");
+    vim_context_feed_keys(ctx6, "i");
+    vim_context_feed_keys(ctx6, "{");
+    assert(vim_context_get_mode(ctx6) == VIM_MODE_VISUAL);
+    // '{' at 11, '}' at 24 -> inner is 12 to 23
+    assert(vim_context_get_visual_anchor(ctx6).byteCol == 12);
+    assert(vim_context_get_cursor(ctx6).byteCol == 23);
+
+    // Also test viB
+    vim_context_feed_keys(ctx6, "\x1b");
+    vim_context_set_cursor(ctx6, 1, 15);
+    vim_context_feed_keys(ctx6, "v");
+    vim_context_feed_keys(ctx6, "i");
+    vim_context_feed_keys(ctx6, "B");
+    assert(vim_context_get_mode(ctx6) == VIM_MODE_VISUAL);
+    assert(vim_context_get_visual_anchor(ctx6).byteCol == 12);
+    assert(vim_context_get_cursor(ctx6).byteCol == 23);
+    vim_context_destroy(ctx6);
+}
+
+static void test_search_forward_n_N(void) {
+    const char *text = "apple banana cherry\napple date elderberry\nfig grape apple";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Stream search "/apple\r"
+    vim_context_feed_keys(ctx, "/");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_COMMAND);
+    vim_context_feed_keys(ctx, "a");
+    vim_context_feed_keys(ctx, "p");
+    vim_context_feed_keys(ctx, "p");
+    vim_context_feed_keys(ctx, "l");
+    vim_context_feed_keys(ctx, "e");
+    vim_context_feed_keys(ctx, "\r");
+
+    // After <CR>, mode returns to NORMAL and cursor matches first occurrence (line 1, col 1)
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(vim_context_get_cursor(ctx).line == 1);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+    assert(strcmp(vim_context_get_last_search(ctx), "apple") == 0);
+
+    // 'n' moves forward to next match: line 2, col 1
+    vim_context_feed_keys(ctx, "n");
+    assert(vim_context_get_cursor(ctx).line == 2);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    // 'n' moves forward to 3rd match: line 3, col 11
+    vim_context_feed_keys(ctx, "n");
+    assert(vim_context_get_cursor(ctx).line == 3);
+    assert(vim_context_get_cursor(ctx).byteCol == 11);
+
+    // 'n' wraps around to first match: line 1, col 1
+    vim_context_feed_keys(ctx, "n");
+    assert(vim_context_get_cursor(ctx).line == 1);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    // 'N' moves backward to previous match: line 3, col 11
+    vim_context_feed_keys(ctx, "N");
+    assert(vim_context_get_cursor(ctx).line == 3);
+    assert(vim_context_get_cursor(ctx).byteCol == 11);
+
+    // 'N' moves backward to line 2, col 1
+    vim_context_feed_keys(ctx, "N");
+    assert(vim_context_get_cursor(ctx).line == 2);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_ex_commands_streaming_and_ZZ(void) {
+    const char *text = "alpha beta gamma\nfoo bar baz";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. Stream :%s/foo/super/g\r
+    const char *s_cmd = ":%s/foo/super/g\r";
+    for (size_t i = 0; i < strlen(s_cmd); i++) {
+        char ch[2] = { s_cmd[i], '\0' };
+        vim_context_feed_keys(ctx, ch);
+    }
+    size_t out_len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strstr(ser, "super bar baz") != NULL);
+    free(ser);
+
+    // 2. Stream :w\r
+    vim_context_feed_keys(ctx, ":");
+    vim_context_feed_keys(ctx, "w");
+    vim_context_feed_keys(ctx, "\r");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE);
+    vim_context_clear_pending_action(ctx);
+
+    // 3. Stream :w!\r
+    vim_context_feed_keys(ctx, ":");
+    vim_context_feed_keys(ctx, "w");
+    vim_context_feed_keys(ctx, "!");
+    vim_context_feed_keys(ctx, "\r");
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE_FORCE);
+    vim_context_clear_pending_action(ctx);
+
+    // 4. Stream ZZ character-by-character
+    vim_context_feed_keys(ctx, "Z");
+    assert(vim_context_should_quit(ctx) == false);
+    vim_context_feed_keys(ctx, "Z");
+    assert(vim_context_should_quit(ctx) == true);
+    assert(vim_context_get_pending_action(ctx) == VIM_ACTION_SAVE_AND_QUIT);
+    vim_context_destroy(ctx);
+
+    // 5. Ex command :ZZ
+    VimContextRef ctx2 = vim_context_create("Clean doc");
+    vim_context_execute_ex(ctx2, "ZZ");
+    assert(vim_context_should_quit(ctx2) == true);
+    assert(vim_context_get_pending_action(ctx2) == VIM_ACTION_QUIT);
+    vim_context_destroy(ctx2);
+}
+
+static void test_navigation_motions_and_counts(void) {
+    const char *text = "   hello world foo_bar baz\nsecond line 123 456\nthird line";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. Line motions: 0, ^, $
+    vim_context_set_cursor(ctx, 1, 10);
+    vim_context_feed_keys(ctx, "0"); // Start of line
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    vim_context_feed_keys(ctx, "^"); // First non-blank
+    assert(vim_context_get_cursor(ctx).byteCol == 4); // 'h'
+
+    vim_context_feed_keys(ctx, "$"); // End of line
+    assert(vim_context_get_cursor(ctx).byteCol == 26); // 'z'
+
+    // 2. Word motions: w, b, e, ge
+    vim_context_set_cursor(ctx, 1, 4); // on 'h' in 'hello'
+    vim_context_feed_keys(ctx, "w");
+    assert(vim_context_get_cursor(ctx).byteCol == 10); // 'w' in 'world'
+
+    vim_context_feed_keys(ctx, "e");
+    assert(vim_context_get_cursor(ctx).byteCol == 14); // 'd' in 'world'
+
+    vim_context_feed_keys(ctx, "b");
+    assert(vim_context_get_cursor(ctx).byteCol == 10); // 'w' in 'world'
+
+    vim_context_feed_keys(ctx, "ge");
+    assert(vim_context_get_cursor(ctx).byteCol == 8); // 'o' in 'hello'
+
+    // 3. Inline find/till: f<char>, t<char>
+    vim_context_set_cursor(ctx, 1, 4);
+    vim_context_feed_keys(ctx, "f");
+    vim_context_feed_keys(ctx, "w"); // find 'w' forward
+    assert(vim_context_get_cursor(ctx).byteCol == 10);
+
+    vim_context_set_cursor(ctx, 1, 4);
+    vim_context_feed_keys(ctx, "t");
+    vim_context_feed_keys(ctx, "w"); // till 'w' forward -> col 9 (space before 'w')
+    assert(vim_context_get_cursor(ctx).byteCol == 9);
+
+    // 4. Count prefixes: 2j, 2k, 2w
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "2");
+    vim_context_feed_keys(ctx, "j");
+    assert(vim_context_get_cursor(ctx).line == 3);
+
+    vim_context_feed_keys(ctx, "2");
+    vim_context_feed_keys(ctx, "k");
+    assert(vim_context_get_cursor(ctx).line == 1);
+
+    vim_context_set_cursor(ctx, 1, 4);
+    vim_context_feed_keys(ctx, "2");
+    vim_context_feed_keys(ctx, "w"); // 2w from 'hello' jumps to 'foo_bar'
+    assert(vim_context_get_cursor(ctx).byteCol == 16);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_operator_mutations(void) {
+    const char *text = "alpha beta gamma\none two three\nfoo bar baz";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. dd (delete line)
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "d");
+    vim_context_feed_keys(ctx, "d");
+    size_t out_len = 0;
+    char *ser1 = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strstr(ser1, "one two three") == NULL);
+    assert(strcmp(ser1, "alpha beta gamma\nfoo bar baz") == 0);
+    free(ser1);
+
+    // 2. p (paste after) - pastes the deleted line "one two three" below line 2
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "p");
+    char *ser2 = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strcmp(ser2, "alpha beta gamma\nfoo bar baz\none two three") == 0);
+    free(ser2);
+
+    // 3. yy and P (paste before)
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "y");
+    vim_context_feed_keys(ctx, "y");
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "P");
+    char *ser3 = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strcmp(ser3, "alpha beta gamma\nalpha beta gamma\nfoo bar baz\none two three") == 0);
+    free(ser3);
+    vim_context_destroy(ctx);
+
+    // 4. dw (delete word) and yw (yank word)
+    VimContextRef ctx2 = vim_context_create("first second third");
+    vim_context_set_cursor(ctx2, 1, 1);
+    vim_context_feed_keys(ctx2, "d");
+    vim_context_feed_keys(ctx2, "w");
+    char *ser4 = vim_context_serialize_buffer(ctx2, &out_len);
+    assert(strcmp(ser4, "second third") == 0);
+    free(ser4);
+
+    // 5. d$ (delete to end of line) and d0 (delete to start of line)
+    VimContextRef ctx3 = vim_context_create("prefix middle suffix");
+    vim_context_set_cursor(ctx3, 1, 8); // on 'm'
+    vim_context_feed_keys(ctx3, "d");
+    vim_context_feed_keys(ctx3, "$");
+    char *ser5 = vim_context_serialize_buffer(ctx3, &out_len);
+    assert(strcmp(ser5, "prefix ") == 0);
+    free(ser5);
+
+    VimContextRef ctx3b = vim_context_create("prefix middle suffix");
+    vim_context_set_cursor(ctx3b, 1, 8); // on 'm'
+    vim_context_feed_keys(ctx3b, "d");
+    vim_context_feed_keys(ctx3b, "0");
+    char *ser5b = vim_context_serialize_buffer(ctx3b, &out_len);
+    assert(strcmp(ser5b, "middle suffix") == 0);
+    free(ser5b);
+    vim_context_destroy(ctx3);
+    vim_context_destroy(ctx3b);
+
+    // 6. cc and cw (change line / word)
+    VimContextRef ctx4 = vim_context_create("old line text\nnext line");
+    vim_context_set_cursor(ctx4, 1, 1);
+    vim_context_feed_keys(ctx4, "c");
+    vim_context_feed_keys(ctx4, "c");
+    assert(vim_context_get_mode(ctx4) == VIM_MODE_INSERT);
+    vim_context_feed_keys(ctx4, "new content\x1b");
+    char *ser6 = vim_context_serialize_buffer(ctx4, &out_len);
+    assert(strcmp(ser6, "new content\nnext line") == 0);
+    free(ser6);
+
+    vim_context_set_cursor(ctx4, 2, 1);
+    vim_context_feed_keys(ctx4, "c");
+    vim_context_feed_keys(ctx4, "w");
+    assert(vim_context_get_mode(ctx4) == VIM_MODE_INSERT);
+    vim_context_feed_keys(ctx4, "final\x1b");
+    char *ser7 = vim_context_serialize_buffer(ctx4, &out_len);
+    assert(strcmp(ser7, "new content\nfinal line") == 0);
+    free(ser7);
+    vim_context_destroy(ctx4);
+
+    // 7. x (delete char), s (substitute char), r<char> (replace char)
+    VimContextRef ctx5 = vim_context_create("abcdef");
+    vim_context_set_cursor(ctx5, 1, 2); // 'b'
+    vim_context_feed_keys(ctx5, "x");
+    char *ser8 = vim_context_serialize_buffer(ctx5, &out_len);
+    assert(strcmp(ser8, "acdef") == 0);
+    free(ser8);
+
+    vim_context_set_cursor(ctx5, 1, 2); // 'c'
+    vim_context_feed_keys(ctx5, "r");
+    vim_context_feed_keys(ctx5, "Z");
+    char *ser9 = vim_context_serialize_buffer(ctx5, &out_len);
+    assert(strcmp(ser9, "aZdef") == 0);
+    free(ser9);
+
+    vim_context_set_cursor(ctx5, 1, 2); // 'Z'
+    vim_context_feed_keys(ctx5, "s");
+    assert(vim_context_get_mode(ctx5) == VIM_MODE_INSERT);
+    vim_context_feed_keys(ctx5, "NEW\x1b");
+    char *ser10 = vim_context_serialize_buffer(ctx5, &out_len);
+    assert(strcmp(ser10, "aNEWdef") == 0);
+    free(ser10);
+    vim_context_destroy(ctx5);
+
+    // 8. J (join lines)
+    VimContextRef ctx6 = vim_context_create("First line\nSecond line");
+    vim_context_feed_keys(ctx6, "J");
+    char *ser11 = vim_context_serialize_buffer(ctx6, &out_len);
+    assert(strcmp(ser11, "First line Second line") == 0);
+    free(ser11);
+    vim_context_destroy(ctx6);
+    vim_context_destroy(ctx2);
+}
+
+static void test_visual_selection_and_operators(void) {
+    const char *text = "one two three\nfour five six";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. v (characterwise visual) + d (delete)
+    vim_context_set_cursor(ctx, 1, 5); // on 't' in 'two'
+    vim_context_feed_keys(ctx, "v");
+    vim_context_feed_keys(ctx, "l");
+    vim_context_feed_keys(ctx, "l"); // select 'two'
+    vim_context_feed_keys(ctx, "d");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    size_t out_len = 0;
+    char *ser1 = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strcmp(ser1, "one  three\nfour five six") == 0);
+    free(ser1);
+
+    // 2. V (linewise visual) + y (yank) + p (paste)
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "V");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_VISUAL);
+    vim_context_feed_keys(ctx, "y");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "p");
+    char *ser2 = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strcmp(ser2, "one  three\nfour five six\nfour five six") == 0);
+    free(ser2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_esc_cancellation(void) {
+    VimContextRef ctx = vim_context_create("Line 1\nLine 2\nLine 3");
+    assert(ctx != NULL);
+
+    // 1. Pending 'g' cancelled by <Esc>
+    vim_context_set_cursor(ctx, 2, 1);
+    vim_context_feed_keys(ctx, "g");
+    vim_context_feed_keys(ctx, "\x1b"); // cancel
+    vim_context_feed_keys(ctx, "g"); // this is now a fresh leader, not second 'g'
+    assert(vim_context_get_cursor(ctx).line == 2); // Still at line 2!
+    vim_context_feed_keys(ctx, "\x1b"); // clean up
+
+    // 2. Pending operator 'd' cancelled by <Esc>
+    vim_context_feed_keys(ctx, "d");
+    vim_context_feed_keys(ctx, "\x1b");
+    vim_context_feed_keys(ctx, "d"); // fresh operator, not second 'd' of 'dd'
+    size_t out_len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &out_len);
+    assert(strcmp(ser, "Line 1\nLine 2\nLine 3") == 0); // No lines deleted!
+    free(ser);
+    vim_context_feed_keys(ctx, "\x1b");
+
+    // 3. Count cancelled by <Esc>
+    vim_context_feed_keys(ctx, "5");
+    vim_context_feed_keys(ctx, "\x1b");
+    vim_context_feed_keys(ctx, "j"); // single 'j', not 5j
+    assert(vim_context_get_cursor(ctx).line == 3); // Moved from 2 to 3 (single step)
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -664,6 +1159,15 @@ int main(void) {
     RUN_TEST(test_system_actions);
     RUN_TEST(test_interactive_command_line);
     RUN_TEST(test_set_cursor);
+    RUN_TEST(test_gg_motion_streaming);
+    RUN_TEST(test_G_motion);
+    RUN_TEST(test_visual_text_objects);
+    RUN_TEST(test_search_forward_n_N);
+    RUN_TEST(test_ex_commands_streaming_and_ZZ);
+    RUN_TEST(test_navigation_motions_and_counts);
+    RUN_TEST(test_operator_mutations);
+    RUN_TEST(test_visual_selection_and_operators);
+    RUN_TEST(test_esc_cancellation);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }
