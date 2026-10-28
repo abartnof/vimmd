@@ -303,9 +303,20 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        // Intercept macOS Cmd+Z (Undo) and Cmd+Shift+Z (Redo)
+        // Intercept macOS Cmd shortcuts
         if event.modifierFlags.contains(.command) {
-            if event.charactersIgnoringModifiers == "z" {
+            let key = event.charactersIgnoringModifiers ?? ""
+            if key == "=" || key == "+" {
+                zoomIn(nil)
+                return
+            } else if key == "-" {
+                zoomOut(nil)
+                return
+            } else if key == "0" {
+                actualSize(nil)
+                return
+            }
+            if key == "z" {
                 if event.modifierFlags.contains(.shift) {
                     session.redo()
                 } else {
@@ -325,12 +336,34 @@ open class VimMDTextView: NSTextView {
         }
 
         if session.mode == VIM_MODE_NORMAL || session.mode == VIM_MODE_VISUAL || session.mode == VIM_MODE_COMMAND {
-            if let chars = event.characters {
+            if let chars = event.characters, !chars.isEmpty {
                 session.feedKeys(chars)
                 synchronizeCaretWithSession()
                 onCursorMoved?()
                 if session.shouldQuit {
                     onQuitRequested?()
+                }
+                return
+            }
+            if session.mode == VIM_MODE_COMMAND {
+                if event.keyCode == 51 { // Backspace
+                    session.feedKeys("\u{7f}")
+                    synchronizeCaretWithSession()
+                    onCursorMoved?()
+                    return
+                } else if event.keyCode == 36 || event.keyCode == 76 { // Return / Enter
+                    session.feedKeys("\r")
+                    synchronizeCaretWithSession()
+                    onCursorMoved?()
+                    if session.shouldQuit {
+                        onQuitRequested?()
+                    }
+                    return
+                } else if event.keyCode == 53 { // Escape
+                    session.feedKeys("\u{1b}")
+                    synchronizeCaretWithSession()
+                    onCursorMoved?()
+                    return
                 }
             }
             return
@@ -385,10 +418,29 @@ open class VimMDTextView: NSTextView {
     }
 
     override open func deleteBackward(_ sender: Any?) {
-        guard let session = session, session.mode == VIM_MODE_INSERT else { return }
+        guard let session = session, session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_COMMAND else { return }
         session.feedKeys("\u{7f}")
         synchronizeCaretWithSession()
         onCursorMoved?()
+    }
+
+    // MARK: - Viewport Zoom Controls
+
+    @objc @IBAction open func zoomIn(_ sender: Any?) {
+        guard let sv = enclosingScrollView else { return }
+        let current = sv.magnification
+        sv.magnification = min(3.0, current + 0.1)
+    }
+
+    @objc @IBAction open func zoomOut(_ sender: Any?) {
+        guard let sv = enclosingScrollView else { return }
+        let current = sv.magnification
+        sv.magnification = max(0.5, current - 0.1)
+    }
+
+    @objc @IBAction open func actualSize(_ sender: Any?) {
+        guard let sv = enclosingScrollView else { return }
+        sv.magnification = 1.0
     }
 
     // MARK: - Undo & Redo Integration
@@ -438,6 +490,11 @@ open class VimMDTextView: NSTextView {
         }
         if item.action == #selector(VimMDTextView.redo(_:)) {
             return session?.canRedo ?? false
+        }
+        if item.action == #selector(VimMDTextView.zoomIn(_:)) ||
+           item.action == #selector(VimMDTextView.zoomOut(_:)) ||
+           item.action == #selector(VimMDTextView.actualSize(_:)) {
+            return enclosingScrollView?.allowsMagnification ?? true
         }
         return super.validateUserInterfaceItem(item)
     }

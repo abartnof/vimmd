@@ -4,30 +4,52 @@ This document tracks all active milestones, user requirements, and architectural
 
 ---
 
-## 1. In Progress
-- [ ] **Milestone E: Finder 'Open With' Clean Launch (Suppress File Picker)**
-  - [ ] When opening a file via Finder right-click ("Open With -> VimMD") or drag-and-drop, do NOT present the "Open File" picker sheet/dialog.
-  - [ ] Defer launch picker check on runloop to allow Finder `application:openFile:` events to establish document controllers first.
-  - [ ] Suppress picker if arguments contain files or if document was opened on launch.
+## 1. Completed
+- [x] **Milestone E: Finder 'Open With' Clean Launch (Suppress File Picker)**
+  - [x] When opening a file via Finder right-click ("Open With -> VimMD") or drag-and-drop, do NOT present the "Open File" picker sheet/dialog.
+  - [x] Defer launch picker check on runloop to allow Finder `application:openFile:` events to establish document controllers first.
+  - [x] Suppress picker if arguments contain files or if document was opened on launch.
+- [x] **Milestone F: Viewport Zoom Controls in View Menu & Shortcuts**
+  - [x] `Zoom In` (`⌘+` / `⌘=` / `Cmd+=`): Increment magnification by +10% (e.g. up to 3.0x).
+  - [x] `Zoom Out` (`⌘-` / `Cmd+-`): Decrement magnification by -10% (e.g. down to 0.5x).
+  - [x] `Actual Size` (`⌘0` / `Cmd+0`): Reset magnification to 100% (1.0).
+  - [x] Enable `scrollView.allowsMagnification = true` with smooth pinch-to-zoom trackpad support.
+  - [x] Positioned in **View** menu alongside Wrap Lines and Appearance.
+- [x] **Milestone G: Live Ex Command Line & Search Input in Status Bar**
+  - [x] When typing colon commands (`:`) or search patterns (`/`), display the command string live in the status bar at the bottom as keystrokes are typed (e.g. `:`, `:w`, `:wq`, `:%s/foo/bar/g`, `/search_term`).
+  - [x] Support backspace (`⌫`) deleting characters live from the command line.
+  - [x] On `<CR>`: Execute the command and display confirmation feedback or warnings.
+  - [x] On `<Esc>`: Clear the command line and restore normal mode status display.
 
 ---
 
 ## 2. Upcoming Milestones
 
-### Milestone F: Viewport Zoom Controls in View Menu & Shortcuts
-- [ ] **Zoom Commands in View Menu**:
-  - `Zoom In` (`⌘+` / `⌘=` / `Cmd+=`): Increment magnification by +10% (e.g. up to 3.0x).
-  - `Zoom Out` (`⌘-` / `Cmd+-`): Decrement magnification by -10% (e.g. down to 0.5x).
-  - `Actual Size` (`⌘0` / `Cmd+0`): Reset magnification to 100% (1.0).
-  - Enable `scrollView.allowsMagnification = true` with smooth pinch-to-zoom trackpad support.
-  - Positioned in **View** menu alongside Wrap Lines and Appearance.
+### Milestone H: Save Confirmation Chip & Dirty Exit Warning
+- [ ] **Transient 'Saved' Chip in Status Bar**:
+  - When document is saved (`:w`, `:wq`, `ZZ`, `Cmd+S`), display a prominent 'Saved' pill/chip badge (with subtle background tint / accent) in the status bar for a couple seconds before fading out.
+- [ ] **Unsaved Changes Exit Warning Sheet**:
+  - When closing the window or quitting with unsaved changes (`isDocumentEdited == true` or `session.isDirty == true`):
+    - Vim path (`:q`, `:qa`): Displays warning `[Warning] E37: No write since last change (add ! to override)` in status bar.
+    - macOS path (`Cmd+W`, `Cmd+Q`, window close button): Prompts standard native alert dialog: "Do you want to save the changes made to the document?" with [Save], [Don't Save], [Cancel] actions, preventing accidental data loss.
 
-### Milestone G: Live Ex Command Line & Search Input in Status Bar
-- [ ] **Live Interactive Command Display**:
-  - When typing colon commands (`:`) or search patterns (`/`), display the command string live in the status bar at the bottom as keystrokes are typed (e.g. `:`, `:w`, `:wq`, `:%s/foo/bar/g`, `/search_term`).
-  - Support backspace (`⌫`) deleting characters live from the command line.
-  - On `<CR>`: Execute the command and display confirmation feedback or warnings.
-  - On `<Esc>`: Clear the command line and restore normal mode status display.
+### Milestone I: Typography Hierarchy (Monospace Default for Non-Markdown)
+- [ ] **Format-Aware Typography Hierarchy**:
+  - **Markdown (`.md`)**: Rich hybrid typography (proportional SF Pro for headers, body text, bold, italics, and lists; monospaced SF Mono for code spans, tables, and frontmatter).
+  - **All Other Formats (`.txt`, `.csv`, `.tsv`, `.sh`, `.json`, etc.)**: Default to native Monospaced System Font (SF Mono, 13pt).
+
+### Milestone J: Operator-Pending Inner Text Objects (`di'`, `ci'`, `yi'`)
+- [ ] **Delete Inner Text Objects (`di...`)**:
+  - `di'`: Delete content inside single quotes (`'...'`) without deleting quotes.
+  - `di"`: Delete content inside double quotes (`"..."`) without deleting quotes.
+  - `di(` / `di)` / `dib`: Delete content inside parentheses (`(...)`).
+  - `di[` / `di]`: Delete content inside square brackets (`[...]`).
+  - `di<` / `di>`: Delete content inside angle brackets (`<...>`).
+  - `di{` / `di}` / `diB`: Delete content inside braces (`{...}`).
+- [ ] **Change Inner Text Objects (`ci...`)**:
+  - `ci'`, `ci"`, `ci(`, `ci)`, `cib`, `ci[`, `ci]`, `ci<`, `ci>`, `ci{`, `ci}`, `ciB`: Delete content inside enclosing pairs and immediately transition to Insert mode at insertion point.
+- [ ] **Yank Inner Text Objects (`yi...`)**:
+  - `yi'`, `yi"`, `yi(`, `yi)`, `yib`, `yi[`, `yi]`, `yi<`, `yi>`, `yi{`, `yi}`, `yiB`: Yank content inside enclosing pairs to clipboard without modifying buffer.
 
 ### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
 - [ ] **36 End-to-End Synthetic User Journeys**:

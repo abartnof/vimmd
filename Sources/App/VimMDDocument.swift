@@ -79,9 +79,16 @@ open class VimMDDocument: NSDocument {
             let baseTitle = self.displayName ?? "Untitled"
             win.title = "\(baseTitle) — [\(mode)]"
         }
-        if let err = session.lastError, !err.isEmpty {
+        if session.mode == VIM_MODE_COMMAND {
+            let cmd = session.commandLineBuffer
+            messageLabel?.stringValue = cmd
+            messageLabel?.textColor = NSColor.labelColor
+        } else if let err = session.lastError, !err.isEmpty {
             let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
             showStatusMessage(warningText, isWarning: true)
+        } else {
+            messageLabel?.stringValue = currentStatusMessage ?? ""
+            messageLabel?.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
         }
     }
 
@@ -192,6 +199,9 @@ open class VimMDDocument: NSDocument {
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = !self.wrapLines
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 0.5
+        scrollView.maxMagnification = 3.0
 
         let contentSize = scrollView.contentSize
         let tv = VimMDTextView(frame: NSRect(origin: .zero, size: contentSize))

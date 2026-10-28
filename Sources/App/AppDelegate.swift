@@ -11,11 +11,16 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     public static let wrapLinesPreferenceKey = "VimMDWrapLinesPreference"
 
     public var hasOpenedDocument: Bool = false
+    public var hasLaunchedWithTargetFile: Bool = false
+    public var openDocumentInvokedCount: Int = 0
 
     public var matchSystemMenuItem: NSMenuItem?
     public var lightMenuItem: NSMenuItem?
     public var darkMenuItem: NSMenuItem?
     public var wrapLinesMenuItem: NSMenuItem?
+    public var zoomInMenuItem: NSMenuItem?
+    public var zoomOutMenuItem: NSMenuItem?
+    public var actualSizeMenuItem: NSMenuItem?
     public var viewMenuItem: NSMenuItem?
 
     public var currentAppearanceMode: AppearanceMode {
@@ -110,14 +115,44 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     public func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        NSDocumentController.shared.openDocument(nil)
+        presentOpenDocument()
         return true
+    }
+
+    open func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        hasOpenedDocument = true
+        hasLaunchedWithTargetFile = true
+        let fileURL = URL(fileURLWithPath: filename)
+        NSDocumentController.shared.openDocument(withContentsOf: fileURL, display: true) { _, _, _ in }
+        return true
+    }
+
+    open func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        for filename in filenames {
+            _ = self.application(sender, openFile: filename)
+        }
+    }
+
+    open func presentOpenDocument() {
+        openDocumentInvokedCount += 1
+        NSDocumentController.shared.openDocument(nil)
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        if NSDocumentController.shared.documents.isEmpty {
-            NSDocumentController.shared.openDocument(nil)
+
+        for arg in CommandLine.arguments.dropFirst() {
+            if !arg.hasPrefix("-") {
+                hasLaunchedWithTargetFile = true
+                break
+            }
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if !self.hasLaunchedWithTargetFile && NSDocumentController.shared.documents.isEmpty {
+                self.presentOpenDocument()
+            }
         }
     }
 
@@ -199,6 +234,26 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         wrapLinesItem.target = nil
         viewMenu.addItem(wrapLinesItem)
         self.wrapLinesMenuItem = wrapLinesItem
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let zoomInItem = NSMenuItem(title: "Zoom In", action: Selector(("zoomIn:")), keyEquivalent: "+")
+        zoomInItem.keyEquivalentModifierMask = [.command]
+        zoomInItem.target = nil
+        viewMenu.addItem(zoomInItem)
+        self.zoomInMenuItem = zoomInItem
+
+        let zoomOutItem = NSMenuItem(title: "Zoom Out", action: Selector(("zoomOut:")), keyEquivalent: "-")
+        zoomOutItem.keyEquivalentModifierMask = [.command]
+        zoomOutItem.target = nil
+        viewMenu.addItem(zoomOutItem)
+        self.zoomOutMenuItem = zoomOutItem
+
+        let actualSizeItem = NSMenuItem(title: "Actual Size", action: Selector(("actualSize:")), keyEquivalent: "0")
+        actualSizeItem.keyEquivalentModifierMask = [.command]
+        actualSizeItem.target = nil
+        viewMenu.addItem(actualSizeItem)
+        self.actualSizeMenuItem = actualSizeItem
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)

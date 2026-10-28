@@ -63,6 +63,7 @@ void vim_context_execute_ex(VimContextRef ctx, const char *command);
 
 // State Queries
 VimEngineMode vim_context_get_mode(VimContextRef ctx);
+const char* vim_context_get_command_buffer(VimContextRef ctx);
 VimBytePos vim_context_get_cursor(VimContextRef ctx);
 void vim_context_set_cursor(VimContextRef ctx, int32_t line, int32_t byteCol);
 VimBytePos vim_context_get_visual_anchor(VimContextRef ctx);

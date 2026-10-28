@@ -145,6 +145,14 @@ public final class VimSession {
         }
     }
 
+    public var commandLineBuffer: String {
+        guard let ctx = context else { return "" }
+        if let ptr = vim_context_get_command_buffer(ctx) {
+            return String(cString: ptr)
+        }
+        return ""
+    }
+
     public func setCursor(line: Int, byteCol: Int) {
         guard let ctx = context else { return }
         vim_context_set_cursor(ctx, Int32(line), Int32(byteCol))

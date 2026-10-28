@@ -400,6 +400,11 @@ VimEngineMode vim_context_get_mode(VimContextRef ctx) {
     return ctx->mode;
 }
 
+const char* vim_context_get_command_buffer(VimContextRef ctx) {
+    if (!ctx) return "";
+    return ctx->cmd_buf;
+}
+
 VimBytePos vim_context_get_cursor(VimContextRef ctx) {
     if (!ctx) {
         VimBytePos def = { .line = 1, .byteCol = 1 };
@@ -1681,8 +1686,9 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             } else if (*p == ':') {
                 ctx->mode = VIM_MODE_COMMAND;
                 ctx->is_search_cmd = false;
-                ctx->cmd_len = 0;
-                ctx->cmd_buf[0] = '\0';
+                ctx->cmd_buf[0] = ':';
+                ctx->cmd_buf[1] = '\0';
+                ctx->cmd_len = 1;
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == '/') {
