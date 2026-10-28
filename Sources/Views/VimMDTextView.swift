@@ -12,14 +12,37 @@ open class VimMDTextView: NSTextView {
     /// Callback invoked when a Vim quit command (e.g. :q, :wq, ZZ, ZQ) is triggered.
     public var onQuitRequested: (() -> Void)?
 
+    /// Callback invoked when cursor position moves (typing, arrows, clicks).
+    public var onCursorMoved: (() -> Void)?
+
+    /// Callback invoked when Vim mode changes.
+    public var onModeChanged: ((VimEngineMode) -> Void)?
+
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
+
+    override open var acceptsFirstResponder: Bool {
+        return true
+    }
+
+    override open func becomeFirstResponder() -> Bool {
+        self.needsDisplay = true
+        return true
+    }
+
+    override open func resignFirstResponder() -> Bool {
+        self.needsDisplay = true
+        return true
+    }
 
     private func bindSession() {
         guard let session = session else { return }
         self.string = session.serializeBuffer()
         session.onLineDeltaWithRange = { [weak self] startLine, deletedCount, newLines, targetRange in
             self?.applyDelta(targetRange: targetRange, newLines: newLines)
+        }
+        session.onModeChanged = { [weak self] mode in
+            self?.onModeChanged?(mode)
         }
         synchronizeCaretWithSession()
     }
@@ -58,8 +81,31 @@ open class VimMDTextView: NSTextView {
         self.setSelectedRange(self.currentSelectedRange)
     }
 
+    override open func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
+        super.setSelectedRange(charRange, affinity: affinity, stillSelecting: stillSelectingFlag)
+        self.currentSelectedRange = charRange
+    }
+
+    override open func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        guard let session = session else { return }
+        let charIndex = self.selectedRange().location
+        if charIndex != NSNotFound {
+            let vimPos = session.lineIndexTable.vimPosition(fromDocumentUtf16Offset: charIndex)
+            session.setCursor(line: vimPos.line, byteCol: vimPos.byteCol)
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        }
+    }
+
     override open func keyDown(with event: NSEvent) {
         guard let session = session else {
+            super.keyDown(with: event)
+            return
+        }
+
+        // Preserve macOS Command shortcuts (Cmd+W, Cmd+S, Cmd+Q, Cmd+C, Cmd+V, Cmd+Z, Cmd+A, etc.)
+        if event.modifierFlags.contains(.command) {
             super.keyDown(with: event)
             return
         }
@@ -68,6 +114,7 @@ open class VimMDTextView: NSTextView {
             if let chars = event.characters {
                 session.feedKeys(chars)
                 synchronizeCaretWithSession()
+                onCursorMoved?()
                 if session.shouldQuit {
                     onQuitRequested?()
                 }
@@ -76,19 +123,58 @@ open class VimMDTextView: NSTextView {
         }
 
         // Insert mode
+        // 1. Escape key
         if event.keyCode == 53 || event.characters == "\u{1b}" {
             session.feedKeys("\u{1b}")
             unmarkText()
             synchronizeCaretWithSession()
+            onCursorMoved?()
             return
         }
 
-        // In insert mode, pass through input context or feed directly
-        if let inputContext = self.inputContext {
-            inputContext.handleEvent(event)
-        } else if let chars = event.characters {
-            insertText(chars, replacementRange: self.selectedRange())
+        // 2. Active IME composition
+        if hasMarkedText() {
+            if inputContext?.handleEvent(event) == true {
+                return
+            }
         }
+
+        // 3. Direct Vim editing keys: Backspace, Return, Tab
+        if event.keyCode == 51 { // Backspace
+            session.feedKeys("\u{7f}")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+            return
+        } else if event.keyCode == 36 || event.keyCode == 76 { // Return / Enter
+            session.feedKeys("\r")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+            return
+        } else if event.keyCode == 48 { // Tab
+            session.feedKeys("\t")
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+            return
+        }
+
+        // 4. Delegate to inputContext if it handles the event
+        if let inputContext = self.inputContext, inputContext.handleEvent(event) {
+            return
+        }
+
+        // 5. Normal typing fallback
+        if let chars = event.characters, !chars.isEmpty {
+            session.feedKeys(chars)
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        }
+    }
+
+    override open func deleteBackward(_ sender: Any?) {
+        guard let session = session, session.mode == VIM_MODE_INSERT else { return }
+        session.feedKeys("\u{7f}")
+        synchronizeCaretWithSession()
+        onCursorMoved?()
     }
 
     // MARK: - NSTextInputClient overrides

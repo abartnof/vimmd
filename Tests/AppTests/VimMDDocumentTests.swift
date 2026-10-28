@@ -149,17 +149,46 @@ func testDocumentWindowControllerSetup() throws {
     guard let window = doc.windowControllers.first?.window else {
         throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Window controller has no window"])
     }
-    guard let scrollView = window.contentView as? NSScrollView else {
-        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Window content view is not NSScrollView"])
+    guard let container = window.contentView else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Window has no content view"])
+    }
+    guard let scrollView = container.subviews.compactMap({ $0 as? NSScrollView }).first else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Content view missing NSScrollView"])
     }
     guard let tv = scrollView.documentView as? VimMDTextView else {
-        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "ScrollView document view is not VimMDTextView"])
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "ScrollView document view is not VimMDTextView"])
     }
     guard doc.textView === tv else {
-        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "doc.textView was not set"])
+        throw NSError(domain: "AppTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "doc.textView was not set"])
     }
     guard tv.session === doc.session else {
-        throw NSError(domain: "AppTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "TextView session is not bound to document session"])
+        throw NSError(domain: "AppTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "TextView session is not bound to document session"])
+    }
+    guard window.initialFirstResponder === tv else {
+        throw NSError(domain: "AppTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected initialFirstResponder to be tv"])
+    }
+    guard doc.modeLabel?.stringValue == "-- NORMAL --" else {
+        throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- NORMAL --', got \(doc.modeLabel?.stringValue ?? "nil")"])
+    }
+    guard window.title.contains("[NORMAL]") else {
+        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])
+    }
+
+    // Test mode transitions update status display and window title
+    doc.session?.feedKeys("i")
+    guard doc.modeLabel?.stringValue == "-- INSERT --" else {
+        throw NSError(domain: "AppTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- INSERT --' after 'i', got \(doc.modeLabel?.stringValue ?? "nil")"])
+    }
+    guard window.title.contains("[INSERT]") else {
+        throw NSError(domain: "AppTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [INSERT], got '\(window.title)'"])
+    }
+
+    doc.session?.feedKeys("\u{1b}")
+    guard doc.modeLabel?.stringValue == "-- NORMAL --" else {
+        throw NSError(domain: "AppTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- NORMAL --' after Esc, got \(doc.modeLabel?.stringValue ?? "nil")"])
+    }
+    guard window.title.contains("[NORMAL]") else {
+        throw NSError(domain: "AppTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])
     }
 }
 
@@ -326,9 +355,8 @@ func testBinaryContainsVimMDDocumentSymbol() throws {
     process.arguments = [binaryPath]
     process.standardOutput = pipe
     try process.run()
-    process.waitUntilExit()
-
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
     let output = String(decoding: data, as: UTF8.self)
     guard output.contains("VimMDDocument") else {
         throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Binary at \(binaryPath) does NOT contain VimMDDocument symbol! Dead-stripped or missing link."])

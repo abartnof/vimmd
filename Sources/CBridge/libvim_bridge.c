@@ -227,6 +227,13 @@ VimBytePos vim_context_get_cursor(VimContextRef ctx) {
     return ctx->cursor;
 }
 
+void vim_context_set_cursor(VimContextRef ctx, int32_t line, int32_t byteCol) {
+    if (!ctx) return;
+    ctx->cursor.line = line;
+    ctx->cursor.byteCol = byteCol;
+    clamp_cursor(ctx);
+}
+
 bool vim_context_is_dirty(VimContextRef ctx) {
     if (!ctx) return false;
     return ctx->is_dirty;

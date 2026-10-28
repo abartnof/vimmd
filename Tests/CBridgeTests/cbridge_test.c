@@ -623,6 +623,26 @@ static void test_interactive_command_line(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_set_cursor(void) {
+    const char *text = "Line 1\nSecond Line\nThird Line";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Set cursor to line 2, byteCol 4
+    vim_context_set_cursor(ctx, 2, 4);
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 2);
+    assert(pos.byteCol == 4);
+
+    // Set cursor out of bounds: line 10 -> clamped to 3
+    vim_context_set_cursor(ctx, 10, 50);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 3);
+    assert(pos.byteCol <= 11);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -643,6 +663,7 @@ int main(void) {
     RUN_TEST(test_open_line_deltas);
     RUN_TEST(test_system_actions);
     RUN_TEST(test_interactive_command_line);
+    RUN_TEST(test_set_cursor);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

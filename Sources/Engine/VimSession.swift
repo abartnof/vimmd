@@ -39,6 +39,9 @@ public final class VimSession {
     /// Callback invoked when a system action (:w, :q, :wq, etc.) is emitted by the Vim engine.
     public var onSystemAction: ((VimSystemAction) -> Void)?
 
+    /// Callback invoked when the Vim mode changes (NORMAL, INSERT, VISUAL, COMMAND).
+    public var onModeChanged: ((VimEngineMode) -> Void)?
+
     internal func handleLineDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
         let targetRange = lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
         lineIndexTable.updateLines(at: startLine, deleted: deletedCount, inserted: newLines)
@@ -75,6 +78,21 @@ public final class VimSession {
     public var mode: VimEngineMode {
         guard let ctx = context else { return VIM_MODE_NORMAL }
         return vim_context_get_mode(ctx)
+    }
+
+    public var modeString: String {
+        switch mode {
+        case VIM_MODE_NORMAL: return "NORMAL"
+        case VIM_MODE_INSERT: return "INSERT"
+        case VIM_MODE_VISUAL: return "VISUAL"
+        case VIM_MODE_COMMAND: return "COMMAND"
+        default: return "NORMAL"
+        }
+    }
+
+    public func setCursor(line: Int, byteCol: Int) {
+        guard let ctx = context else { return }
+        vim_context_set_cursor(ctx, Int32(line), Int32(byteCol))
     }
 
     public var cursor: VimBytePos {
@@ -128,16 +146,26 @@ public final class VimSession {
 
     public func feedKeys(_ keys: String) {
         guard let ctx = context else { return }
+        let oldMode = mode
         keys.withCString { cKeys in
             vim_context_feed_keys(ctx, cKeys)
+        }
+        let newMode = mode
+        if newMode != oldMode {
+            onModeChanged?(newMode)
         }
         checkAndDispatchPendingAction()
     }
 
     public func executeEx(_ command: String) {
         guard let ctx = context else { return }
+        let oldMode = mode
         command.withCString { cCmd in
             vim_context_execute_ex(ctx, cCmd)
+        }
+        let newMode = mode
+        if newMode != oldMode {
+            onModeChanged?(newMode)
         }
         checkAndDispatchPendingAction()
     }

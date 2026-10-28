@@ -8,6 +8,20 @@ open class VimMDDocument: NSDocument {
     public var session: VimSession?
     public var textView: VimMDTextView?
     public var isClosed: Bool = false
+    public var modeLabel: NSTextField?
+    public var posLabel: NSTextField?
+
+    public func updateStatusDisplay() {
+        guard let session = session else { return }
+        let mode = session.modeString
+        let pos = session.cursorPosition
+        modeLabel?.stringValue = "-- \(mode) --"
+        posLabel?.stringValue = "Ln \(pos.line), Col \(pos.byteCol)"
+        if let win = self.windowControllers.first?.window {
+            let baseTitle = self.displayName ?? "Untitled"
+            win.title = "\(baseTitle) — [\(mode)]"
+        }
+    }
 
     override public init() {
         let s = VimSession(initialText: "")
@@ -32,6 +46,9 @@ open class VimMDDocument: NSDocument {
     private func bindSessionSystemAction(_ s: VimSession) {
         s.onSystemAction = { [weak self] action in
             self?.handleSystemAction(action)
+        }
+        s.onModeChanged = { [weak self] _ in
+            self?.updateStatusDisplay()
         }
     }
 
@@ -76,9 +93,15 @@ open class VimMDDocument: NSDocument {
             backing: .buffered,
             defer: false
         )
-        window.title = self.displayName ?? "Untitled"
+        let baseTitle = self.displayName ?? "Untitled"
+        window.title = "\(baseTitle) — [NORMAL]"
 
-        let scrollView = NSScrollView(frame: window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 800, height: 600))
+        let contentBounds = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        let statusHeight: CGFloat = 22.0
+
+        // 1. Scroll view
+        let scrollFrame = NSRect(x: 0, y: statusHeight, width: contentBounds.width, height: max(0, contentBounds.height - statusHeight))
+        let scrollView = NSScrollView(frame: scrollFrame)
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -102,17 +125,63 @@ open class VimMDDocument: NSDocument {
         tv.onQuitRequested = { [weak self] in
             self?.handleQuitTrigger()
         }
+        tv.onCursorMoved = { [weak self] in
+            self?.updateStatusDisplay()
+        }
+        tv.onModeChanged = { [weak self] _ in
+            self?.updateStatusDisplay()
+        }
+        self.session?.onModeChanged = { [weak self] _ in
+            self?.updateStatusDisplay()
+        }
 
         scrollView.documentView = tv
-        window.contentView = scrollView
+
+        // 2. Status bar at bottom
+        let statusFrame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)
+        let statusBar = NSView(frame: statusFrame)
+        statusBar.autoresizingMask = [.width, .maxYMargin]
+
+        let modeLbl = NSTextField(frame: NSRect(x: 8, y: 3, width: 200, height: 16))
+        modeLbl.isEditable = false
+        modeLbl.isBordered = false
+        modeLbl.backgroundColor = .clear
+        modeLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        modeLbl.textColor = NSColor.secondaryLabelColor
+        modeLbl.stringValue = "-- NORMAL --"
+        statusBar.addSubview(modeLbl)
+        self.modeLabel = modeLbl
+
+        let posLbl = NSTextField(frame: NSRect(x: max(208, contentBounds.width - 208), y: 3, width: 200, height: 16))
+        posLbl.autoresizingMask = [.minXMargin]
+        posLbl.isEditable = false
+        posLbl.isBordered = false
+        posLbl.backgroundColor = .clear
+        posLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        posLbl.textColor = NSColor.secondaryLabelColor
+        posLbl.alignment = .right
+        posLbl.stringValue = "Ln 1, Col 1"
+        statusBar.addSubview(posLbl)
+        self.posLabel = posLbl
+
+        let containerView = NSView(frame: contentBounds)
+        containerView.autoresizingMask = [.width, .height]
+        containerView.addSubview(scrollView)
+        containerView.addSubview(statusBar)
+        window.contentView = containerView
 
         self.textView = tv
 
         window.isReleasedWhenClosed = false
         (NSApplication.shared.delegate as? AppDelegate)?.hasOpenedDocument = true
 
+        window.initialFirstResponder = tv
+        window.makeFirstResponder(tv)
+
         let windowController = NSWindowController(window: window)
         self.addWindowController(windowController)
+
+        updateStatusDisplay()
     }
 
     override open func close() {

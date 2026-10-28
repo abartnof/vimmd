@@ -225,6 +225,133 @@ func testTextViewOpenLineMutations() throws {
     }
 }
 
+func testTextViewFirstResponderAndCaretSelection() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    guard textView.acceptsFirstResponder else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected acceptsFirstResponder to be true"])
+    }
+    guard textView.becomeFirstResponder() else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected becomeFirstResponder to return true"])
+    }
+    guard textView.resignFirstResponder() else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected resignFirstResponder to return true"])
+    }
+
+    textView.setSelectedRange(NSRange(location: 3, length: 0), affinity: .downstream, stillSelecting: false)
+    guard textView.selectedRange().location == 3 else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected selectedRange location 3, got \(textView.selectedRange().location)"])
+    }
+}
+
+func testTextViewDirectInsertModeKeyHandling() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Initial")
+    textView.session = session
+
+    // Enter insert mode with 'i'
+    let eventI = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "i", charactersIgnoringModifiers: "i", isARepeat: false, keyCode: 34)!
+    textView.keyDown(with: eventI)
+    guard session.mode == VIM_MODE_INSERT else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected mode to be INSERT"])
+    }
+
+    // Type character 'X' in insert mode via keyDown
+    let eventX = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "X", charactersIgnoringModifiers: "X", isARepeat: false, keyCode: 7)!
+    textView.keyDown(with: eventX)
+    guard session.serializeBuffer().contains("XInitial") else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected X to be inserted before Initial, got '\(session.serializeBuffer())'"])
+    }
+
+    // Type Backspace (keyCode 51)
+    let eventBS = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\u{7f}", charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51)!
+    textView.keyDown(with: eventBS)
+    guard session.serializeBuffer() == "Initial" else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected X to be deleted by Backspace, got '\(session.serializeBuffer())'"])
+    }
+
+    // Escape back to NORMAL (keyCode 53)
+    let eventEsc = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+    textView.keyDown(with: eventEsc)
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected mode to return to NORMAL"])
+    }
+}
+
+func testTextViewModeAndCursorMovedCallbacks() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Hello World")
+    textView.session = session
+
+    var modeChanges = 0
+    var cursorMoves = 0
+
+    textView.onModeChanged = { _ in modeChanges += 1 }
+    textView.onCursorMoved = { cursorMoves += 1 }
+
+    // 'i' triggers mode change and cursor move
+    let eventI = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "i", charactersIgnoringModifiers: "i", isARepeat: false, keyCode: 34)!
+    textView.keyDown(with: eventI)
+    guard modeChanges >= 1 else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected onModeChanged when entering INSERT"])
+    }
+
+    // 'Z' in insert mode triggers cursor move
+    let eventZ = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "Z", charactersIgnoringModifiers: "Z", isARepeat: false, keyCode: 6)!
+    textView.keyDown(with: eventZ)
+    guard cursorMoves >= 1 else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected onCursorMoved when typing"])
+    }
+
+    // Esc back to normal
+    let eventEsc = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+    textView.keyDown(with: eventEsc)
+    guard modeChanges >= 2 else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected onModeChanged when exiting INSERT"])
+    }
+}
+
+func testTextViewCommandHotkeysPreservation() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Immutable Text")
+    textView.session = session
+
+    // 1. In NORMAL mode, Cmd+V must NOT switch mode to VISUAL!
+    let eventCmdV = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [.command],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "v",
+        charactersIgnoringModifiers: "v",
+        isARepeat: false,
+        keyCode: 9 // 'v'
+    )!
+    textView.keyDown(with: eventCmdV)
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cmd+V in NORMAL mode caused mode transition to \(session.modeString)! Expected NORMAL."])
+    }
+
+    // 2. In NORMAL mode, Cmd+X must NOT delete character ('x')
+    let eventCmdX = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [.command],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "x",
+        charactersIgnoringModifiers: "x",
+        isARepeat: false,
+        keyCode: 7 // 'x'
+    )!
+    textView.keyDown(with: eventCmdX)
+    guard session.serializeBuffer() == "Immutable Text" else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cmd+X in NORMAL mode mutated buffer: '\(session.serializeBuffer())'! Expected 'Immutable Text'."])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -237,7 +364,11 @@ let tests: [(String, () throws -> Void)] = [
     ("testAttributedSubstring", testAttributedSubstring),
     ("testVisualModeKeyInterception", testVisualModeKeyInterception),
     ("testNilSessionSafety", testNilSessionSafety),
-    ("testTextViewOpenLineMutations", testTextViewOpenLineMutations)
+    ("testTextViewOpenLineMutations", testTextViewOpenLineMutations),
+    ("testTextViewFirstResponderAndCaretSelection", testTextViewFirstResponderAndCaretSelection),
+    ("testTextViewDirectInsertModeKeyHandling", testTextViewDirectInsertModeKeyHandling),
+    ("testTextViewModeAndCursorMovedCallbacks", testTextViewModeAndCursorMovedCallbacks),
+    ("testTextViewCommandHotkeysPreservation", testTextViewCommandHotkeysPreservation)
 ]
 
 for (name, test) in tests {

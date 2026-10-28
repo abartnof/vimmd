@@ -331,6 +331,40 @@ func testVimSessionSystemActionsAndErrors() throws {
     }
 }
 
+func testVimSessionSetCursorAndModeNotifications() throws {
+    let session = VimSession(initialText: "First line\nSecond line\nThird line")
+
+    // 1. setCursor
+    session.setCursor(line: 2, byteCol: 4)
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 4 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cursor position mismatch after setCursor"])
+    }
+
+    // 2. Mode string and onModeChanged
+    guard session.modeString == "NORMAL" else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial modeString should be NORMAL"])
+    }
+
+    var recordedModes: [VimEngineMode] = []
+    session.onModeChanged = { mode in
+        recordedModes.append(mode)
+    }
+
+    session.feedKeys("i")
+    guard session.modeString == "INSERT" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected modeString INSERT after 'i'"])
+    }
+
+    session.feedKeys("\u{1b}")
+    guard session.modeString == "NORMAL" else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected modeString NORMAL after <Esc>"])
+    }
+
+    guard recordedModes == [VIM_MODE_INSERT, VIM_MODE_NORMAL] else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "recordedModes mismatch: \(recordedModes)"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -350,7 +384,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionQuitState", testVimSessionQuitState),
     ("testVimSessionInsertModeLineMutations", testVimSessionInsertModeLineMutations),
     ("testVimSessionQuitVariations", testVimSessionQuitVariations),
-    ("testVimSessionSystemActionsAndErrors", testVimSessionSystemActionsAndErrors)
+    ("testVimSessionSystemActionsAndErrors", testVimSessionSystemActionsAndErrors),
+    ("testVimSessionSetCursorAndModeNotifications", testVimSessionSetCursorAndModeNotifications)
 ]
 
 for (name, test) in tests {
