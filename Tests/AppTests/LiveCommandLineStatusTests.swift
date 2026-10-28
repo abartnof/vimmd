@@ -113,7 +113,7 @@ func testDocumentStatusDisplayRendersLiveCommand() throws {
         throw NSError(domain: "LiveCommandLineStatusTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "Expected ':', got '\(msgLabel.stringValue)'"])
     }
     guard msgLabel.textColor == NSColor.labelColor else {
-        throw NSError(domain: "LiveCommandLineStatusTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "Expected textColor to be labelColor, got \(msgLabel.textColor)"])
+        throw NSError(domain: "LiveCommandLineStatusTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "Expected textColor to be labelColor, got \(String(describing: msgLabel.textColor))"])
     }
 
     // Type '%s/foo/bar/g'

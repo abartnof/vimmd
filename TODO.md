@@ -20,18 +20,19 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] Support backspace (`⌫`) deleting characters live from the command line.
   - [x] On `<CR>`: Execute the command and display confirmation feedback or warnings.
   - [x] On `<Esc>`: Clear the command line and restore normal mode status display.
+- [x] **Milestone H: Save Confirmation Chip & Dirty Exit Warning**
+  - [x] **Transient 'Saved' Chip in Status Bar**:
+    - [x] When document is saved (`:w`, `:wq`, `ZZ`, `Cmd+S`, Cocoa save), display a prominent 'Saved' pill/chip badge (`✓ Saved` with subtle green accent tint and rounded corners) in status bar for ~2 seconds before fading out.
+    - [x] Accessible and inspectable via `savedChipView` and `isSavedChipVisible`.
+  - [x] **Unsaved Changes Exit Warning Sheet & Vim Blocking**:
+    - [x] Set `autosavesInPlace` to `false` to prevent silent overwrites and bypass of close confirmation.
+    - [x] Synchronize `session.isDirty` with AppKit `updateChangeCount(.changeDone)` / `updateChangeCount(.changeCleared)`.
+    - [x] Vim path (`:q`, `:qa`): Blocks close when dirty and displays `[Warning] E37: No write since last change (add ! to override)` in warning style.
+    - [x] macOS path (`Cmd+W`, `Cmd+Q`, window close button): Prompts standard native alert save sheet when document is edited, preventing accidental data loss.
 
 ---
 
 ## 2. Upcoming Milestones
-
-### Milestone H: Save Confirmation Chip & Dirty Exit Warning
-- [ ] **Transient 'Saved' Chip in Status Bar**:
-  - When document is saved (`:w`, `:wq`, `ZZ`, `Cmd+S`), display a prominent 'Saved' pill/chip badge (with subtle background tint / accent) in the status bar for a couple seconds before fading out.
-- [ ] **Unsaved Changes Exit Warning Sheet**:
-  - When closing the window or quitting with unsaved changes (`isDocumentEdited == true` or `session.isDirty == true`):
-    - Vim path (`:q`, `:qa`): Displays warning `[Warning] E37: No write since last change (add ! to override)` in status bar.
-    - macOS path (`Cmd+W`, `Cmd+Q`, window close button): Prompts standard native alert dialog: "Do you want to save the changes made to the document?" with [Save], [Don't Save], [Cancel] actions, preventing accidental data loss.
 
 ### Milestone I: Typography Hierarchy (Monospace Default for Non-Markdown)
 - [ ] **Format-Aware Typography Hierarchy**:
@@ -50,6 +51,16 @@ This document tracks all active milestones, user requirements, and architectural
   - `ci'`, `ci"`, `ci(`, `ci)`, `cib`, `ci[`, `ci]`, `ci<`, `ci>`, `ci{`, `ci}`, `ciB`: Delete content inside enclosing pairs and immediately transition to Insert mode at insertion point.
 - [ ] **Yank Inner Text Objects (`yi...`)**:
   - `yi'`, `yi"`, `yi(`, `yi)`, `yib`, `yi[`, `yi]`, `yi<`, `yi>`, `yi{`, `yi}`, `yiB`: Yank content inside enclosing pairs to clipboard without modifying buffer.
+
+### Milestone K: Vim `:sort` Command Subsystem
+- [ ] **Alphabetical and Numerical Line Sorting (`:sort`)**:
+  - `:sort`: Lexicographically sort lines across the entire buffer (or within active visual range `:'<,'>sort`).
+  - `:sort!`: Reverse/descending sort order.
+  - `:sort i`: Case-insensitive lexicographical sorting.
+  - `:sort u`: Deduplicate identical adjacent lines (unique filter).
+  - `:sort n`: Numeric sorting (evaluating leading or embedded integers).
+  - Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
+  - Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
 
 ### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
 - [ ] **36 End-to-End Synthetic User Journeys**:

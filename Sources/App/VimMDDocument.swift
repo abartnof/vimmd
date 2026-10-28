@@ -3,6 +3,57 @@ import Engine
 import Views
 import CBridge
 
+open class SavedChipView: NSView {
+    public let label: NSTextField
+
+    public var text: String {
+        get { return label.stringValue }
+        set { label.stringValue = newValue }
+    }
+
+    public var stringValue: String {
+        get { return label.stringValue }
+        set { label.stringValue = newValue }
+    }
+
+    public override init(frame frameRect: NSRect) {
+        let lbl = NSTextField(labelWithString: "✓ Saved")
+        self.label = lbl
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required public init?(coder: NSCoder) {
+        let lbl = NSTextField(labelWithString: "✓ Saved")
+        self.label = lbl
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        self.wantsLayer = true
+        self.layer?.cornerRadius = 8.0
+        self.layer?.masksToBounds = true
+        self.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.18).cgColor
+
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+        label.textColor = NSColor.systemGreen
+        label.alignment = .center
+        label.backgroundColor = .clear
+        label.isBordered = false
+        label.isEditable = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4)
+        ])
+    }
+}
+
 @objc(VimMDDocument)
 open class VimMDDocument: NSDocument {
     public static let wrapLinesPreferenceKey = "VimMDWrapLinesPreference"
@@ -58,8 +109,55 @@ open class VimMDDocument: NSDocument {
     public var modeLabel: NSTextField?
     public var posLabel: NSTextField?
     public var messageLabel: NSTextField?
+    public var savedChipView: SavedChipView?
+    public var isSavedChipVisible: Bool {
+        guard let chip = savedChipView else { return false }
+        return chip.alphaValue > 0.0 && !chip.isHidden
+    }
+    public var savedChipTimer: Timer?
     public var currentStatusMessage: String?
     public var isCurrentStatusMessageWarning: Bool = false
+
+    public func showSavedChip(duration: TimeInterval = 2.0) {
+        guard let chip = self.savedChipView else { return }
+        savedChipTimer?.invalidate()
+        savedChipTimer = nil
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            chip.animator().alphaValue = 1.0
+        }
+        chip.alphaValue = 1.0
+
+        if duration > 0 {
+            savedChipTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self, weak chip] _ in
+                guard let chip = chip else { return }
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.3
+                    chip.animator().alphaValue = 0.0
+                }, completionHandler: {
+                    chip.alphaValue = 0.0
+                })
+                chip.alphaValue = 0.0
+                self?.savedChipTimer = nil
+            }
+        }
+    }
+
+    public func hideSavedChip(animated: Bool = false) {
+        savedChipTimer?.invalidate()
+        savedChipTimer = nil
+        guard let chip = self.savedChipView else { return }
+        if animated {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.2
+                chip.animator().alphaValue = 0.0
+            }, completionHandler: {
+                chip.alphaValue = 0.0
+            })
+        }
+        chip.alphaValue = 0.0
+    }
 
     public func showStatusMessage(_ text: String, isWarning: Bool = false) {
         self.currentStatusMessage = text
@@ -95,6 +193,9 @@ open class VimMDDocument: NSDocument {
     override public init() {
         let s = VimSession(initialText: "")
         self.session = s
+        let chip = SavedChipView(frame: NSRect(x: 0, y: 0, width: 70, height: 16))
+        chip.alphaValue = 0.0
+        self.savedChipView = chip
         super.init()
         configureWrapLinesPolicy()
         bindSessionSystemAction(s)
@@ -120,15 +221,33 @@ open class VimMDDocument: NSDocument {
             self?.handleSystemAction(action)
         }
         s.onModeChanged = { [weak self] _ in
+            self?.syncDirtyState()
             self?.updateStatusDisplay()
         }
         s.onStatusChanged = { [weak self] in
+            self?.syncDirtyState()
             self?.updateStatusDisplay()
+        }
+        s.onLineDeltaWithRange = { [weak self] _, _, _, _ in
+            self?.syncDirtyState()
+        }
+    }
+
+    public func syncDirtyState() {
+        guard let s = session else { return }
+        if s.isDirty {
+            if !super.isDocumentEdited {
+                self.updateChangeCount(.changeDone)
+            }
+        } else {
+            if super.isDocumentEdited {
+                self.updateChangeCount(.changeCleared)
+            }
         }
     }
 
     override open class var autosavesInPlace: Bool {
-        return true
+        return false
     }
 
     override open var isDocumentEdited: Bool {
@@ -160,6 +279,7 @@ open class VimMDDocument: NSDocument {
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
         }
+        self.updateChangeCount(.changeCleared)
     }
 
     override open func read(from url: URL, ofType typeName: String) throws {
@@ -169,6 +289,7 @@ open class VimMDDocument: NSDocument {
         self.textView?.isTabularDocument = self.isTabularDocument
         self.textView?.isTSV = self.isTSVDocument
         try super.read(from: url, ofType: typeName)
+        self.updateChangeCount(.changeCleared)
     }
 
     override open func write(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType, originalContentsURL absoluteOriginalContentsURL: URL?) throws {
@@ -178,6 +299,33 @@ open class VimMDDocument: NSDocument {
         self.textView?.isTSV = self.isTSVDocument
         try super.write(to: url, ofType: typeName, for: saveOperation, originalContentsURL: absoluteOriginalContentsURL)
         session?.clearDirty()
+        self.updateChangeCount(.changeCleared)
+        showSavedChip()
+    }
+
+    @IBAction override open func save(_ sender: Any?) {
+        super.save(sender)
+        showSavedChip()
+    }
+
+    override open func canClose(withDelegate delegate: Any, shouldClose shouldCloseSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let dirty = self.isDocumentEdited || (self.session?.isDirty ?? false)
+        if dirty && !super.isDocumentEdited {
+            self.updateChangeCount(.changeDone)
+        } else if !dirty && super.isDocumentEdited {
+            self.updateChangeCount(.changeCleared)
+        }
+        super.canClose(withDelegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
+    }
+
+    override open func shouldCloseWindowController(_ windowController: NSWindowController, delegate: Any?, shouldClose shouldCloseSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let dirty = self.isDocumentEdited || (self.session?.isDirty ?? false)
+        if dirty && !super.isDocumentEdited {
+            self.updateChangeCount(.changeDone)
+        } else if !dirty && super.isDocumentEdited {
+            self.updateChangeCount(.changeCleared)
+        }
+        super.shouldCloseWindowController(windowController, delegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
     }
 
     override open func makeWindowControllers() {
@@ -264,19 +412,19 @@ open class VimMDDocument: NSDocument {
         statusBar.addSubview(modeLbl)
         self.modeLabel = modeLbl
 
-        let msgWidth = max(100, contentBounds.width - 325)
-        let msgLbl = NSTextField(frame: NSRect(x: 155, y: 3, width: msgWidth, height: 16))
-        msgLbl.autoresizingMask = [.width]
-        msgLbl.isEditable = false
-        msgLbl.isBordered = false
-        msgLbl.backgroundColor = .clear
-        msgLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        msgLbl.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
-        msgLbl.stringValue = currentStatusMessage ?? ""
-        statusBar.addSubview(msgLbl)
-        self.messageLabel = msgLbl
+        let chipWidth: CGFloat = 70.0
+        let chipHeight: CGFloat = 16.0
+        let posWidth: CGFloat = 110.0
+        let posRightMargin: CGFloat = 8.0
 
-        let posLbl = NSTextField(frame: NSRect(x: max(160, contentBounds.width - 165), y: 3, width: 155, height: 16))
+        let chipX = max(160, contentBounds.width - posRightMargin - posWidth - chipWidth - 10)
+        let chip = self.savedChipView ?? SavedChipView(frame: NSRect(x: chipX, y: 3, width: chipWidth, height: chipHeight))
+        chip.frame = NSRect(x: chipX, y: 3, width: chipWidth, height: chipHeight)
+        chip.autoresizingMask = [.minXMargin]
+        statusBar.addSubview(chip)
+        self.savedChipView = chip
+
+        let posLbl = NSTextField(frame: NSRect(x: contentBounds.width - posRightMargin - posWidth, y: 3, width: posWidth, height: 16))
         posLbl.autoresizingMask = [.minXMargin]
         posLbl.isEditable = false
         posLbl.isBordered = false
@@ -287,6 +435,18 @@ open class VimMDDocument: NSDocument {
         posLbl.stringValue = "Ln 1, Col 1"
         statusBar.addSubview(posLbl)
         self.posLabel = posLbl
+
+        let msgWidth = max(60, chipX - 165)
+        let msgLbl = NSTextField(frame: NSRect(x: 155, y: 3, width: msgWidth, height: 16))
+        msgLbl.autoresizingMask = [.width]
+        msgLbl.isEditable = false
+        msgLbl.isBordered = false
+        msgLbl.backgroundColor = .clear
+        msgLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        msgLbl.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
+        msgLbl.stringValue = currentStatusMessage ?? ""
+        statusBar.addSubview(msgLbl)
+        self.messageLabel = msgLbl
 
         let containerView = NSView(frame: contentBounds)
         containerView.autoresizingMask = [.width, .height]
@@ -324,6 +484,7 @@ open class VimMDDocument: NSDocument {
                     try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
                     self.updateChangeCount(.changeCleared)
                     session.clearDirty()
+                    showSavedChip()
                     let lineCount = session.lineIndexTable.lineCount
                     let content = session.serializeBuffer()
                     let byteCount = content.utf8.count
@@ -349,6 +510,7 @@ open class VimMDDocument: NSDocument {
                     try self.write(to: url, ofType: self.fileType ?? "public.plain-text", for: .saveOperation, originalContentsURL: url)
                     self.updateChangeCount(.changeCleared)
                     session.clearDirty()
+                    showSavedChip()
                     let lineCount = session.lineIndexTable.lineCount
                     let content = session.serializeBuffer()
                     let byteCount = content.utf8.count
@@ -367,7 +529,9 @@ open class VimMDDocument: NSDocument {
             }
 
         case VIM_ACTION_QUIT:
-            if !session.isDirty {
+            if session.isDirty || self.isDocumentEdited {
+                showStatusMessage("[Warning] E37: No write since last change (add ! to override)", isWarning: true)
+            } else {
                 self.close()
             }
 
@@ -376,8 +540,10 @@ open class VimMDDocument: NSDocument {
 
         case VIM_ACTION_QUIT_ALL:
             let allDocs = NSDocumentController.shared.documents
-            let anyDirty = allDocs.contains { ($0 as? VimMDDocument)?.isDocumentEdited == true }
-            if !anyDirty {
+            let anyDirty = allDocs.contains { ($0 as? VimMDDocument)?.isDocumentEdited == true || (($0 as? VimMDDocument)?.session?.isDirty ?? false) }
+            if anyDirty || session.isDirty || self.isDocumentEdited {
+                showStatusMessage("[Warning] E37: No write since last change (add ! to override)", isWarning: true)
+            } else {
                 NSApplication.shared.terminate(nil)
             }
 
@@ -394,6 +560,9 @@ open class VimMDDocument: NSDocument {
                 } catch {
                     NSLog("Failed to reload document: %@", error.localizedDescription)
                 }
+            } else {
+                self.session?.clearDirty()
+                self.updateChangeCount(.changeCleared)
             }
 
         default:
@@ -408,7 +577,9 @@ open class VimMDDocument: NSDocument {
         if action != VIM_ACTION_NONE {
             handleSystemAction(action)
         } else if session.shouldQuit {
-            if !session.isDirty {
+            if session.isDirty || self.isDocumentEdited {
+                showStatusMessage("[Warning] E37: No write since last change (add ! to override)", isWarning: true)
+            } else {
                 self.close()
             }
         }
