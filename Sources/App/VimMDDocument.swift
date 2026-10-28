@@ -96,6 +96,7 @@ open class VimMDDocument: NSDocument {
         bindSessionSystemAction(newSession)
         if let tv = self.textView {
             tv.session = newSession
+            tv.updateFrameHeightToFitText()
         }
     }
 
@@ -154,6 +155,7 @@ open class VimMDDocument: NSDocument {
         }
 
         scrollView.documentView = tv
+        tv.updateFrameHeightToFitText()
 
         // 2. Status bar at bottom
         let statusFrame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)

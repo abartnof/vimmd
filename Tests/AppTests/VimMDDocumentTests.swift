@@ -543,6 +543,32 @@ func testShowStatusMessageMethod() throws {
     }
 }
 
+func testDocumentScrollViewDynamicHeightAndScroller() throws {
+    let doc = VimMDDocument()
+    let multiline = (1...100).map { "## Section \($0)\nThis is multiline markdown paragraph number \($0)." }.joined(separator: "\n")
+    guard let data = multiline.data(using: .utf8) else {
+        throw NSError(domain: "AppTests", code: 1, userInfo: nil)
+    }
+    try doc.read(from: data, ofType: "public.plain-text")
+    doc.makeWindowControllers()
+
+    guard let tv = doc.textView else {
+        throw NSError(domain: "AppTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "TextView not created"])
+    }
+    guard let scrollView = tv.enclosingScrollView else {
+        throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Enclosing scroll view not found"])
+    }
+
+    guard scrollView.hasVerticalScroller else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "ScrollView vertical scroller should be enabled"])
+    }
+
+    // TextView frame height must accurately expand to accommodate 100 lines (> 1000pt)
+    guard tv.frame.size.height > scrollView.contentSize.height else {
+        throw NSError(domain: "AppTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "TextView frame height \(tv.frame.size.height) did not expand past scroll view content height \(scrollView.contentSize.height)"])
+    }
+}
+
 print("=== App Unit Tests ===")
 var total = 0
 var passed = 0
@@ -568,7 +594,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testStatusBarWriteUntitledFeedback", testStatusBarWriteUntitledFeedback),
     ("testStatusBarWriteSuccessFeedback", testStatusBarWriteSuccessFeedback),
     ("testStatusBarShowsLastErrorOnBlockedQuit", testStatusBarShowsLastErrorOnBlockedQuit),
-    ("testShowStatusMessageMethod", testShowStatusMessageMethod)
+    ("testShowStatusMessageMethod", testShowStatusMessageMethod),
+    ("testDocumentScrollViewDynamicHeightAndScroller", testDocumentScrollViewDynamicHeightAndScroller)
 ]
 
 for (name, test) in tests {

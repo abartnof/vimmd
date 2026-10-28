@@ -21,10 +21,10 @@ public struct MarkdownDelimiter: Equatable {
 }
 
 public struct MarkdownSyntaxResolver {
-    // Precompiled cached NSRegularExpression patterns
+    // Precompiled cached NSRegularExpression patterns conforming to CommonMark delimiter rules
     public static let headerRegex = try! NSRegularExpression(pattern: "^(#{1,6}\\s+)")
-    public static let boldRegex = try! NSRegularExpression(pattern: "(\\*\\*|__)(.*?)\\1")
-    public static let italicRegex = try! NSRegularExpression(pattern: "(?<!\\*|_)(\\*|_)(?!\\*|_)(.*?)(?<!\\*|_)\\1(?!\\*|_)")
+    public static let boldRegex = try! NSRegularExpression(pattern: "(?<!\\*|_)(\\*\\*|__)(?!\\s)((?:(?!\\1)[^\\n])+?)(?<!\\s)\\1(?!\\*|_)")
+    public static let italicRegex = try! NSRegularExpression(pattern: "(?<!\\*|_)(\\*|_)(?!\\s|\\*|_)((?:(?!\\1)[^\\n])+?)(?<!\\s|\\*|_)\\1(?!\\*|_)")
     public static let codeRegex = try! NSRegularExpression(pattern: "`([^`]+)`")
     public static let strikeRegex = try! NSRegularExpression(pattern: "~~([^~]+)~~")
     public static let linkRegex = try! NSRegularExpression(pattern: "\\[(.*?)\\]\\((.*?)\\)")
@@ -186,22 +186,9 @@ public struct MarkdownSyntaxResolver {
 
         let defaultFont = NSFont.systemFont(ofSize: 14)
         let defaultTextColor = NSColor.labelColor
-        let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
-        for (zeroIdx, lineRange) in lineRanges.enumerated() {
-            let currentLineNumber = zeroIdx + 1
-            let isEditingThisLine = isInsertMode && (activeLineIndex == currentLineNumber)
-
-            if isEditingThisLine {
-                // Active line in Insert mode: raw monospaced typography, delimiters unconcealed
-                textStorage.setAttributes([
-                    .font: monoFont,
-                    .foregroundColor: defaultTextColor
-                ], range: lineRange)
-                continue
-            }
-
-            // Normal/Visual mode or inactive line in Insert mode: render styled markdown
+        for lineRange in lineRanges {
+            // Apply markdown formatting permanently to all lines in all modes (NORMAL, VISUAL, INSERT)
             textStorage.setAttributes([
                 .font: defaultFont,
                 .foregroundColor: defaultTextColor

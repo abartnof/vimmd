@@ -22,25 +22,62 @@ open class VimMDTextView: NSTextView {
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
     public let syntaxResolver = MarkdownSyntaxResolver()
-    private var lastRenderedMode: VimEngineMode?
-    private var lastRenderedActiveLine: Int?
+
+    override public init(frame frameRect: NSRect, textContainer: NSTextContainer?) {
+        super.init(frame: frameRect, textContainer: textContainer)
+        setupDefaults()
+    }
+
+    required public init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupDefaults()
+    }
+
+    override public init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupDefaults()
+    }
+
+    private func setupDefaults() {
+        self.isVerticallyResizable = true
+        self.isHorizontallyResizable = false
+        self.autoresizingMask = [.width]
+        self.textContainer?.widthTracksTextView = true
+        self.textContainer?.containerSize = NSSize(width: self.frame.width, height: CGFloat.greatestFiniteMagnitude)
+    }
+
+    public func updateFrameHeightToFitText() {
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
+        let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
+        if abs(self.frame.size.height - targetHeight) > 1.0 {
+            self.setFrameSize(NSSize(width: self.frame.size.width, height: targetHeight))
+        }
+    }
+
+    override open func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(newSize.width - self.frame.size.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged {
+            updateFrameHeightToFitText()
+        }
+    }
+
+    override open func scrollWheel(with event: NSEvent) {
+        if let scrollView = self.enclosingScrollView {
+            scrollView.scrollWheel(with: event)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
 
     public func updateSyntaxStyling(force: Bool = false) {
         guard let storage = self.textStorage else { return }
         let currentMode = session?.mode ?? VIM_MODE_NORMAL
         let isInsert = (currentMode == VIM_MODE_INSERT)
         let activeLine = session?.cursorPosition.line
-
-        if !force && currentMode == lastRenderedMode {
-            if !isInsert {
-                return
-            } else if activeLine == lastRenderedActiveLine {
-                return
-            }
-        }
-
-        lastRenderedMode = currentMode
-        lastRenderedActiveLine = activeLine
 
         storage.beginEditing()
         syntaxResolver.renderSyntax(
@@ -76,6 +113,7 @@ open class VimMDTextView: NSTextView {
             self?.onModeChanged?(mode)
         }
         updateSyntaxStyling(force: true)
+        updateFrameHeightToFitText()
         synchronizeCaretWithSession()
     }
 
@@ -96,6 +134,7 @@ open class VimMDTextView: NSTextView {
         }
 
         updateSyntaxStyling(force: true)
+        updateFrameHeightToFitText()
         synchronizeCaretWithSession()
     }
 
@@ -112,6 +151,7 @@ open class VimMDTextView: NSTextView {
         let clamped = max(0, min(docLength, offset))
         self.currentSelectedRange = NSRange(location: clamped, length: 0)
         self.setSelectedRange(self.currentSelectedRange)
+        self.scrollRangeToVisible(self.currentSelectedRange)
         if session.mode == VIM_MODE_INSERT {
             updateSyntaxStyling()
         }

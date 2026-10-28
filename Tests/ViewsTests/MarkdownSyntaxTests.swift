@@ -226,23 +226,71 @@ func testRenderSyntaxInlineSpans() throws {
     }
 }
 
-func testRenderSyntaxInsertModeActiveLineUnconcealment() throws {
+func testRenderSyntaxInsertModeActiveLineFormattingPermanent() throws {
     let resolver = MarkdownSyntaxResolver()
     let text = "# Heading One\n**Bold Line Two**"
     let storage = NSMutableAttributedString(string: text)
 
-    // In Insert mode on Line 1: Line 1 should be raw monospaced (unconcealed), Line 2 should be styled
+    // In Insert mode on Line 1: Line 1 should retain H1 header font (22pt bold), Line 2 bold
     resolver.renderSyntax(in: storage, activeLineIndex: 1, isInsertMode: true)
 
     let line1Font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
-    guard let l1f = line1Font, l1f.isFixedPitch, l1f.pointSize == 13 else {
-        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected active line in insert mode to be 13pt monospaced, got \(String(describing: line1Font))"])
+    guard let l1f = line1Font, l1f.pointSize == 22, NSFontManager.shared.traits(of: l1f).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected active line in insert mode to permanently retain 22pt bold header font, got \(String(describing: line1Font))"])
     }
 
     let line2Offset = (text as NSString).range(of: "Bold Line Two").location
     let line2Font = storage.attribute(.font, at: line2Offset, effectiveRange: nil) as? NSFont
     guard let l2f = line2Font, NSFontManager.shared.traits(of: l2f).contains(.boldFontMask) else {
-        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected inactive line in insert mode to remain styled markdown"])
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected line 2 to retain bold font, got \(String(describing: line2Font))"])
+    }
+
+    // Delimiters should be styled with tertiary/subtle color
+    let delimColor = storage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+    guard delimColor == NSColor.tertiaryLabelColor else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected header delimiter '# ' to have tertiaryLabelColor"])
+    }
+}
+
+func testCommonMarkDelimiterEdgeCases() throws {
+    let resolver = MarkdownSyntaxResolver()
+
+    // 1. CommonMark italic edge case: '*this is not italic, but *this* is'
+    let italicEdgeText = "*this is not italic, but *this* is"
+    let italicDelims = resolver.extractDelimiters(from: italicEdgeText)
+    guard italicDelims.count == 1, italicDelims[0].type == .italic else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected exactly 1 italic delimiter for edge case, got \(italicDelims.count)"])
+    }
+    let matchedItalic = (italicEdgeText as NSString).substring(with: italicDelims[0].range)
+    guard matchedItalic == "*this*" else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected match '*this*', got '\(matchedItalic)'"])
+    }
+
+    // Test in renderSyntax
+    let storageItalic = NSMutableAttributedString(string: italicEdgeText)
+    resolver.renderSyntax(in: storageItalic, activeLineIndex: nil, isInsertMode: false)
+
+    let nonItalicOffset = (italicEdgeText as NSString).range(of: "this is not italic").location
+    let nonItalicFont = storageItalic.attribute(.font, at: nonItalicOffset, effectiveRange: nil) as? NSFont
+    guard let nif = nonItalicFont, !NSFontManager.shared.traits(of: nif).contains(.italicFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "'this is not italic' must NOT have italic font"])
+    }
+
+    let actualItalicOffset = (italicEdgeText as NSString).range(of: "this* is").location
+    let actualItalicFont = storageItalic.attribute(.font, at: actualItalicOffset, effectiveRange: nil) as? NSFont
+    guard let aif = actualItalicFont, NSFontManager.shared.traits(of: aif).contains(.italicFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "'*this*' must have italic font"])
+    }
+
+    // 2. CommonMark bold edge case: '**this is not bold, but **this** is'
+    let boldEdgeText = "**this is not bold, but **this** is"
+    let boldDelims = resolver.extractDelimiters(from: boldEdgeText)
+    guard boldDelims.count == 1, boldDelims[0].type == .bold else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected exactly 1 bold delimiter for edge case, got \(boldDelims.count)"])
+    }
+    let matchedBold = (boldEdgeText as NSString).substring(with: boldDelims[0].range)
+    guard matchedBold == "**this**" else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected match '**this**', got '\(matchedBold)'"])
     }
 }
 
@@ -261,7 +309,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testItalicAndStrikethroughDelimiters", testItalicAndStrikethroughDelimiters),
     ("testRenderSyntaxHeaders", testRenderSyntaxHeaders),
     ("testRenderSyntaxInlineSpans", testRenderSyntaxInlineSpans),
-    ("testRenderSyntaxInsertModeActiveLineUnconcealment", testRenderSyntaxInsertModeActiveLineUnconcealment)
+    ("testRenderSyntaxInsertModeActiveLineFormattingPermanent", testRenderSyntaxInsertModeActiveLineFormattingPermanent),
+    ("testCommonMarkDelimiterEdgeCases", testCommonMarkDelimiterEdgeCases)
 ]
 
 for (name, test) in tests {

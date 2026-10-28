@@ -375,7 +375,7 @@ func testTextViewMarkdownRenderingInNormalMode() throws {
     }
 }
 
-func testTextViewActiveLineUnconcealedInInsertMode() throws {
+func testTextViewMarkdownFormattingPermanentInInsertMode() throws {
     let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
     let session = VimSession(initialText: "# Header Line\n**Bold Line Two**")
     textView.session = session
@@ -388,10 +388,10 @@ func testTextViewActiveLineUnconcealedInInsertMode() throws {
         throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
     }
 
-    // Line 1 is active in insert mode -> raw monospaced font
+    // Line 1 is active in insert mode -> MUST retain 22pt bold header font (permanent formatting)
     let line1Font = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
-    guard let l1f = line1Font, l1f.isFixedPitch, l1f.pointSize == 13 else {
-        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected active line in insert mode to be raw 13pt monospaced, got \(String(describing: line1Font))"])
+    guard let l1f = line1Font, l1f.pointSize == 22, NSFontManager.shared.traits(of: l1f).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected active line in insert mode to permanently retain 22pt bold header font, got \(String(describing: line1Font))"])
     }
 
     // Line 2 is inactive in insert mode -> rendered markdown bold
@@ -402,7 +402,7 @@ func testTextViewActiveLineUnconcealedInInsertMode() throws {
     }
 }
 
-func testTextViewModeTransitionTogglesStyling() throws {
+func testTextViewModeTransitionPreservesMarkdownFormatting() throws {
     let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
     let session = VimSession(initialText: "# Header")
     textView.session = session
@@ -417,12 +417,12 @@ func testTextViewModeTransitionTogglesStyling() throws {
         throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected 22pt header font in Normal mode"])
     }
 
-    // Transition to Insert mode -> 13pt monospaced
+    // Transition to Insert mode -> STILL 22pt header!
     session.feedKeys("i")
     textView.updateSyntaxStyling(force: true)
     font = storage.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
-    guard font?.isFixedPitch == true, font?.pointSize == 13 else {
-        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected 13pt monospaced font in Insert mode"])
+    guard font?.pointSize == 22, let f = font, NSFontManager.shared.traits(of: f).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected 22pt header font preserved in Insert mode"])
     }
 
     // Escape back to Normal mode -> 22pt header
@@ -434,7 +434,7 @@ func testTextViewModeTransitionTogglesStyling() throws {
     }
 }
 
-func testTextViewInsertModeCursorMoveSwapsActiveLine() throws {
+func testTextViewInsertModeCursorMoveMaintainsStyling() throws {
     let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
     let session = VimSession(initialText: "# Line One\n## Line Two")
     textView.session = session
@@ -447,23 +447,152 @@ func testTextViewInsertModeCursorMoveSwapsActiveLine() throws {
         throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
     }
 
-    // Line 1 active (13pt mono), Line 2 styled (18pt bold)
+    // Line 1 (22pt bold), Line 2 (18pt bold)
     var fontL1 = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
     let l2Offset = (storage.string as NSString).range(of: "Line Two").location
     var fontL2 = storage.attribute(.font, at: l2Offset, effectiveRange: nil) as? NSFont
-    guard fontL1?.isFixedPitch == true, fontL2?.pointSize == 18 else {
+    guard fontL1?.pointSize == 22, fontL2?.pointSize == 18 else {
         throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial insert mode styling mismatch"])
     }
 
-    // Move cursor to Line 2 while remaining in Insert mode (e.g. Down arrow or setCursor)
+    // Move cursor to Line 2 while remaining in Insert mode
     session.setCursor(line: 2, byteCol: 1)
     textView.updateSyntaxStyling(force: true)
 
-    // Now Line 1 should be styled (22pt bold), Line 2 unconcealed (13pt mono)
+    // Both lines must maintain their header formatting
     fontL1 = storage.attribute(.font, at: 2, effectiveRange: nil) as? NSFont
     fontL2 = storage.attribute(.font, at: l2Offset, effectiveRange: nil) as? NSFont
-    guard fontL1?.pointSize == 22, fontL2?.isFixedPitch == true else {
-        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Line swapping after cursor move mismatch: L1=\(String(describing: fontL1)), L2=\(String(describing: fontL2))"])
+    guard fontL1?.pointSize == 22, fontL2?.pointSize == 18 else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Header styling should persist across cursor moves in Insert mode"])
+    }
+}
+
+func testTextViewDynamicFrameHeightExpansion() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 100))
+    let multiline = (1...60).map { "Line \($0): A long document line with some text." }.joined(separator: "\n")
+    let session = VimSession(initialText: multiline)
+    textView.session = session
+
+    // Ensure frame height expanded to accommodate multiline text
+    guard textView.frame.size.height >= 500 else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected text view frame height to expand for multiline text, got \(textView.frame.size.height)"])
+    }
+}
+
+class TrackingScrollTextView: VimMDTextView {
+    var lastScrolledRange: NSRange?
+    override func scrollRangeToVisible(_ range: NSRange) {
+        lastScrolledRange = range
+        super.scrollRangeToVisible(range)
+    }
+}
+
+func testCaretAutoScrollInvocation() throws {
+    let textView = TrackingScrollTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let multiline = (1...30).map { "Line \($0)" }.joined(separator: "\n")
+    let session = VimSession(initialText: multiline)
+    textView.session = session
+
+    // Move cursor down with 'j'
+    let eventJ = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "j",
+        charactersIgnoringModifiers: "j",
+        isARepeat: false,
+        keyCode: 38
+    )!
+    textView.keyDown(with: eventJ)
+
+    guard let scrolled = textView.lastScrolledRange else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "scrollRangeToVisible was never called after cursor navigation"])
+    }
+    guard scrolled.location == session.cursorUtf16Offset else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "scrollRangeToVisible called with range \(scrolled), expected \(session.cursorUtf16Offset)"])
+    }
+}
+
+func testResponsiveTypingInInsertModeMarkdownStyling() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "")
+    textView.session = session
+
+    // Enter insert mode
+    session.feedKeys("i")
+    guard session.mode == VIM_MODE_INSERT else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected Insert mode"])
+    }
+
+    // Type '**live bold**' live in insert mode
+    for ch in "**live bold**" {
+        session.feedKeys(String(ch))
+    }
+
+    guard let storage = textView.textStorage else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected textStorage"])
+    }
+
+    let boldLoc = (storage.string as NSString).range(of: "live bold").location
+    guard boldLoc != NSNotFound else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "String missing 'live bold': '\(storage.string)'"])
+    }
+
+    let boldFont = storage.attribute(.font, at: boldLoc, effectiveRange: nil) as? NSFont
+    guard let bf = boldFont, NSFontManager.shared.traits(of: bf).contains(.boldFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Typing in Insert mode did not responsively apply bold styling: \(String(describing: boldFont))"])
+    }
+
+    // Now type CommonMark edge case: '\n*this is not italic, but *this* is'
+    session.feedKeys("\r")
+    for ch in "*this is not italic, but *this* is" {
+        session.feedKeys(String(ch))
+    }
+
+    let notItalicLoc = (storage.string as NSString).range(of: "this is not italic").location
+    let notItalicFont = storage.attribute(.font, at: notItalicLoc, effectiveRange: nil) as? NSFont
+    guard let nif = notItalicFont, !NSFontManager.shared.traits(of: nif).contains(.italicFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "'this is not italic' must not be italic"])
+    }
+
+    let isItalicLoc = (storage.string as NSString).range(of: "this* is").location
+    let isItalicFont = storage.attribute(.font, at: isItalicLoc, effectiveRange: nil) as? NSFont
+    guard let iif = isItalicFont, NSFontManager.shared.traits(of: iif).contains(.italicFontMask) else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "'*this*' must be italic"])
+    }
+}
+
+class TrackingScrollView: NSScrollView {
+    var receivedScrollWheel = false
+    override func scrollWheel(with event: NSEvent) {
+        receivedScrollWheel = true
+    }
+}
+
+func testScrollWheelForwarding() throws {
+    let scrollView = TrackingScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 1000))
+    scrollView.documentView = textView
+
+    let dummyEvent = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "",
+        charactersIgnoringModifiers: "",
+        isARepeat: false,
+        keyCode: 0
+    )!
+    textView.scrollWheel(with: dummyEvent)
+
+    guard scrollView.receivedScrollWheel else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "scrollWheel was not forwarded to enclosing scroll view"])
     }
 }
 
@@ -506,9 +635,13 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewModeAndCursorMovedCallbacks", testTextViewModeAndCursorMovedCallbacks),
     ("testTextViewCommandHotkeysPreservation", testTextViewCommandHotkeysPreservation),
     ("testTextViewMarkdownRenderingInNormalMode", testTextViewMarkdownRenderingInNormalMode),
-    ("testTextViewActiveLineUnconcealedInInsertMode", testTextViewActiveLineUnconcealedInInsertMode),
-    ("testTextViewModeTransitionTogglesStyling", testTextViewModeTransitionTogglesStyling),
-    ("testTextViewInsertModeCursorMoveSwapsActiveLine", testTextViewInsertModeCursorMoveSwapsActiveLine),
+    ("testTextViewMarkdownFormattingPermanentInInsertMode", testTextViewMarkdownFormattingPermanentInInsertMode),
+    ("testTextViewModeTransitionPreservesMarkdownFormatting", testTextViewModeTransitionPreservesMarkdownFormatting),
+    ("testTextViewInsertModeCursorMoveMaintainsStyling", testTextViewInsertModeCursorMoveMaintainsStyling),
+    ("testTextViewDynamicFrameHeightExpansion", testTextViewDynamicFrameHeightExpansion),
+    ("testCaretAutoScrollInvocation", testCaretAutoScrollInvocation),
+    ("testResponsiveTypingInInsertModeMarkdownStyling", testResponsiveTypingInInsertModeMarkdownStyling),
+    ("testScrollWheelForwarding", testScrollWheelForwarding),
     ("testTextViewCaretAlignmentMatchesRawOffsets", testTextViewCaretAlignmentMatchesRawOffsets)
 ]
 
