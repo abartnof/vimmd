@@ -5,6 +5,38 @@ import CBridge
 
 @objc(VimMDDocument)
 open class VimMDDocument: NSDocument {
+    public static let wrapLinesPreferenceKey = "VimMDWrapLinesPreference"
+
+    public static func isTabularFormat(url: URL?, fileType: String?) -> Bool {
+        if let ext = url?.pathExtension.lowercased(), ext == "csv" || ext == "tsv" {
+            return true
+        }
+        if let type = fileType?.lowercased(),
+           type.contains("comma-separated") || type.contains("tab-separated") || type.contains(".csv") || type.contains(".tsv") {
+            return true
+        }
+        return false
+    }
+
+    public var isTabularDocument: Bool {
+        return VimMDDocument.isTabularFormat(url: self.fileURL, fileType: self.fileType)
+    }
+
+    public var wrapLines: Bool = true {
+        didSet {
+            textView?.wrapLines = wrapLines
+            (NSApplication.shared.delegate as? AppDelegate)?.updateWrapLinesMenuItemState()
+        }
+    }
+
+    public func configureWrapLinesPolicy() {
+        if isTabularDocument {
+            self.wrapLines = false
+        } else {
+            self.wrapLines = UserDefaults.standard.object(forKey: VimMDDocument.wrapLinesPreferenceKey) as? Bool ?? true
+        }
+    }
+
     public var session: VimSession?
     public var textView: VimMDTextView?
     public var isClosed: Bool = false
@@ -42,18 +74,21 @@ open class VimMDDocument: NSDocument {
         let s = VimSession(initialText: "")
         self.session = s
         super.init()
+        configureWrapLinesPolicy()
         bindSessionSystemAction(s)
     }
 
     public convenience init(type typeName: String) throws {
         self.init()
         self.fileType = typeName
+        configureWrapLinesPolicy()
     }
 
     public convenience init(contentsOf url: URL, ofType typeName: String) throws {
         self.init()
         self.fileURL = url
         self.fileType = typeName
+        configureWrapLinesPolicy()
         let data = try Data(contentsOf: url)
         try self.read(from: data, ofType: typeName)
     }
@@ -90,14 +125,24 @@ open class VimMDDocument: NSDocument {
     }
 
     override open func read(from data: Data, ofType typeName: String) throws {
+        self.fileType = typeName
+        configureWrapLinesPolicy()
         let string = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
         let newSession = VimSession(initialText: string)
         self.session = newSession
         bindSessionSystemAction(newSession)
         if let tv = self.textView {
             tv.session = newSession
+            tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
         }
+    }
+
+    override open func read(from url: URL, ofType typeName: String) throws {
+        self.fileURL = url
+        self.fileType = typeName
+        configureWrapLinesPolicy()
+        try super.read(from: url, ofType: typeName)
     }
 
     override open func write(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType, originalContentsURL absoluteOriginalContentsURL: URL?) throws {
@@ -123,17 +168,17 @@ open class VimMDDocument: NSDocument {
         let scrollView = NSScrollView(frame: scrollFrame)
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
+        scrollView.hasHorizontalScroller = !self.wrapLines
 
         let contentSize = scrollView.contentSize
         let tv = VimMDTextView(frame: NSRect(origin: .zero, size: contentSize))
         tv.minSize = NSSize(width: 0.0, height: contentSize.height)
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         tv.isVerticallyResizable = true
-        tv.isHorizontallyResizable = false
-        tv.autoresizingMask = [.width]
-        tv.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-        tv.textContainer?.widthTracksTextView = true
+        tv.isHorizontallyResizable = !self.wrapLines
+        tv.autoresizingMask = self.wrapLines ? [.width] : []
+        tv.textContainer?.containerSize = NSSize(width: self.wrapLines ? contentSize.width : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.textContainer?.widthTracksTextView = self.wrapLines
 
         if self.session == nil {
             let s = VimSession(initialText: "")
@@ -155,6 +200,10 @@ open class VimMDDocument: NSDocument {
         }
 
         scrollView.documentView = tv
+        tv.wrapLines = self.wrapLines
+        tv.onToggleWrapLines = { [weak self] in
+            self?.toggleWrapLines(nil)
+        }
         tv.updateFrameHeightToFitText()
 
         // Configure LineNumberRulerView gutter
@@ -332,5 +381,21 @@ open class VimMDDocument: NSDocument {
             let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
             showStatusMessage(warningText, isWarning: true)
         }
+    }
+
+    @IBAction open func toggleWrapLines(_ sender: Any?) {
+        self.wrapLines = !self.wrapLines
+        if !isTabularDocument {
+            UserDefaults.standard.set(self.wrapLines, forKey: VimMDDocument.wrapLinesPreferenceKey)
+        }
+        (NSApplication.shared.delegate as? AppDelegate)?.updateWrapLinesMenuItemState()
+    }
+
+    override open func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleWrapLines(_:)) {
+            menuItem.state = self.wrapLines ? .on : .off
+            return true
+        }
+        return super.validateMenuItem(menuItem)
     }
 }

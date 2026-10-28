@@ -1,7 +1,105 @@
 import AppKit
 
-open class AppDelegate: NSObject, NSApplicationDelegate {
+public enum AppearanceMode: String, CaseIterable {
+    case matchSystem = "Match System"
+    case light = "Light"
+    case dark = "Dark"
+}
+
+open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+    public static let appearancePreferenceKey = "VimMDAppearancePreference"
+    public static let wrapLinesPreferenceKey = "VimMDWrapLinesPreference"
+
     public var hasOpenedDocument: Bool = false
+
+    public var matchSystemMenuItem: NSMenuItem?
+    public var lightMenuItem: NSMenuItem?
+    public var darkMenuItem: NSMenuItem?
+    public var wrapLinesMenuItem: NSMenuItem?
+    public var viewMenuItem: NSMenuItem?
+
+    public var currentAppearanceMode: AppearanceMode {
+        get {
+            guard let stored = UserDefaults.standard.string(forKey: AppDelegate.appearancePreferenceKey) else {
+                return .matchSystem
+            }
+            switch stored.lowercased() {
+            case "light", "aqua":
+                return .light
+            case "dark", "darkaqua":
+                return .dark
+            default:
+                return .matchSystem
+            }
+        }
+        set {
+            setAppearance(mode: newValue)
+        }
+    }
+
+    public func setAppearance(mode: AppearanceMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: AppDelegate.appearancePreferenceKey)
+        applyAppearanceMode(mode)
+    }
+
+    public func applyAppearanceMode(_ mode: AppearanceMode) {
+        switch mode {
+        case .matchSystem:
+            NSApp.appearance = nil
+        case .light:
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+        updateAppearanceMenuCheckmarks(mode: mode)
+    }
+
+    public func updateAppearanceMenuCheckmarks(mode: AppearanceMode) {
+        matchSystemMenuItem?.state = (mode == .matchSystem) ? .on : .off
+        lightMenuItem?.state = (mode == .light) ? .on : .off
+        darkMenuItem?.state = (mode == .dark) ? .on : .off
+    }
+
+    public func updateWrapLinesMenuItemState() {
+        guard let item = wrapLinesMenuItem else { return }
+        if let doc = NSDocumentController.shared.currentDocument as? VimMDDocument {
+            item.state = doc.wrapLines ? .on : .off
+        } else {
+            let pref = UserDefaults.standard.object(forKey: AppDelegate.wrapLinesPreferenceKey) as? Bool ?? true
+            item.state = pref ? .on : .off
+        }
+    }
+
+    @IBAction public func setAppearanceMatchSystem(_ sender: Any?) {
+        setAppearance(mode: .matchSystem)
+    }
+
+    @IBAction public func setAppearanceLight(_ sender: Any?) {
+        setAppearance(mode: .light)
+    }
+
+    @IBAction public func setAppearanceDark(_ sender: Any?) {
+        setAppearance(mode: .dark)
+    }
+
+    @IBAction public func toggleWrapLines(_ sender: Any?) {
+        if let doc = NSDocumentController.shared.currentDocument as? VimMDDocument {
+            doc.toggleWrapLines(sender)
+        } else {
+            let currentPref = UserDefaults.standard.object(forKey: AppDelegate.wrapLinesPreferenceKey) as? Bool ?? true
+            let newPref = !currentPref
+            UserDefaults.standard.set(newPref, forKey: AppDelegate.wrapLinesPreferenceKey)
+            updateWrapLinesMenuItemState()
+        }
+    }
+
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem == wrapLinesMenuItem || menuItem.action == #selector(toggleWrapLines(_:)) {
+            updateWrapLinesMenuItemState()
+            return true
+        }
+        return true
+    }
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return hasOpenedDocument && NSDocumentController.shared.documents.isEmpty
@@ -69,7 +167,44 @@ open class AppDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
-        // 4. Window Menu
+        // 4. View Menu
+        let viewMenuItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+
+        let appearanceMenuItem = NSMenuItem(title: "Appearance", action: nil, keyEquivalent: "")
+        let appearanceMenu = NSMenu(title: "Appearance")
+
+        let matchSystemItem = NSMenuItem(title: "Match System", action: #selector(setAppearanceMatchSystem(_:)), keyEquivalent: "")
+        matchSystemItem.target = self
+        appearanceMenu.addItem(matchSystemItem)
+        self.matchSystemMenuItem = matchSystemItem
+
+        let lightItem = NSMenuItem(title: "Light", action: #selector(setAppearanceLight(_:)), keyEquivalent: "")
+        lightItem.target = self
+        appearanceMenu.addItem(lightItem)
+        self.lightMenuItem = lightItem
+
+        let darkItem = NSMenuItem(title: "Dark", action: #selector(setAppearanceDark(_:)), keyEquivalent: "")
+        darkItem.target = self
+        appearanceMenu.addItem(darkItem)
+        self.darkMenuItem = darkItem
+
+        appearanceMenuItem.submenu = appearanceMenu
+        viewMenu.addItem(appearanceMenuItem)
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        let wrapLinesItem = NSMenuItem(title: "Wrap Lines", action: #selector(toggleWrapLines(_:)), keyEquivalent: "w")
+        wrapLinesItem.keyEquivalentModifierMask = [.command, .option]
+        wrapLinesItem.target = nil
+        viewMenu.addItem(wrapLinesItem)
+        self.wrapLinesMenuItem = wrapLinesItem
+
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+        self.viewMenuItem = viewMenuItem
+
+        // 5. Window Menu
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -77,7 +212,18 @@ open class AppDelegate: NSObject, NSApplicationDelegate {
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
 
+        // 6. Help Menu
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        helpMenu.addItem(withTitle: "\(appName) Help", action: #selector(NSApplication.showHelp(_:)), keyEquivalent: "?")
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+
         NSApplication.shared.mainMenu = mainMenu
         NSApplication.shared.windowsMenu = windowMenu
+        NSApplication.shared.helpMenu = helpMenu
+
+        applyAppearanceMode(currentAppearanceMode)
+        updateWrapLinesMenuItemState()
     }
 }

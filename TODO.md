@@ -5,7 +5,8 @@ This document tracks all active milestones, user requirements, and architectural
 ---
 
 ## 1. In Progress
-- [ ] **Full Undo & Redo Subsystem**
+- [x] **Full Undo & Redo Subsystem** (`97ab3eb`)
+- [ ] **View Menu, Appearance Modes & Line Wrap Policy**
   - [x] Multi-tier snapshot history stack in C engine (`struct VimUndoState` in `VimDocumentContext`).
   - [x] Snapshot boundaries captured before buffer mutations (`dd`, `dw`, `d$`, `d0`, `x`, `s`, `p`, `P`, `J`, `:%s`, and Insert mode sessions).
   - [x] Vim keys: `u` (Undo) and `<C-r>` (`\x12`, Redo).

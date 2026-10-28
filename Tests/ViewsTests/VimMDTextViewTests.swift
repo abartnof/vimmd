@@ -862,6 +862,104 @@ func testTextViewUndoManagerIntegration() throws {
     }
 }
 
+func testTextViewWrapLinesPropertyAndConfiguration() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    scrollView.documentView = textView
+
+    // 1. Initial default state: wrapLines == true
+    guard textView.wrapLines == true else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Default wrapLines must be true"])
+    }
+    guard textView.textContainer?.widthTracksTextView == true else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "widthTracksTextView must be true when wrapLines == true"])
+    }
+    guard textView.isHorizontallyResizable == false else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "isHorizontallyResizable must be false when wrapLines == true"])
+    }
+    guard scrollView.hasHorizontalScroller == false else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "hasHorizontalScroller must be false when wrapLines == true"])
+    }
+
+    // 2. Set wrapLines = false (unwrapped / horizontal scroll)
+    textView.wrapLines = false
+    guard textView.wrapLines == false else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "wrapLines must be false"])
+    }
+    guard textView.textContainer?.widthTracksTextView == false else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "widthTracksTextView must be false when wrapLines == false"])
+    }
+    guard textView.textContainer?.containerSize.width == CGFloat.greatestFiniteMagnitude else {
+        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "containerSize.width must be greatestFiniteMagnitude when wrapLines == false"])
+    }
+    guard textView.isHorizontallyResizable == true else {
+        throw NSError(domain: "ViewsTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "isHorizontallyResizable must be true when wrapLines == false"])
+    }
+    guard textView.maxSize.width == CGFloat.greatestFiniteMagnitude else {
+        throw NSError(domain: "ViewsTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "maxSize.width must be greatestFiniteMagnitude when wrapLines == false"])
+    }
+    guard scrollView.hasHorizontalScroller == true else {
+        throw NSError(domain: "ViewsTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "hasHorizontalScroller must be true when wrapLines == false"])
+    }
+
+    // 3. Test horizontal frame expansion with a wide line
+    let wideLine = String(repeating: "tabular_data_col_value\t", count: 20)
+    let session = VimSession(initialText: wideLine)
+    textView.session = session
+    textView.updateFrameHeightToFitText()
+
+    guard textView.frame.size.width > 400 else {
+        throw NSError(domain: "ViewsTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected textView frame width to expand beyond 400 for wide text when wrapLines == false, got \(textView.frame.size.width)"])
+    }
+
+    // 4. Toggle back to wrapLines == true
+    textView.wrapLines = true
+    guard textView.wrapLines == true else {
+        throw NSError(domain: "ViewsTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "wrapLines must be true"])
+    }
+    guard textView.textContainer?.widthTracksTextView == true else {
+        throw NSError(domain: "ViewsTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "widthTracksTextView must restore to true"])
+    }
+    guard let containerWidth = textView.textContainer?.containerSize.width, abs(containerWidth - 400) < 1.0 else {
+        throw NSError(domain: "ViewsTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "containerSize.width must restore to contentWidth, got \(String(describing: textView.textContainer?.containerSize.width))"])
+    }
+    guard textView.isHorizontallyResizable == false else {
+        throw NSError(domain: "ViewsTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "isHorizontallyResizable must restore to false"])
+    }
+    guard scrollView.hasHorizontalScroller == false else {
+        throw NSError(domain: "ViewsTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "hasHorizontalScroller must restore to false"])
+    }
+
+    // 5. User interface validation checkmark tests (validateUserInterfaceItem)
+    let menuItem = NSMenuItem(title: "Wrap Lines", action: #selector(VimMDTextView.toggleWrapLines(_:)), keyEquivalent: "")
+    let isValidOn = textView.validateUserInterfaceItem(menuItem)
+    guard isValidOn else {
+        throw NSError(domain: "ViewsTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "validateUserInterfaceItem returned false for toggleWrapLines"])
+    }
+    guard menuItem.state == .on else {
+        throw NSError(domain: "ViewsTests", code: 18, userInfo: [NSLocalizedDescriptionKey: "menuItem.state should be .on when wrapLines == true"])
+    }
+
+    textView.wrapLines = false
+    let isValidOff = textView.validateUserInterfaceItem(menuItem)
+    guard isValidOff else {
+        throw NSError(domain: "ViewsTests", code: 19, userInfo: [NSLocalizedDescriptionKey: "validateUserInterfaceItem returned false for toggleWrapLines"])
+    }
+    guard menuItem.state == .off else {
+        throw NSError(domain: "ViewsTests", code: 20, userInfo: [NSLocalizedDescriptionKey: "menuItem.state should be .off when wrapLines == false"])
+    }
+
+    // 6. toggleWrapLines action method
+    textView.toggleWrapLines(nil)
+    guard textView.wrapLines == true else {
+        throw NSError(domain: "ViewsTests", code: 21, userInfo: [NSLocalizedDescriptionKey: "toggleWrapLines should flip wrapLines to true"])
+    }
+    textView.toggleWrapLines(nil)
+    guard textView.wrapLines == false else {
+        throw NSError(domain: "ViewsTests", code: 22, userInfo: [NSLocalizedDescriptionKey: "toggleWrapLines should flip wrapLines back to false"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -893,7 +991,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewCopyAndPasteSynchronizedWithSystemPasteboard", testTextViewCopyAndPasteSynchronizedWithSystemPasteboard),
     ("testTextViewUndoRedoCommandKeys", testTextViewUndoRedoCommandKeys),
     ("testTextViewUndoRedoActionMethods", testTextViewUndoRedoActionMethods),
-    ("testTextViewUndoManagerIntegration", testTextViewUndoManagerIntegration)
+    ("testTextViewUndoManagerIntegration", testTextViewUndoManagerIntegration),
+    ("testTextViewWrapLinesPropertyAndConfiguration", testTextViewWrapLinesPropertyAndConfiguration)
 ]
 
 for (name, test) in tests {

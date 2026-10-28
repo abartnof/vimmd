@@ -18,6 +18,15 @@ open class VimMDTextView: NSTextView {
     /// Callback invoked when Vim mode changes.
     public var onModeChanged: ((VimEngineMode) -> Void)?
 
+    /// Callback invoked when wrap lines is toggled.
+    public var onToggleWrapLines: (() -> Void)?
+
+    public var wrapLines: Bool = true {
+        didSet {
+            applyWrapLinesSetting()
+        }
+    }
+
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
@@ -46,8 +55,66 @@ open class VimMDTextView: NSTextView {
         self.textContainer?.containerSize = NSSize(width: self.frame.width, height: CGFloat.greatestFiniteMagnitude)
     }
 
+    override open func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        if self.superview != nil {
+            applyWrapLinesSetting()
+        }
+    }
+
+    public func applyWrapLinesSetting() {
+        guard let textContainer = self.textContainer else { return }
+        if wrapLines {
+            let contentWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
+            textContainer.widthTracksTextView = true
+            textContainer.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+            self.isHorizontallyResizable = false
+            self.autoresizingMask = [.width]
+            if let scrollView = self.enclosingScrollView {
+                scrollView.hasHorizontalScroller = false
+                if abs(self.frame.width - contentWidth) > 0.5 {
+                    self.setFrameSize(NSSize(width: contentWidth, height: self.frame.height))
+                }
+            }
+            updateFrameHeightToFitText()
+        } else {
+            self.autoresizingMask = []
+            textContainer.widthTracksTextView = false
+            textContainer.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            self.isHorizontallyResizable = true
+            self.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            if let scrollView = self.enclosingScrollView {
+                scrollView.hasHorizontalScroller = true
+            }
+            updateFrameForUnwrappedLines()
+        }
+    }
+
+    public func updateFrameForUnwrappedLines() {
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let viewportWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
+        let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
+        let targetWidth = max(viewportWidth, ceil(usedRect.size.width + self.textContainerInset.width * 2 + 50.0))
+        let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
+        self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
+    }
+
+    @objc open func toggleWrapLines(_ sender: Any? = nil) {
+        if let callback = onToggleWrapLines {
+            callback()
+        } else {
+            self.wrapLines = !self.wrapLines
+        }
+    }
+
     public func updateFrameHeightToFitText() {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
+        if !wrapLines {
+            updateFrameForUnwrappedLines()
+            return
+        }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
@@ -60,7 +127,7 @@ open class VimMDTextView: NSTextView {
     override open func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(newSize.width - self.frame.size.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged {
+        if widthChanged && wrapLines {
             updateFrameHeightToFitText()
         }
     }
@@ -315,6 +382,12 @@ open class VimMDTextView: NSTextView {
     }
 
     override open func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(toggleWrapLines(_:)) {
+            if let menuItem = item as? NSMenuItem {
+                menuItem.state = self.wrapLines ? .on : .off
+            }
+            return true
+        }
         if item.action == #selector(VimMDTextView.undo(_:)) {
             return session?.canUndo ?? false
         }
