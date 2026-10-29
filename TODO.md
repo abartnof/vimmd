@@ -136,9 +136,9 @@ This document tracks all active milestones, user requirements, and architectural
     - [ ] Set `NSApplication.shared.applicationIconImage` dynamically at launch in `AppDelegate`.
     - [ ] Package multi-resolution `AppIcon.icns` in `VimMD.app/Contents/Resources/` and register `CFBundleIconFile` in `Info.plist` for Finder and Dock support.
 
-- [ ] **Milestone O: Tabular Modal Input & First Responder Parity (Vim Commands in Spreadsheets)**
-  - [ ] **First Responder & Mouse Down Fix**: Ensure clicking anywhere in a tabular document (including row 0 headers and column A cells) properly activates `firstResponder` on `VimMDTextView`, positions the Vim caret at the clicked cell, and allows subsequent typing without swallowing events.
-  - [ ] **Full Modal Parity**: Verify that all standard Vim commands work identically in tabular documents:
+- [x] **Milestone O: Tabular Modal Input & First Responder Parity (Vim Commands in Spreadsheets)**
+  - [x] **First Responder & Mouse Down Fix**: Ensure clicking anywhere in a tabular document (including row 0 headers and column A cells) properly activates `firstResponder` on `VimMDTextView`, positions the Vim caret at the clicked cell, and allows subsequent typing without swallowing events.
+  - [x] **Full Modal Parity**: Verify that all standard Vim commands work identically in tabular documents:
     - Navigation: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `ge`, `0`, `^`, `$`, `gg`, `G`, `f`, `t`.
     - Mutations: `x`, `s`, `r`, `cw`, `cc`, `c$`, `dd`, `dw`, `d$`, `yy`, `yw`, `p`, `P`, `J`.
     - Modal Transitions: `i`, `I`, `a`, `A`, `o`, `O` with automatic tabular delimiter alignment.
@@ -176,27 +176,27 @@ Tracks live verification status of all capabilities across each supported docume
 
 | Function Category | Capability / Keystroke | Spreadsheet (`.csv`, `.tsv`) | Markdown (`.md`) | Plain Text / Code (`.txt`, `.sh`, `.json`) |
 | :--- | :--- | :---: | :---: | :---: |
-| **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Pending M-O | Verified (CUJ 13) | Verified (CUJ 13) |
-| **Vertical Motions** | `j`, `k`, `gg`, `G` | Pending M-O | Verified (CUJ 16) | Verified (CUJ 16) |
-| **Word Motions** | `w`, `b`, `e`, `ge` | Pending M-O | Verified (CUJ 14) | Verified (CUJ 14) |
-| **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Pending M-O | Verified (CUJ 15) | Verified (CUJ 15) |
-| **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Pending M-O | Verified (CUJ 16) | Verified (CUJ 16) |
-| **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Pending M-O | Verified (CUJ 1-6) | Verified (CUJ 7-10) |
-| **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Pending M-O | Verified (CUJ 19) | Verified (CUJ 19) |
-| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Pending M-O | Verified (CUJ 20-21) | Verified (CUJ 20-21) |
-| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Pending M-O | Verified (CUJ 22-24) | Verified (CUJ 22-24) |
-| **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Pending M-O | Verified (CUJ 25-30) | Verified (CUJ 25-30) |
-| **Visual Modes** | `v`, `V`, block selections | Pending M-O | Verified (CUJ 30) | Verified (CUJ 30) |
-| **Undo / Redo** | `u`, `Ctrl-R` | Pending M-O | Verified (CUJ 31) | Verified (CUJ 31) |
-| **Ex Substitutions** | `:%s/find/replace/g` | Pending M-O | Verified (CUJ 33) | Verified (CUJ 33) |
-| **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Pending M-O | Verified (CUJ 34) | Verified (CUJ 34) |
-| **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Pending M-O | Verified (CUJ 17-18) | Verified (CUJ 17-18) |
-| **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Pending M-O | Verified (CUJ 32) | Verified (CUJ 32) |
+| **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Verified (M-O) | Verified (CUJ 13) | Verified (CUJ 13) |
+| **Vertical Motions** | `j`, `k`, `gg`, `G` | Verified (M-O) | Verified (CUJ 16) | Verified (CUJ 16) |
+| **Word Motions** | `w`, `b`, `e`, `ge` | Verified (M-O) | Verified (CUJ 14) | Verified (CUJ 14) |
+| **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Verified (M-O) | Verified (CUJ 15) | Verified (CUJ 15) |
+| **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Verified (M-O) | Verified (CUJ 16) | Verified (CUJ 16) |
+| **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Verified (M-O) | Verified (CUJ 1-6) | Verified (CUJ 7-10) |
+| **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Verified (M-O) | Verified (CUJ 19) | Verified (CUJ 19) |
+| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Verified (M-O) | Verified (CUJ 20-21) | Verified (CUJ 20-21) |
+| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Verified (M-O) | Verified (CUJ 22-24) | Verified (CUJ 22-24) |
+| **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Verified (M-O) | Verified (CUJ 25-30) | Verified (CUJ 25-30) |
+| **Visual Modes** | `v`, `V`, block selections | Verified (M-O) | Verified (CUJ 30) | Verified (CUJ 30) |
+| **Undo / Redo** | `u`, `Ctrl-R` | Verified (M-O) | Verified (CUJ 31) | Verified (CUJ 31) |
+| **Ex Substitutions** | `:%s/find/replace/g` | Verified (M-O) | Verified (CUJ 33) | Verified (CUJ 33) |
+| **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Verified (M-O) | Verified (CUJ 34) | Verified (CUJ 34) |
+| **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Verified (M-O) | Verified (CUJ 17-18) | Verified (CUJ 17-18) |
+| **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-O) | Verified (CUJ 32) | Verified (CUJ 32) |
 | **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified | Verified | Verified |
 | **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (CUJ 35) | N/A (Disabled) | N/A (Disabled) |
 | **Table Formatting** | Neutral gridlines, text wrap | Verified | N/A (GFM Tables) | N/A (Monospace) |
 | **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (CUJ 36) | N/A | N/A |
-| **App Branding** | High-contrast cursor, `v.circle` | In Progress (M-N) | In Progress (M-N) | In Progress (M-N) |
+| **App Branding** | High-contrast cursor, `v.circle` | Verified (M-N) | Verified (M-N) | Verified (M-N) |
 
 ---
 
