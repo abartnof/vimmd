@@ -152,6 +152,36 @@ open class VimMDDocument: NSDocument {
         }
     }
 
+    @objc open var freezeFirstRow: Bool = false {
+        didSet {
+            textView?.freezeFirstRow = freezeFirstRow
+        }
+    }
+
+    @objc open var freezeFirstColumn: Bool = false {
+        didSet {
+            textView?.freezeFirstColumn = freezeFirstColumn
+        }
+    }
+
+    @objc open var wrapTableCells: Bool = false {
+        didSet {
+            textView?.wrapTableCells = wrapTableCells
+        }
+    }
+
+    @IBAction open func toggleFreezeFirstRow(_ sender: Any?) {
+        self.freezeFirstRow = !self.freezeFirstRow
+    }
+
+    @IBAction open func toggleFreezeFirstColumn(_ sender: Any?) {
+        self.freezeFirstColumn = !self.freezeFirstColumn
+    }
+
+    @IBAction open func toggleWrapTableCells(_ sender: Any?) {
+        self.wrapTableCells = !self.wrapTableCells
+    }
+
     public func configureWrapLinesPolicy() {
         if isTabularDocument {
             self.wrapLines = false
@@ -494,8 +524,14 @@ open class VimMDDocument: NSDocument {
 
         scrollView.documentView = tv
         tv.wrapLines = self.wrapLines
+        tv.freezeFirstRow = self.freezeFirstRow
+        tv.freezeFirstColumn = self.freezeFirstColumn
+        tv.wrapTableCells = self.wrapTableCells
         tv.onToggleWrapLines = { [weak self] in
             self?.toggleWrapLines(nil)
+        }
+        tv.onFlashFeedback = { [weak self] msg in
+            self?.showStatusMessage(msg, isWarning: false)
         }
         tv.updateFrameHeightToFitText()
 
@@ -710,6 +746,21 @@ open class VimMDDocument: NSDocument {
     override open func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleWrapLines(_:)) {
             menuItem.state = self.wrapLines ? .on : .off
+            return true
+        }
+        if menuItem.action == #selector(toggleFreezeFirstRow(_:)) {
+            guard isTabularDocument else { return false }
+            menuItem.state = self.freezeFirstRow ? .on : .off
+            return true
+        }
+        if menuItem.action == #selector(toggleFreezeFirstColumn(_:)) {
+            guard isTabularDocument else { return false }
+            menuItem.state = self.freezeFirstColumn ? .on : .off
+            return true
+        }
+        if menuItem.action == #selector(toggleWrapTableCells(_:)) {
+            guard isTabularDocument else { return false }
+            menuItem.state = self.wrapTableCells ? .on : .off
             return true
         }
         return super.validateMenuItem(menuItem)

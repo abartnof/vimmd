@@ -59,10 +59,6 @@ func testCSVDataRowColumnColors() throws {
 
     let line2Start = 30 // "col0,col1,col2,col3,col4,col5\n" length = 30
     // Line 2: "val0,val1,val2,val3,val4,val5"
-    let expectedColors = TabularSyntaxResolver.columnColors
-    guard expectedColors.count == 5 else {
-        throw NSError(domain: "TabularTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected 5 column colors, got \(expectedColors.count)"])
-    }
 
     // Check font of line 2 (regular weight)
     let fontLine2 = storage.attribute(.font, at: line2Start, effectiveRange: nil) as? NSFont
@@ -74,10 +70,10 @@ func testCSVDataRowColumnColors() throws {
         throw NSError(domain: "TabularTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Data row should not be bold"])
     }
 
-    // val0: index 30..34 -> col 0 (teal)
+    // val0: index 30..34 -> neutral labelColor
     let colorVal0 = storage.attribute(.foregroundColor, at: line2Start, effectiveRange: nil) as? NSColor
-    guard colorVal0 == expectedColors[0] else {
-        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected col 0 color \(expectedColors[0]), got \(String(describing: colorVal0))"])
+    guard colorVal0 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected neutral labelColor, got \(String(describing: colorVal0))"])
     }
 
     // delim at 34 (",") -> tertiaryLabelColor
@@ -86,34 +82,34 @@ func testCSVDataRowColumnColors() throws {
         throw NSError(domain: "TabularTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected delimiter color, got \(String(describing: delim1))"])
     }
 
-    // val1: index 35..39 -> col 1 (purple)
+    // val1: index 35..39 -> neutral labelColor
     let colorVal1 = storage.attribute(.foregroundColor, at: line2Start + 5, effectiveRange: nil) as? NSColor
-    guard colorVal1 == expectedColors[1] else {
-        throw NSError(domain: "TabularTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected col 1 color \(expectedColors[1]), got \(String(describing: colorVal1))"])
+    guard colorVal1 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected col 1 neutral color, got \(String(describing: colorVal1))"])
     }
 
-    // val2: index 40..44 -> col 2 (blue)
+    // val2: index 40..44 -> neutral labelColor
     let colorVal2 = storage.attribute(.foregroundColor, at: line2Start + 10, effectiveRange: nil) as? NSColor
-    guard colorVal2 == expectedColors[2] else {
-        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected col 2 color \(expectedColors[2]), got \(String(describing: colorVal2))"])
+    guard colorVal2 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected col 2 neutral color, got \(String(describing: colorVal2))"])
     }
 
-    // val3: col 3 (green)
+    // val3: col 3 -> neutral labelColor
     let colorVal3 = storage.attribute(.foregroundColor, at: line2Start + 15, effectiveRange: nil) as? NSColor
-    guard colorVal3 == expectedColors[3] else {
-        throw NSError(domain: "TabularTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected col 3 color \(expectedColors[3]), got \(String(describing: colorVal3))"])
+    guard colorVal3 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected col 3 neutral color, got \(String(describing: colorVal3))"])
     }
 
-    // val4: col 4 (orange)
+    // val4: col 4 -> neutral labelColor
     let colorVal4 = storage.attribute(.foregroundColor, at: line2Start + 20, effectiveRange: nil) as? NSColor
-    guard colorVal4 == expectedColors[4] else {
-        throw NSError(domain: "TabularTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected col 4 color \(expectedColors[4]), got \(String(describing: colorVal4))"])
+    guard colorVal4 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected col 4 neutral color, got \(String(describing: colorVal4))"])
     }
 
-    // val5: col 5 -> cycles back to col 0 (teal)
+    // val5: col 5 -> neutral labelColor
     let colorVal5 = storage.attribute(.foregroundColor, at: line2Start + 25, effectiveRange: nil) as? NSColor
-    guard colorVal5 == expectedColors[0] else {
-        throw NSError(domain: "TabularTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected cycled col 0 color \(expectedColors[0]), got \(String(describing: colorVal5))"])
+    guard colorVal5 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected col 5 neutral color, got \(String(describing: colorVal5))"])
     }
 }
 
@@ -142,10 +138,10 @@ func testTSVTabDelimitedExtractionAndDelimiterDimming() throws {
 
     // Data row: "101\tBob\tEngineer"
     let line2Start = 13 // "id\tname\trole\n".count = 13
-    // "101": col 0 (teal)
+    // "101": col 0 (neutral labelColor)
     let color101 = storage.attribute(.foregroundColor, at: line2Start, effectiveRange: nil) as? NSColor
-    guard color101 == TabularSyntaxResolver.columnColors[0] else {
-        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 color on TSV field 0"])
+    guard color101 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 neutral color on TSV field 0"])
     }
 
     // tab at line2Start + 3
@@ -154,16 +150,16 @@ func testTSVTabDelimitedExtractionAndDelimiterDimming() throws {
         throw NSError(domain: "TabularTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected tertiaryLabelColor on data tab delimiter"])
     }
 
-    // "Bob": col 1 (purple)
+    // "Bob": col 1 (neutral labelColor)
     let colorBob = storage.attribute(.foregroundColor, at: line2Start + 4, effectiveRange: nil) as? NSColor
-    guard colorBob == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "TabularTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 color on TSV field 1"])
+    guard colorBob == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 neutral color on TSV field 1"])
     }
 
-    // "Engineer": col 2 (blue)
+    // "Engineer": col 2 (neutral labelColor)
     let colorEng = storage.attribute(.foregroundColor, at: line2Start + 8, effectiveRange: nil) as? NSColor
-    guard colorEng == TabularSyntaxResolver.columnColors[2] else {
-        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected Col 2 color on TSV field 2"])
+    guard colorEng == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected Col 2 neutral color on TSV field 2"])
     }
 }
 
@@ -177,13 +173,13 @@ func testQuotedCSVFieldsWithEmbeddedCommas() throws {
     // Line 2: "\"Smith, John\",\"123 Main St, Apt 4\",\"Likes \"\"quoted\"\" words\""
     // Field 0: "\"Smith, John\"" (length 13, index 19..<32)
     let colorField0 = storage.attribute(.foregroundColor, at: line2Start + 1, effectiveRange: nil) as? NSColor
-    guard colorField0 == TabularSyntaxResolver.columnColors[0] else {
-        throw NSError(domain: "TabularTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected col 0 color on quoted field"])
+    guard colorField0 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected neutral color on quoted field"])
     }
     // Embedded comma at index 19 + 6 ("Smith,") must NOT be delimiter color
     let embeddedComma0 = storage.attribute(.foregroundColor, at: line2Start + 6, effectiveRange: nil) as? NSColor
-    guard embeddedComma0 == TabularSyntaxResolver.columnColors[0] else {
-        throw NSError(domain: "TabularTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Embedded comma inside quoted string must stay column color, got \(String(describing: embeddedComma0))"])
+    guard embeddedComma0 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Embedded comma inside quoted string must stay text color, got \(String(describing: embeddedComma0))"])
     }
 
     // Delimiter comma after "\"Smith, John\"" is at index 19 + 13 = 32
@@ -194,13 +190,13 @@ func testQuotedCSVFieldsWithEmbeddedCommas() throws {
 
     // Field 1: "\"123 Main St, Apt 4\"" (length 20, index 33..<53)
     let colorField1 = storage.attribute(.foregroundColor, at: line2Start + 14, effectiveRange: nil) as? NSColor
-    guard colorField1 == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected col 1 color on field 1"])
+    guard colorField1 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected neutral color on field 1"])
     }
-    // Embedded comma at index 33 + 12 = 45 ("Main St,") must stay col 1 color
+    // Embedded comma at index 33 + 12 = 45 ("Main St,") must stay text color
     let embeddedComma1 = storage.attribute(.foregroundColor, at: line2Start + 14 + 11, effectiveRange: nil) as? NSColor
-    guard embeddedComma1 == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "TabularTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Embedded comma inside second quoted string must stay col 1 color"])
+    guard embeddedComma1 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Embedded comma inside second quoted string must stay text color"])
     }
 
     // Delimiter comma after field 1 is at index 53
@@ -209,10 +205,10 @@ func testQuotedCSVFieldsWithEmbeddedCommas() throws {
         throw NSError(domain: "TabularTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Comma delimiter after second quoted field must be tertiaryLabelColor"])
     }
 
-    // Field 2: "\"Likes \"\"quoted\"\" words\"" -> col 2
+    // Field 2: "\"Likes \"\"quoted\"\" words\"" -> neutral labelColor
     let colorField2 = storage.attribute(.foregroundColor, at: line2Start + 35, effectiveRange: nil) as? NSColor
-    guard colorField2 == TabularSyntaxResolver.columnColors[2] else {
-        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected col 2 color on field with escaped quotes"])
+    guard colorField2 == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected neutral color on field with escaped quotes"])
     }
 }
 
@@ -247,8 +243,8 @@ func testTabularSyntaxEdgeCases() throws {
     let unclosedStorage = NSTextStorage(string: "name,notes\nAlice,\"unfinished quote")
     resolver.renderTabularSyntax(in: unclosedStorage, isTSV: false)
     let colorUnclosed = unclosedStorage.attribute(.foregroundColor, at: 18, effectiveRange: nil) as? NSColor
-    guard colorUnclosed == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Unfinished quoted field should be styled as col 1"])
+    guard colorUnclosed == NSColor.labelColor else {
+        throw NSError(domain: "TabularTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Unfinished quoted field should be styled as neutral labelColor"])
     }
 
     // 5. Single line CSV

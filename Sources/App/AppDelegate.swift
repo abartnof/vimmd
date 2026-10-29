@@ -18,6 +18,9 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     public var lightMenuItem: NSMenuItem?
     public var darkMenuItem: NSMenuItem?
     public var wrapLinesMenuItem: NSMenuItem?
+    public var freezeFirstRowMenuItem: NSMenuItem?
+    public var freezeFirstColumnMenuItem: NSMenuItem?
+    public var wrapTableCellsMenuItem: NSMenuItem?
     public var zoomInMenuItem: NSMenuItem?
     public var zoomOutMenuItem: NSMenuItem?
     public var actualSizeMenuItem: NSMenuItem?
@@ -98,9 +101,48 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    @IBAction public func toggleFreezeFirstRow(_ sender: Any?) {
+        if let doc = NSDocumentController.shared.currentDocument as? VimMDDocument {
+            doc.toggleFreezeFirstRow(sender)
+        }
+    }
+
+    @IBAction public func toggleFreezeFirstColumn(_ sender: Any?) {
+        if let doc = NSDocumentController.shared.currentDocument as? VimMDDocument {
+            doc.toggleFreezeFirstColumn(sender)
+        }
+    }
+
+    @IBAction public func toggleWrapTableCells(_ sender: Any?) {
+        if let doc = NSDocumentController.shared.currentDocument as? VimMDDocument {
+            doc.toggleWrapTableCells(sender)
+        }
+    }
+
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem == wrapLinesMenuItem || menuItem.action == #selector(toggleWrapLines(_:)) {
             updateWrapLinesMenuItemState()
+            return true
+        }
+        if menuItem == freezeFirstRowMenuItem || menuItem.action == #selector(toggleFreezeFirstRow(_:)) {
+            guard let doc = NSDocumentController.shared.currentDocument as? VimMDDocument, doc.isTabularDocument else {
+                return false
+            }
+            menuItem.state = doc.freezeFirstRow ? .on : .off
+            return true
+        }
+        if menuItem == freezeFirstColumnMenuItem || menuItem.action == #selector(toggleFreezeFirstColumn(_:)) {
+            guard let doc = NSDocumentController.shared.currentDocument as? VimMDDocument, doc.isTabularDocument else {
+                return false
+            }
+            menuItem.state = doc.freezeFirstColumn ? .on : .off
+            return true
+        }
+        if menuItem == wrapTableCellsMenuItem || menuItem.action == #selector(toggleWrapTableCells(_:)) {
+            guard let doc = NSDocumentController.shared.currentDocument as? VimMDDocument, doc.isTabularDocument else {
+                return false
+            }
+            menuItem.state = doc.wrapTableCells ? .on : .off
             return true
         }
         return true
@@ -234,6 +276,24 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         wrapLinesItem.target = nil
         viewMenu.addItem(wrapLinesItem)
         self.wrapLinesMenuItem = wrapLinesItem
+
+        viewMenu.addItem(NSMenuItem.separator())
+
+        // Dedicated Spreadsheet section
+        let freezeRowItem = NSMenuItem(title: "Freeze First Row", action: #selector(toggleFreezeFirstRow(_:)), keyEquivalent: "")
+        freezeRowItem.target = self
+        viewMenu.addItem(freezeRowItem)
+        self.freezeFirstRowMenuItem = freezeRowItem
+
+        let freezeColItem = NSMenuItem(title: "Freeze First Column", action: #selector(toggleFreezeFirstColumn(_:)), keyEquivalent: "")
+        freezeColItem.target = self
+        viewMenu.addItem(freezeColItem)
+        self.freezeFirstColumnMenuItem = freezeColItem
+
+        let wrapCellsItem = NSMenuItem(title: "Wrap Table Cells", action: #selector(toggleWrapTableCells(_:)), keyEquivalent: "")
+        wrapCellsItem.target = self
+        viewMenu.addItem(wrapCellsItem)
+        self.wrapTableCellsMenuItem = wrapCellsItem
 
         viewMenu.addItem(NSMenuItem.separator())
 

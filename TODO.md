@@ -79,10 +79,10 @@ This document tracks all active milestones, user requirements, and architectural
   - Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
 
 ### Milestone M: Excel-Style Spreadsheet View for CSV & TSV (Gridlines, Dynamic Sizing, Wrap, Freeze Panes)
-- [ ] **Excel / Numbers Grid Styling**:
+- [x] **Excel / Numbers Grid Styling**:
   - Replace rainbow column coloring with clean, professional neutral typography and subtle header shading.
   - Render crisp horizontal and vertical grey gridlines separating rows and columns (adapting to macOS Light/Dark appearance).
-- [ ] **Dynamic Row & Column Addition As You Type**:
+- [x] **Dynamic Row & Column Addition As You Type**:
   - **Dynamic Row Insertion (`o`, `O`, `<CR>`)**:
     - Opening a new row in a tabular file automatically aligns to the table schema ($N-1$ delimiter placeholders) so new rows immediately match the column count of the spreadsheet.
   - **Dynamic Column Addition (`,` / `<Tab>`)**:
@@ -90,23 +90,30 @@ This document tracks all active milestones, user requirements, and architectural
     - Grid columns, cell boundaries, and vertical gridlines dynamically expand in real-time as content is typed.
   - **Fluid Caret Synchronization**:
     - Caret tracking accurately stays centered inside the active cell while column widths expand dynamically under live keystrokes.
-- [ ] **Column Widths & View Menu 'Text Wrap'**:
+- [x] **Column Widths & View Menu 'Text Wrap'**:
   - Add `Text Wrap` (or `Wrap Table Cells`) option to the **View** menu for tabular documents.
   - **Wrap OFF (Default)**: Each column expands so its width accommodates its longest entry (`max(cellContentWidth) + padding`), keeping columns vertically aligned across arbitrarily wide datasets.
   - **Wrap ON**: Apply a sensible default column width (e.g. 240pt / 30 chars), wrapping multi-word content within cell boundaries.
   - Robust horizontal scrolling support for wide tables (dozens/hundreds of columns) without horizontal truncation.
-- [ ] **Freeze Panes & Dedicated 'Spreadsheet' View Menu Section**:
+- [x] **Freeze Panes & Dedicated 'Spreadsheet' View Menu Section**:
   - In the **View** menu, add a dedicated `Spreadsheet` section (or section with separators) containing:
     - `View -> Freeze First Row` (checkable)
     - `View -> Freeze First Column` (checkable)
     - `View -> Wrap Table Cells` (checkable)
   - **Format-Aware Validation**: These menu items are dynamically enabled ONLY when the active document is a CSV or TSV (`isTabularDocument == true`). For all other file types (Markdown, plain text, shell scripts, JSON, etc.), they automatically grey out via `validateUserInterfaceItem`.
   - State persistence and dynamic viewport layout integration.
-- [ ] **Interactive Header Copy Gestures (Mouse Hover & Quick Click)**:
-  - **Column A Hover (Row Selector)**: Hovering over column A morphs the cursor into a rightward arrow (`→`). Clicking flashes the targeted row with a subtle highlight animation and automatically copies the row's values to the macOS clipboard.
-  - **Row 1 Hover (Column Selector)**: Hovering over row 1 morphs the cursor into a downward arrow (`↓`). Clicking flashes the entire column vertically with a subtle highlight animation and automatically copies the column's values (newline-delimited) to the macOS clipboard.
-  - Displays a transient status confirmation (e.g. `Row 5 copied to clipboard` / `Column 'Price' copied to clipboard`).
-- [ ] **Vim Editing & Plain-Text Integrity**:
+- [x] **Interactive Header Copy Gestures (Mouse Hover, Click & Drag Range)**:
+  - **Column A Hover & Drag (Row Selector)**:
+    - Hovering over column A morphs the cursor into a rightward arrow (`→`).
+    - Clicking copies the row's values to the macOS clipboard with a subtle highlight flash animation.
+    - **Multi-Row Dragging**: Clicking and dragging down/up across column A selects a range of rows (e.g. rows 3–8), flashes the row range on mouse-up, and copies all selected rows to the clipboard.
+    - Displays transient status feedback (e.g. `Row 5 copied to clipboard` or `Rows 3–8 copied to clipboard`).
+  - **Row 1 Hover & Drag (Column Selector)**:
+    - Hovering over row 1 morphs the cursor into a downward arrow (`↓`).
+    - Clicking copies the column's values (newline-delimited) to the macOS clipboard with a subtle vertical highlight flash animation.
+    - **Multi-Column Dragging**: Clicking and dragging left/right across row 1 selects a range of columns (e.g. columns B–D), flashes the column range on mouse-up, and copies all selected columns across all rows to the clipboard.
+    - Displays transient status feedback (e.g. `Column 'Price' copied to clipboard` or `Columns B–D copied to clipboard`).
+- [x] **Vim Editing & Plain-Text Integrity**:
   - Retain raw UTF-8 comma/tab separated text representation on disk with zero proprietary metadata.
   - Full modal navigation (`h`, `j`, `k`, `l`, `w`, `b`, `$`, `0`, `f`, `t`) and editing in grid cells.
 
@@ -144,4 +151,5 @@ This document tracks all active milestones, user requirements, and architectural
 - [x] Full Undo & Redo Subsystem (`97ab3eb`)
 - [x] View Menu, Appearance Modes & Format-Aware Line Wrap Policy (`e51ea5d`)
 - [x] Live In-Place Tabular Syntax Rendering for CSV & TSV (Milestone C)
+- [x] Excel-Style Spreadsheet View for CSV & TSV: Gridlines, Neutral Palette, Dynamic Sizing, Wrap, Freeze Panes, and Copy Gestures (Milestone M)
 

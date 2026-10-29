@@ -30,11 +30,48 @@ open class VimMDTextView: NSTextView {
     /// Callback invoked when command mode is cancelled with Escape.
     public var onCommandCancelled: (() -> Void)?
 
+    /// Callback invoked when flash feedback status is generated (e.g. header copy).
+    public var onFlashFeedback: ((String) -> Void)?
+
     public var wrapLines: Bool = true {
         didSet {
             applyWrapLinesSetting()
         }
     }
+
+    // MARK: - Spreadsheet Properties
+
+    public var freezeFirstRow: Bool = false {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    public var freezeFirstColumn: Bool = false {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    public var wrapTableCells: Bool = false {
+        didSet {
+            updateSyntaxStyling(force: true)
+            if !wrapTableCells {
+                updateFrameForUnwrappedLines()
+            }
+            needsDisplay = true
+        }
+    }
+
+    public var activeRowDragRange: ClosedRange<Int>?
+    public var activeColDragRange: ClosedRange<Int>?
+    public var transientFlashRect: NSRect?
+
+    private var tabularTrackingArea: NSTrackingArea?
+    private var isDraggingRow: Bool = false
+    private var isDraggingCol: Bool = false
+    private var dragStartRowIndex: Int?
+    private var dragStartColIndex: Int?
 
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
@@ -124,7 +161,41 @@ open class VimMDTextView: NSTextView {
         super.viewDidMoveToSuperview()
         if self.superview != nil {
             applyWrapLinesSetting()
+            if let contentView = enclosingScrollView?.contentView {
+                contentView.postsBoundsChangedNotifications = true
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(scrollViewDidScroll(_:)),
+                    name: NSView.boundsDidChangeNotification,
+                    object: contentView
+                )
+            }
         }
+    }
+
+    @objc private func scrollViewDidScroll(_ notification: Notification) {
+        if freezeFirstRow || freezeFirstColumn {
+            self.needsDisplay = true
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override open func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = tabularTrackingArea {
+            removeTrackingArea(old)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        tabularTrackingArea = tracking
     }
 
     public func applyWrapLinesSetting() {
@@ -161,7 +232,13 @@ open class VimMDTextView: NSTextView {
         let usedRect = layoutManager.usedRect(for: textContainer)
         let viewportWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
         let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
-        let targetWidth = max(viewportWidth, ceil(usedRect.size.width + self.textContainerInset.width * 2 + 50.0))
+
+        var tableWidth: CGFloat = 0.0
+        if isTabularDocument {
+            tableWidth = columnWidths().reduce(0, +)
+        }
+
+        let targetWidth = max(viewportWidth, max(tableWidth, usedRect.size.width) + self.textContainerInset.width * 2 + 50.0)
         let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
         self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
     }
@@ -172,6 +249,18 @@ open class VimMDTextView: NSTextView {
         } else {
             self.wrapLines = !self.wrapLines
         }
+    }
+
+    @objc open func toggleFreezeFirstRow(_ sender: Any? = nil) {
+        self.freezeFirstRow = !self.freezeFirstRow
+    }
+
+    @objc open func toggleFreezeFirstColumn(_ sender: Any? = nil) {
+        self.freezeFirstColumn = !self.freezeFirstColumn
+    }
+
+    @objc open func toggleWrapTableCells(_ sender: Any? = nil) {
+        self.wrapTableCells = !self.wrapTableCells
     }
 
     public func updateFrameHeightToFitText() {
@@ -210,9 +299,9 @@ open class VimMDTextView: NSTextView {
         storage.beginEditing()
         switch documentSyntaxType {
         case .csv:
-            tabularResolver.renderTabularSyntax(in: storage, isTSV: false)
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: wrapTableCells)
         case .tsv:
-            tabularResolver.renderTabularSyntax(in: storage, isTSV: true)
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: true, wrapTableCells: wrapTableCells)
         case .plainText:
             let fullRange = NSRange(location: 0, length: storage.length)
             let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -324,7 +413,499 @@ open class VimMDTextView: NSTextView {
         self.currentSelectedRange = charRange
     }
 
+    // MARK: - Spreadsheet Geometry & Calculations
+
+    public func columnWidths() -> [CGFloat] {
+        guard let storage = self.textStorage else { return [] }
+        return tabularResolver.calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells)
+    }
+
+    public func rowRect(for rowIndex: Int) -> NSRect? {
+        guard let storage = self.textStorage else { return nil }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else {
+            return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: bounds.width, height: 18.0)
+        }
+
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+
+        var currentLine = 0
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            if currentLine == rowIndex {
+                let glyphRange = layoutManager.glyphRange(forCharacterRange: lr, actualCharacterRange: nil)
+                var lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
+                lineRect.origin.x = textContainerInset.width
+                lineRect.origin.y += textContainerInset.height
+                lineRect.size.width = max(bounds.width, layoutManager.usedRect(for: textContainer).width)
+                if lineRect.height == 0 { lineRect.size.height = 18.0 }
+                return lineRect
+            }
+            currentLine += 1
+            idx = lr.location + lr.length
+        }
+
+        let y = CGFloat(rowIndex) * 18.0 + textContainerInset.height
+        return NSRect(x: textContainerInset.width, y: y, width: bounds.width, height: 18.0)
+    }
+
+    public func columnRect(for colIndex: Int) -> NSRect? {
+        let widths = columnWidths()
+        guard colIndex >= 0 && colIndex < widths.count else { return nil }
+
+        var startX = textContainerInset.width
+        for i in 0..<colIndex {
+            startX += widths[i]
+        }
+        let colWidth = widths[colIndex]
+        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        return NSRect(x: startX, y: textContainerInset.height, width: colWidth, height: totalHeight)
+    }
+
+    public func rowIndex(at point: NSPoint) -> Int? {
+        guard let storage = self.textStorage else { return nil }
+        let fullString = storage.string as NSString
+        var currentLine = 0
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            if let rect = rowRect(for: currentLine) {
+                if point.y >= rect.minY && point.y <= rect.maxY {
+                    return currentLine
+                }
+            }
+            currentLine += 1
+            idx = lr.location + lr.length
+        }
+        return nil
+    }
+
+    public func columnIndex(at point: NSPoint) -> Int? {
+        let widths = columnWidths()
+        var startX = textContainerInset.width
+        for (i, w) in widths.enumerated() {
+            if point.x >= startX && point.x <= startX + w {
+                return i
+            }
+            startX += w
+        }
+        return nil
+    }
+
+    // MARK: - Spreadsheet Cursors & Hover Gestures
+
+    public static var downwardArrowCursor: NSCursor = {
+        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: "Down") {
+            return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
+        }
+        return NSCursor.resizeDown
+    }()
+
+    public static var rightwardArrowCursor: NSCursor = {
+        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "arrow.right", accessibilityDescription: "Right") {
+            return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
+        }
+        return NSCursor.resizeRight
+    }()
+
+    public func cursorForPoint(_ point: NSPoint) -> NSCursor? {
+        guard isTabularDocument else { return nil }
+        let rIdx = rowIndex(at: point)
+        let cIdx = columnIndex(at: point)
+
+        // Row 0 is Row 1 (header row)
+        if rIdx == 0 {
+            return VimMDTextView.downwardArrowCursor
+        }
+        // Column 0 is Column A on data rows (rIdx > 0)
+        if cIdx == 0 && (rIdx ?? -1) > 0 {
+            return VimMDTextView.rightwardArrowCursor
+        }
+        return nil
+    }
+
+    override open func cursorUpdate(with event: NSEvent) {
+        if isTabularDocument {
+            let pt = convert(event.locationInWindow, from: nil)
+            if let cursor = cursorForPoint(pt) {
+                cursor.set()
+                return
+            }
+        }
+        super.cursorUpdate(with: event)
+    }
+
+    override open func mouseMoved(with event: NSEvent) {
+        if isTabularDocument {
+            let pt = convert(event.locationInWindow, from: nil)
+            if let cursor = cursorForPoint(pt) {
+                cursor.set()
+                return
+            } else {
+                NSCursor.iBeam.set()
+            }
+        }
+        super.mouseMoved(with: event)
+    }
+
+    // MARK: - Spreadsheet Click & Drag Selection
+
+    public func handleTabularMouseDown(at point: NSPoint) -> Bool {
+        guard isTabularDocument else { return false }
+        let rIdx = rowIndex(at: point)
+        let cIdx = columnIndex(at: point)
+
+        if rIdx == 0, let c = cIdx {
+            // Dragging / clicking header row (columns)
+            isDraggingCol = true
+            isDraggingRow = false
+            dragStartColIndex = c
+            activeColDragRange = c...c
+            activeRowDragRange = nil
+            needsDisplay = true
+            return true
+        } else if cIdx == 0, let r = rIdx, r > 0 {
+            // Dragging / clicking Column A (rows)
+            isDraggingRow = true
+            isDraggingCol = false
+            dragStartRowIndex = r
+            activeRowDragRange = r...r
+            activeColDragRange = nil
+            needsDisplay = true
+            return true
+        }
+        return false
+    }
+
+    public func handleTabularMouseDragged(to point: NSPoint) {
+        guard isTabularDocument else { return }
+        if isDraggingCol, let start = dragStartColIndex {
+            if let current = columnIndex(at: point) {
+                let minC = min(start, current)
+                let maxC = max(start, current)
+                activeColDragRange = minC...maxC
+                needsDisplay = true
+            }
+        } else if isDraggingRow, let start = dragStartRowIndex {
+            if let current = rowIndex(at: point), current > 0 {
+                let minR = min(start, current)
+                let maxR = max(start, current)
+                activeRowDragRange = minR...maxR
+                needsDisplay = true
+            }
+        }
+    }
+
+    public func handleTabularMouseUp(at point: NSPoint) {
+        guard isTabularDocument else { return }
+        if isDraggingCol, let range = activeColDragRange {
+            _ = copyColumnRange(from: range.lowerBound, to: range.upperBound)
+            isDraggingCol = false
+            dragStartColIndex = nil
+            activeColDragRange = nil
+            flashHighlight()
+        } else if isDraggingRow, let range = activeRowDragRange {
+            _ = copyRowRange(from: range.lowerBound, to: range.upperBound)
+            isDraggingRow = false
+            dragStartRowIndex = nil
+            activeRowDragRange = nil
+            flashHighlight()
+        }
+    }
+
+    @discardableResult
+    public func copyColumnRange(from startCol: Int, to endCol: Int) -> String {
+        guard let storage = self.textStorage else { return "" }
+        let minCol = min(startCol, endCol)
+        let maxCol = max(startCol, endCol)
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return "" }
+
+        var lineRanges: [NSRange] = []
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            lineRanges.append(lr)
+            idx = lr.location + lr.length
+        }
+
+        var resultLines: [String] = []
+        let delimStr = isTSV ? "\t" : ","
+        var firstColHeaderTitle = ""
+
+        for (lIdx, lr) in lineRanges.enumerated() {
+            var contentLength = lr.length
+            while contentLength > 0 {
+                let char = fullString.character(at: lr.location + contentLength - 1)
+                if char == 10 || char == 13 {
+                    contentLength -= 1
+                } else {
+                    break
+                }
+            }
+            let cr = NSRange(location: lr.location, length: contentLength)
+            let (fields, _) = tabularResolver.parseLine(in: fullString, range: cr, isTSV: isTSV)
+
+            var rowCols: [String] = []
+            for c in minCol...maxCol {
+                if c < fields.count {
+                    let fr = fields[c].range
+                    let cellVal = fullString.substring(with: fr)
+                    rowCols.append(cellVal)
+                    if lIdx == 0 && c == minCol {
+                        firstColHeaderTitle = cellVal
+                    }
+                } else {
+                    rowCols.append("")
+                }
+            }
+            resultLines.append(rowCols.joined(separator: delimStr))
+        }
+
+        let joined = resultLines.joined(separator: "\n")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(joined, forType: .string)
+
+        if let colStartRect = columnRect(for: minCol), let colEndRect = columnRect(for: maxCol) {
+            self.transientFlashRect = NSRect(x: colStartRect.minX, y: 0, width: colEndRect.maxX - colStartRect.minX, height: bounds.height)
+        }
+
+        let feedback: String
+        if minCol == maxCol {
+            if !firstColHeaderTitle.isEmpty {
+                feedback = "Column '\(firstColHeaderTitle)' copied to clipboard"
+            } else {
+                let letter = Character(UnicodeScalar(65 + minCol)!)
+                feedback = "Column \(letter) copied to clipboard"
+            }
+        } else {
+            let startLetter = Character(UnicodeScalar(65 + minCol)!)
+            let endLetter = Character(UnicodeScalar(65 + maxCol)!)
+            feedback = "Columns \(startLetter)–\(endLetter) copied to clipboard"
+        }
+        onFlashFeedback?(feedback)
+        needsDisplay = true
+        return joined
+    }
+
+    @discardableResult
+    public func copyRowRange(from startRow: Int, to endRow: Int) -> String {
+        guard let storage = self.textStorage else { return "" }
+        let minR = min(startRow, endRow)
+        let maxR = max(startRow, endRow)
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return "" }
+
+        var lineRanges: [NSRange] = []
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            lineRanges.append(lr)
+            idx = lr.location + lr.length
+        }
+
+        var selectedLines: [String] = []
+        for r in minR...maxR {
+            guard r < lineRanges.count else { continue }
+            let lr = lineRanges[r]
+            var contentLength = lr.length
+            while contentLength > 0 {
+                let char = fullString.character(at: lr.location + contentLength - 1)
+                if char == 10 || char == 13 {
+                    contentLength -= 1
+                } else {
+                    break
+                }
+            }
+            let cr = NSRange(location: lr.location, length: contentLength)
+            let lineText = fullString.substring(with: cr)
+            selectedLines.append(lineText)
+        }
+
+        let joined = selectedLines.joined(separator: "\n")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(joined, forType: .string)
+
+        if let rowStartRect = rowRect(for: minR), let rowEndRect = rowRect(for: maxR) {
+            self.transientFlashRect = NSRect(x: 0, y: rowStartRect.minY, width: bounds.width, height: rowEndRect.maxY - rowStartRect.minY)
+        }
+
+        let feedback: String
+        if minR == maxR {
+            feedback = "Row \(minR + 1) copied to clipboard"
+        } else {
+            feedback = "Rows \(minR + 1)–\(maxR + 1) copied to clipboard"
+        }
+        onFlashFeedback?(feedback)
+        needsDisplay = true
+        return joined
+    }
+
+    public func flashHighlight() {
+        needsDisplay = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.transientFlashRect = nil
+            self?.needsDisplay = true
+        }
+    }
+
+    // MARK: - Dynamic Row Schema Alignment
+
+    public func alignNewRowSchemaIfNeeded() {
+        guard isTabularDocument, let session = session else { return }
+        let buffer = session.serializeBuffer()
+        let lines = buffer.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 1 else { return }
+
+        let firstLine = String(lines[0])
+        let delimChar: Character = isTSV ? "\t" : ","
+        let headerCols = firstLine.split(separator: delimChar, omittingEmptySubsequences: false).count
+        guard headerCols > 1 else { return }
+
+        let curLineIdx = session.cursorPosition.line - 1
+        if curLineIdx >= 0 && curLineIdx < lines.count {
+            let curLineStr = String(lines[curLineIdx])
+            if curLineStr.isEmpty {
+                let placeholders = String(repeating: delimChar, count: headerCols - 1)
+                session.feedKeys(placeholders)
+                session.feedKeys("\u{1b}0i")
+                synchronizeCaretWithSession()
+            }
+        }
+    }
+
+    // MARK: - Drawing: Gridlines & Frozen Panes
+
+    override open func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if isTabularDocument {
+            drawGridlines(in: dirtyRect)
+            drawSelectionAndFlash(in: dirtyRect)
+            drawFrozenPanes(in: dirtyRect)
+        }
+    }
+
+    public func drawGridlines(in dirtyRect: NSRect) {
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSColor.separatorColor.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1.0
+
+        // Vertical column dividers
+        var x = textContainerInset.width
+        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        for w in widths {
+            x += w
+            if x >= dirtyRect.minX - 5 && x <= dirtyRect.maxX + 5 {
+                path.move(to: NSPoint(x: floor(x) + 0.5, y: 0))
+                path.line(to: NSPoint(x: floor(x) + 0.5, y: totalHeight))
+            }
+        }
+
+        // Horizontal row dividers
+        guard let storage = self.textStorage else {
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+        let fullString = storage.string as NSString
+        var lineIdx = 0
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            if let rect = rowRect(for: lineIdx) {
+                let y = rect.maxY
+                if y >= dirtyRect.minY - 5 && y <= dirtyRect.maxY + 5 {
+                    path.move(to: NSPoint(x: 0, y: floor(y) + 0.5))
+                    path.line(to: NSPoint(x: bounds.width, y: floor(y) + 0.5))
+                }
+            }
+            lineIdx += 1
+            idx = lr.location + lr.length
+        }
+
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    public func drawSelectionAndFlash(in dirtyRect: NSRect) {
+        if let rRange = activeRowDragRange {
+            if let rStart = rowRect(for: rRange.lowerBound), let rEnd = rowRect(for: rRange.upperBound) {
+                let highlightRect = NSRect(x: 0, y: rStart.minY, width: bounds.width, height: rEnd.maxY - rStart.minY)
+                NSColor.selectedTextBackgroundColor.withAlphaComponent(0.25).setFill()
+                highlightRect.fill()
+            }
+        }
+        if let cRange = activeColDragRange {
+            if let cStart = columnRect(for: cRange.lowerBound), let cEnd = columnRect(for: cRange.upperBound) {
+                let highlightRect = NSRect(x: cStart.minX, y: 0, width: cEnd.maxX - cStart.minX, height: bounds.height)
+                NSColor.selectedTextBackgroundColor.withAlphaComponent(0.25).setFill()
+                highlightRect.fill()
+            }
+        }
+        if let flash = transientFlashRect {
+            NSColor.systemBlue.withAlphaComponent(0.2).setFill()
+            flash.fill()
+        }
+    }
+
+    public func drawFrozenPanes(in dirtyRect: NSRect) {
+        let vRect = self.visibleRect
+
+        if freezeFirstRow && vRect.origin.y > 0, let row0 = rowRect(for: 0) {
+            let pinnedHeaderRect = NSRect(x: vRect.origin.x, y: vRect.origin.y, width: vRect.width, height: row0.height)
+            NSColor.windowBackgroundColor.setFill()
+            pinnedHeaderRect.fill()
+            NSColor.quaternaryLabelColor.setFill()
+            pinnedHeaderRect.fill()
+
+            if let storage = self.textStorage {
+                let fullStr = storage.string as NSString
+                if fullStr.length > 0 {
+                    let lr = fullStr.lineRange(for: NSRange(location: 0, length: 0))
+                    let headerAttr = storage.attributedSubstring(from: lr)
+                    headerAttr.draw(in: NSRect(x: textContainerInset.width, y: vRect.origin.y, width: bounds.width, height: row0.height))
+                }
+            }
+
+            NSColor.separatorColor.setStroke()
+            let sep = NSBezierPath()
+            sep.lineWidth = 1.0
+            sep.move(to: NSPoint(x: vRect.origin.x, y: pinnedHeaderRect.maxY))
+            sep.line(to: NSPoint(x: pinnedHeaderRect.maxX, y: pinnedHeaderRect.maxY))
+            sep.stroke()
+        }
+
+        if freezeFirstColumn && vRect.origin.x > 0, let col0 = columnRect(for: 0) {
+            let pinnedColRect = NSRect(x: vRect.origin.x, y: vRect.origin.y, width: col0.width, height: vRect.height)
+            NSColor.windowBackgroundColor.setFill()
+            pinnedColRect.fill()
+
+            NSColor.separatorColor.setStroke()
+            let sep = NSBezierPath()
+            sep.lineWidth = 1.0
+            sep.move(to: NSPoint(x: pinnedColRect.maxX, y: vRect.origin.y))
+            sep.line(to: NSPoint(x: pinnedColRect.maxX, y: pinnedColRect.maxY))
+            sep.stroke()
+        }
+    }
+
+    // MARK: - Mouse & Keyboard Event Handling
+
     override open func mouseDown(with event: NSEvent) {
+        if isTabularDocument {
+            let pt = convert(event.locationInWindow, from: nil)
+            if handleTabularMouseDown(at: pt) {
+                return
+            }
+        }
+
         super.mouseDown(with: event)
         guard let session = session else { return }
         let charIndex = self.selectedRange().location
@@ -334,6 +915,24 @@ open class VimMDTextView: NSTextView {
             synchronizeCaretWithSession()
             onCursorMoved?()
         }
+    }
+
+    override open func mouseDragged(with event: NSEvent) {
+        if isTabularDocument && (isDraggingCol || isDraggingRow) {
+            let pt = convert(event.locationInWindow, from: nil)
+            handleTabularMouseDragged(to: pt)
+            return
+        }
+        super.mouseDragged(with: event)
+    }
+
+    override open func mouseUp(with event: NSEvent) {
+        if isTabularDocument && (isDraggingCol || isDraggingRow) {
+            let pt = convert(event.locationInWindow, from: nil)
+            handleTabularMouseUp(at: pt)
+            return
+        }
+        super.mouseUp(with: event)
     }
 
     override open func keyDown(with event: NSEvent) {
@@ -385,6 +984,10 @@ open class VimMDTextView: NSTextView {
                 let searchPat = isSearchCmd ? String(searchBuf.dropFirst()) : ""
 
                 session.feedKeys(chars)
+
+                if isNormal && (chars == "o" || chars == "O") && isTabularDocument {
+                    alignNewRowSchemaIfNeeded()
+                }
 
                 if isSearchCR && session.lastError == nil {
                     let activePat = searchPat.isEmpty ? (session.lastSearchPattern ?? "") : searchPat
@@ -472,12 +1075,21 @@ open class VimMDTextView: NSTextView {
             return
         } else if event.keyCode == 36 || event.keyCode == 76 { // Return / Enter
             session.feedKeys("\r")
+            if isTabularDocument {
+                alignNewRowSchemaIfNeeded()
+            }
             synchronizeCaretWithSession()
             onCursorMoved?()
             return
         } else if event.keyCode == 48 { // Tab
             session.feedKeys("\t")
             synchronizeCaretWithSession()
+            if isTabularDocument {
+                updateSyntaxStyling(force: true)
+                if !wrapTableCells {
+                    updateFrameForUnwrappedLines()
+                }
+            }
             onCursorMoved?()
             return
         }
@@ -491,6 +1103,12 @@ open class VimMDTextView: NSTextView {
         if let chars = event.characters, !chars.isEmpty {
             session.feedKeys(chars)
             synchronizeCaretWithSession()
+            if isTabularDocument && (chars.contains(",") || chars.contains("\t")) {
+                updateSyntaxStyling(force: true)
+                if !wrapTableCells {
+                    updateFrameForUnwrappedLines()
+                }
+            }
             onCursorMoved?()
         }
     }
@@ -560,6 +1178,27 @@ open class VimMDTextView: NSTextView {
         if item.action == #selector(toggleWrapLines(_:)) {
             if let menuItem = item as? NSMenuItem {
                 menuItem.state = self.wrapLines ? .on : .off
+            }
+            return true
+        }
+        if item.action == #selector(toggleFreezeFirstRow(_:)) {
+            guard isTabularDocument else { return false }
+            if let menuItem = item as? NSMenuItem {
+                menuItem.state = self.freezeFirstRow ? .on : .off
+            }
+            return true
+        }
+        if item.action == #selector(toggleFreezeFirstColumn(_:)) {
+            guard isTabularDocument else { return false }
+            if let menuItem = item as? NSMenuItem {
+                menuItem.state = self.freezeFirstColumn ? .on : .off
+            }
+            return true
+        }
+        if item.action == #selector(toggleWrapTableCells(_:)) {
+            guard isTabularDocument else { return false }
+            if let menuItem = item as? NSMenuItem {
+                menuItem.state = self.wrapTableCells ? .on : .off
             }
             return true
         }
@@ -726,4 +1365,3 @@ private class VimUndoManagerProxy: UndoManager {
         sessionProvider()?.redo()
     }
 }
-

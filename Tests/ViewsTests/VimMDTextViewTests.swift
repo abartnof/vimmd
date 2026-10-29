@@ -991,11 +991,11 @@ func testTextViewTabularLiveTypingInInsertMode() throws {
         throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Text does not contain 'Alpha'"])
     }
 
-    // Check "Alpha" styling on line 2 (should be Col 0: teal)
+    // Check "Alpha" styling on line 2 (neutral labelColor)
     let alphaStart = 16 // "HeaderA,HeaderB\n".count = 16
     let colorAlpha = storage.attribute(.foregroundColor, at: alphaStart, effectiveRange: nil) as? NSColor
-    guard colorAlpha == TabularSyntaxResolver.columnColors[0] else {
-        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 color on 'Alpha'"])
+    guard colorAlpha == NSColor.labelColor else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected neutral labelColor on 'Alpha'"])
     }
 
     // Type comma ","
@@ -1010,8 +1010,8 @@ func testTextViewTabularLiveTypingInInsertMode() throws {
     session.feedKeys("Beta")
     textView.synchronizeCaretWithSession()
     let colorBeta = storage.attribute(.foregroundColor, at: alphaStart + 6, effectiveRange: nil) as? NSColor
-    guard colorBeta == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 color on 'Beta'"])
+    guard colorBeta == NSColor.labelColor else {
+        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected neutral labelColor on 'Beta'"])
     }
 
     // Exit insert mode
@@ -1024,7 +1024,7 @@ func testTextViewTabularLiveTypingInInsertMode() throws {
     // Verify styling remains intact in Normal mode
     let colorAlphaNormal = storage.attribute(.foregroundColor, at: alphaStart, effectiveRange: nil) as? NSColor
     let colorBetaNormal = storage.attribute(.foregroundColor, at: alphaStart + 6, effectiveRange: nil) as? NSColor
-    guard colorAlphaNormal == TabularSyntaxResolver.columnColors[0] && colorBetaNormal == TabularSyntaxResolver.columnColors[1] else {
+    guard colorAlphaNormal == NSColor.labelColor && colorBetaNormal == NSColor.labelColor else {
         throw NSError(domain: "ViewsTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Styling lost on transition to Normal mode"])
     }
 }
@@ -1051,10 +1051,10 @@ func testTextViewTSVLiveEditingAndStyling() throws {
     textView.synchronizeCaretWithSession()
 
     let line2Start = 10 // "Col1\tCol2\n".count = 10
-    // "Data1": Col 0 (teal)
+    // "Data1": neutral labelColor
     let colorData1 = storage.attribute(.foregroundColor, at: line2Start, effectiveRange: nil) as? NSColor
-    guard colorData1 == TabularSyntaxResolver.columnColors[0] else {
-        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected Col 0 color on Data1"])
+    guard colorData1 == NSColor.labelColor else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected neutral labelColor on Data1"])
     }
 
     // "\t": tertiaryLabelColor
@@ -1063,10 +1063,10 @@ func testTextViewTSVLiveEditingAndStyling() throws {
         throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected tertiaryLabelColor on data tab"])
     }
 
-    // "Data2": Col 1 (purple)
+    // "Data2": neutral labelColor
     let colorData2 = storage.attribute(.foregroundColor, at: line2Start + 6, effectiveRange: nil) as? NSColor
-    guard colorData2 == TabularSyntaxResolver.columnColors[1] else {
-        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected Col 1 color on Data2"])
+    guard colorData2 == NSColor.labelColor else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected neutral labelColor on Data2"])
     }
 }
 
