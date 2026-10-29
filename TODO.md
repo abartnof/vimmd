@@ -72,62 +72,61 @@ This document tracks all active milestones, user requirements, and architectural
     - [x] `:sort n`: Numeric sorting (evaluating leading or embedded integers).
     - [x] Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
     - [x] Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
+- [x] **Milestone M: Excel-Style Spreadsheet View for CSV & TSV (Gridlines, Dynamic Sizing, Wrap, Freeze Panes)**
+  - [x] **Excel / Numbers Grid Styling**:
+    - Replace rainbow column coloring with clean, professional neutral typography and subtle header shading.
+    - Render crisp horizontal and vertical grey gridlines separating rows and columns (adapting to macOS Light/Dark appearance).
+  - [x] **Dynamic Row & Column Addition As You Type**:
+    - **Dynamic Row Insertion (`o`, `O`, `<CR>`)**:
+      - Opening a new row in a tabular file automatically aligns to the table schema ($N-1$ delimiter placeholders) so new rows immediately match the column count of the spreadsheet.
+    - **Dynamic Column Addition (`,` / `<Tab>`)**:
+      - Typing a delimiter at the end of a row or header seamlessly adds a new column to the table.
+      - Grid columns, cell boundaries, and vertical gridlines dynamically expand in real-time as content is typed.
+    - **Fluid Caret Synchronization**:
+      - Caret tracking accurately stays centered inside the active cell while column widths expand dynamically under live keystrokes.
+  - [x] **Column Widths & View Menu 'Text Wrap'**:
+    - Add `Text Wrap` (or `Wrap Table Cells`) option to the **View** menu for tabular documents.
+    - **Wrap OFF (Default)**: Each column expands so its width accommodates its longest entry (`max(cellContentWidth) + padding`), keeping columns vertically aligned across arbitrarily wide datasets.
+    - **Wrap ON**: Apply a sensible default column width (e.g. 240pt / 30 chars), wrapping multi-word content within cell boundaries.
+    - Robust horizontal scrolling support for wide tables (dozens/hundreds of columns) without horizontal truncation.
+  - [x] **Freeze Panes & Dedicated 'Spreadsheet' View Menu Section**:
+    - In the **View** menu, add a dedicated `Spreadsheet` section (or section with separators) containing:
+      - `View -> Freeze First Row` (checkable)
+      - `View -> Freeze First Column` (checkable)
+      - `View -> Wrap Table Cells` (checkable)
+    - **Format-Aware Validation**: These menu items are dynamically enabled ONLY when the active document is a CSV or TSV (`isTabularDocument == true`). For all other file types (Markdown, plain text, shell scripts, JSON, etc.), they automatically grey out via `validateUserInterfaceItem`.
+    - State persistence and dynamic viewport layout integration.
+  - [x] **Interactive Header Copy Gestures (Mouse Hover, Click & Drag Range)**:
+    - **Column A Hover & Drag (Row Selector)**:
+      - Hovering over column A morphs the cursor into a rightward arrow (`→`).
+      - Clicking copies the row's values to the macOS clipboard with a subtle highlight flash animation.
+      - **Multi-Row Dragging**: Clicking and dragging down/up across column A selects a range of rows (e.g. rows 3–8), flashes the row range on mouse-up, and copies all selected rows to the clipboard.
+      - Displays transient status feedback (e.g. `Row 5 copied to clipboard` or `Rows 3–8 copied to clipboard`).
+    - **Row 1 Hover & Drag (Column Selector)**:
+      - Hovering over row 1 morphs the cursor into a downward arrow (`↓`).
+      - Clicking copies the column's values (newline-delimited) to the macOS clipboard with a subtle vertical highlight flash animation.
+      - **Multi-Column Dragging**: Clicking and dragging left/right across row 1 selects a range of columns (e.g. columns B–D), flashes the column range on mouse-up, and copies all selected columns across all rows to the clipboard.
+      - Displays transient status feedback (e.g. `Column 'Price' copied to clipboard` or `Columns B–D copied to clipboard`).
+  - [x] **Vim Editing & Plain-Text Integrity**:
+    - Retain raw UTF-8 comma/tab separated text representation on disk with zero proprietary metadata.
+    - Full modal navigation (`h`, `j`, `k`, `l`, `w`, `b`, `$`, `0`, `f`, `t`) and editing in grid cells.
+- [x] **Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication Matrix**
+  - [x] **36 End-to-End Synthetic User Journeys**:
+    - [x] 6 Markdown authoring CUJs (tables, task lists, formatting, frontmatter, headers H1–H6, code fences).
+    - [x] 6 Code & config CUJs (Shell, Python, JSON, YAML, CSV, TSV).
+    - [x] 6 Precision motion & search CUJs (`0`, `^`, `$`, `w`, `b`, `e`, `ge`, `f`, `t`, counts, `/`, `n`, `N`, `p`).
+    - [x] 6 Operator mutation CUJs (`dd`, `dw`, `d$`, `d0`, `yy`, `p`, `P`, `cc`, `cw`, `x`, `s`, `r`, `J`).
+    - [x] 6 Visual text object CUJs (`vi'`, `vi"`, `vi(`, `vi[`, `vi<`, `vi{`, `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{`, `v...d`, `V...y`).
+    - [x] 6 History & system pipeline CUJs (undo/redo cycles `u` and `Ctrl-R`, persistence `:w`, `ZZ`, `:%s`, `:sort` modes, freeze panes, drag copy).
+  - [x] **Deduplicated Keystroke Verification Matrix**:
+    - [x] Extract and deduplicate every key/chord pressed across all 36 journeys via `KeystrokeRecorder`.
+    - [x] Verify all 100 unique keys with 100% fidelity under character-by-character streaming input.
+    - [x] Print console matrix report summarizing 36/36 CUJs, total keystrokes, and category breakdown.
 
 ---
 
 ## 2. Upcoming Milestones
-
-### Milestone M: Excel-Style Spreadsheet View for CSV & TSV (Gridlines, Dynamic Sizing, Wrap, Freeze Panes)
-- [x] **Excel / Numbers Grid Styling**:
-  - Replace rainbow column coloring with clean, professional neutral typography and subtle header shading.
-  - Render crisp horizontal and vertical grey gridlines separating rows and columns (adapting to macOS Light/Dark appearance).
-- [x] **Dynamic Row & Column Addition As You Type**:
-  - **Dynamic Row Insertion (`o`, `O`, `<CR>`)**:
-    - Opening a new row in a tabular file automatically aligns to the table schema ($N-1$ delimiter placeholders) so new rows immediately match the column count of the spreadsheet.
-  - **Dynamic Column Addition (`,` / `<Tab>`)**:
-    - Typing a delimiter at the end of a row or header seamlessly adds a new column to the table.
-    - Grid columns, cell boundaries, and vertical gridlines dynamically expand in real-time as content is typed.
-  - **Fluid Caret Synchronization**:
-    - Caret tracking accurately stays centered inside the active cell while column widths expand dynamically under live keystrokes.
-- [x] **Column Widths & View Menu 'Text Wrap'**:
-  - Add `Text Wrap` (or `Wrap Table Cells`) option to the **View** menu for tabular documents.
-  - **Wrap OFF (Default)**: Each column expands so its width accommodates its longest entry (`max(cellContentWidth) + padding`), keeping columns vertically aligned across arbitrarily wide datasets.
-  - **Wrap ON**: Apply a sensible default column width (e.g. 240pt / 30 chars), wrapping multi-word content within cell boundaries.
-  - Robust horizontal scrolling support for wide tables (dozens/hundreds of columns) without horizontal truncation.
-- [x] **Freeze Panes & Dedicated 'Spreadsheet' View Menu Section**:
-  - In the **View** menu, add a dedicated `Spreadsheet` section (or section with separators) containing:
-    - `View -> Freeze First Row` (checkable)
-    - `View -> Freeze First Column` (checkable)
-    - `View -> Wrap Table Cells` (checkable)
-  - **Format-Aware Validation**: These menu items are dynamically enabled ONLY when the active document is a CSV or TSV (`isTabularDocument == true`). For all other file types (Markdown, plain text, shell scripts, JSON, etc.), they automatically grey out via `validateUserInterfaceItem`.
-  - State persistence and dynamic viewport layout integration.
-- [x] **Interactive Header Copy Gestures (Mouse Hover, Click & Drag Range)**:
-  - **Column A Hover & Drag (Row Selector)**:
-    - Hovering over column A morphs the cursor into a rightward arrow (`→`).
-    - Clicking copies the row's values to the macOS clipboard with a subtle highlight flash animation.
-    - **Multi-Row Dragging**: Clicking and dragging down/up across column A selects a range of rows (e.g. rows 3–8), flashes the row range on mouse-up, and copies all selected rows to the clipboard.
-    - Displays transient status feedback (e.g. `Row 5 copied to clipboard` or `Rows 3–8 copied to clipboard`).
-  - **Row 1 Hover & Drag (Column Selector)**:
-    - Hovering over row 1 morphs the cursor into a downward arrow (`↓`).
-    - Clicking copies the column's values (newline-delimited) to the macOS clipboard with a subtle vertical highlight flash animation.
-    - **Multi-Column Dragging**: Clicking and dragging left/right across row 1 selects a range of columns (e.g. columns B–D), flashes the column range on mouse-up, and copies all selected columns across all rows to the clipboard.
-    - Displays transient status feedback (e.g. `Column 'Price' copied to clipboard` or `Columns B–D copied to clipboard`).
-- [x] **Vim Editing & Plain-Text Integrity**:
-  - Retain raw UTF-8 comma/tab separated text representation on disk with zero proprietary metadata.
-  - Full modal navigation (`h`, `j`, `k`, `l`, `w`, `b`, `$`, `0`, `f`, `t`) and editing in grid cells.
-
-### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
-- [x] **36 End-to-End Synthetic User Journeys**:
-  - [x] 6 Markdown authoring CUJs (tables, task lists, formatting, frontmatter, headers H1–H6, code fences).
-  - [x] 6 Code & config CUJs (Shell, Python, JSON, YAML, CSV, TSV).
-  - [x] 6 Precision motion & search CUJs (`0`, `^`, `$`, `w`, `b`, `e`, `ge`, `f`, `t`, counts, `/`, `n`, `N`, `p`).
-  - [x] 6 Operator mutation CUJs (`dd`, `dw`, `d$`, `d0`, `yy`, `p`, `P`, `cc`, `cw`, `x`, `s`, `r`, `J`).
-  - [x] 6 Visual text object CUJs (`vi'`, `vi"`, `vi(`, `vi[`, `vi<`, `vi{`, `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{`, `v...d`, `V...y`).
-  - [x] 6 History & system pipeline CUJs (undo/redo cycles `u` and `Ctrl-R`, persistence `:w`, `ZZ`, `:%s`, `:sort` modes, freeze panes, drag copy).
-- [x] **Deduplicated Keystroke Verification Matrix**:
-  - [x] Extract and deduplicate every key/chord pressed across all 36 journeys via `KeystrokeRecorder`.
-  - [x] Verify all 100 unique keys with 100% fidelity under character-by-character streaming input.
-  - [x] Print console matrix report summarizing 36/36 CUJs, total keystrokes, and category breakdown.
+*(All queued roadmap milestones completed!)*
 
 ---
 
