@@ -343,7 +343,7 @@ open class VimMDTextView: NSTextView {
         guard let session = session else { return }
         self.string = session.serializeBuffer()
         session.onLineDeltaWithRange = { [weak self] startLine, deletedCount, newLines, targetRange in
-            self?.applyDelta(targetRange: targetRange, newLines: newLines)
+            self?.applyDelta(startLine: startLine, deletedCount: deletedCount, targetRange: targetRange, newLines: newLines)
         }
         session.onModeChanged = { [weak self] mode in
             self?.updateSyntaxStyling()
@@ -357,8 +357,24 @@ open class VimMDTextView: NSTextView {
         synchronizeCaretWithSession()
     }
 
-    public func applyDelta(targetRange: NSRange, newLines: [String]) {
-        let replacement = newLines.joined(separator: "\n")
+    public func applyDelta(startLine: Int = 0, deletedCount: Int = -1, targetRange: NSRange, newLines: [String]) {
+        var replacement = newLines.joined(separator: "\n")
+        let docLength = (self.textStorage?.length ?? (self.string as NSString).length)
+        if deletedCount == 0 && !newLines.isEmpty && docLength > 0 {
+            if targetRange.location < docLength {
+                replacement += "\n"
+            } else {
+                let currentStr = (self.textStorage?.string ?? self.string) as NSString
+                let prevChar = targetRange.location > 0 && targetRange.location <= currentStr.length
+                    ? currentStr.character(at: targetRange.location - 1)
+                    : (currentStr.length > 0 ? currentStr.character(at: currentStr.length - 1) : 0)
+                if prevChar == 10 || prevChar == 13 {
+                    replacement += "\n"
+                } else {
+                    replacement = "\n" + replacement
+                }
+            }
+        }
 
         if let storage = self.textStorage {
             storage.beginEditing()
@@ -382,10 +398,14 @@ open class VimMDTextView: NSTextView {
         synchronizeCaretWithSession()
     }
 
+    public func applyDelta(targetRange: NSRange, newLines: [String]) {
+        applyDelta(startLine: 0, deletedCount: -1, targetRange: targetRange, newLines: newLines)
+    }
+
     public func applyDelta(startLine: Int, deletedCount: Int, newLines: [String]) {
         guard let session = session else { return }
         let targetRange = session.lineIndexTable.characterRange(startLine: startLine, count: deletedCount)
-        applyDelta(targetRange: targetRange, newLines: newLines)
+        applyDelta(startLine: startLine, deletedCount: deletedCount, targetRange: targetRange, newLines: newLines)
     }
 
     public func synchronizeCaretWithSession() {
@@ -494,6 +514,69 @@ open class VimMDTextView: NSTextView {
         return nil
     }
 
+    public func positionCaret(atRow r: Int, column c: Int) {
+        guard let storage = self.textStorage else { return }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else {
+            self.setSelectedRange(NSRange(location: 0, length: 0))
+            if let session = self.session {
+                session.setCursor(line: 1, byteCol: 1)
+                synchronizeCaretWithSession()
+                onCursorMoved?()
+            }
+            return
+        }
+
+        var lineRanges: [NSRange] = []
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            lineRanges.append(lr)
+            idx = lr.location + lr.length
+        }
+        guard !lineRanges.isEmpty else { return }
+        let clampedRow = max(0, min(lineRanges.count - 1, r))
+        let lr = lineRanges[clampedRow]
+
+        var contentLength = lr.length
+        while contentLength > 0 {
+            let char = fullString.character(at: lr.location + contentLength - 1)
+            if char == 10 || char == 13 {
+                contentLength -= 1
+            } else {
+                break
+            }
+        }
+        let contentRange = NSRange(location: lr.location, length: contentLength)
+        let (fields, _) = tabularResolver.parseLine(in: fullString, range: contentRange, isTSV: isTSV)
+
+        let targetOffset: Int
+        if fields.isEmpty {
+            targetOffset = contentRange.location
+        } else if c < 0 {
+            targetOffset = fields[0].range.location
+        } else if c < fields.count {
+            targetOffset = fields[c].range.location
+        } else {
+            let lastField = fields[fields.count - 1]
+            targetOffset = lastField.range.location + lastField.range.length
+        }
+
+        self.setSelectedRange(NSRange(location: targetOffset, length: 0))
+        if let session = self.session {
+            let vimPos = session.lineIndexTable.vimPosition(fromDocumentUtf16Offset: targetOffset)
+            session.setCursor(line: vimPos.line, byteCol: vimPos.byteCol)
+            synchronizeCaretWithSession()
+            onCursorMoved?()
+        }
+    }
+
+    public func positionCaret(at point: NSPoint) {
+        if let r = rowIndex(at: point), let c = columnIndex(at: point) {
+            positionCaret(atRow: r, column: c)
+        }
+    }
+
     // MARK: - Spreadsheet Cursors & Hover Gestures
 
     public static func makeDownwardArrowCursor() -> NSCursor {
@@ -592,6 +675,7 @@ open class VimMDTextView: NSTextView {
 
     public func handleTabularMouseDown(at point: NSPoint) -> Bool {
         guard isTabularDocument else { return false }
+        self.window?.makeFirstResponder(self)
         let rIdx = rowIndex(at: point)
         let cIdx = columnIndex(at: point)
 
@@ -602,6 +686,7 @@ open class VimMDTextView: NSTextView {
             dragStartColIndex = c
             activeColDragRange = c...c
             activeRowDragRange = nil
+            positionCaret(atRow: 0, column: c)
             needsDisplay = true
             return true
         } else if cIdx == 0, let r = rIdx, r > 0 {
@@ -611,6 +696,7 @@ open class VimMDTextView: NSTextView {
             dragStartRowIndex = r
             activeRowDragRange = r...r
             activeColDragRange = nil
+            positionCaret(atRow: r, column: 0)
             needsDisplay = true
             return true
         }
@@ -937,9 +1023,14 @@ open class VimMDTextView: NSTextView {
     // MARK: - Mouse & Keyboard Event Handling
 
     override open func mouseDown(with event: NSEvent) {
+        self.window?.makeFirstResponder(self)
         if isTabularDocument {
             let pt = convert(event.locationInWindow, from: nil)
             if handleTabularMouseDown(at: pt) {
+                return
+            }
+            if let r = rowIndex(at: pt), let c = columnIndex(at: pt) {
+                positionCaret(atRow: r, column: c)
                 return
             }
         }
@@ -952,6 +1043,9 @@ open class VimMDTextView: NSTextView {
             session.setCursor(line: vimPos.line, byteCol: vimPos.byteCol)
             synchronizeCaretWithSession()
             onCursorMoved?()
+        } else if isTabularDocument {
+            let pt = convert(event.locationInWindow, from: nil)
+            positionCaret(at: pt)
         }
     }
 

@@ -405,6 +405,7 @@ open class VimMDDocument: NSDocument {
             tv.documentSyntaxType = self.documentSyntaxType
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
+            tv.window?.makeFirstResponder(tv)
         }
         self.updateChangeCount(.changeCleared)
     }
