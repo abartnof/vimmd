@@ -117,6 +117,22 @@ echo "[TEST] Executing cuj_trial..."
 echo "[TEST] cuj_trial passed."
 echo ""
 
+# 7. Synthetic Critical User Journey (CUJ) Suite & Keystroke Matrix
+echo "[TEST] Building & running 36 Synthetic CUJ Test Fleet & Keystroke Matrix..."
+echo "[TEST] Compiling SyntheticCUJSuite..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/Tests/CUJTests/SyntheticCUJSuite.swift" \
+    -o "${BUILD_DIR}/SyntheticCUJSuite"
+
+echo "[TEST] Executing SyntheticCUJSuite..."
+"${BUILD_DIR}/SyntheticCUJSuite"
+echo "[TEST] SyntheticCUJSuite passed."
+echo ""
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="

@@ -117,16 +117,17 @@ This document tracks all active milestones, user requirements, and architectural
   - Full modal navigation (`h`, `j`, `k`, `l`, `w`, `b`, `$`, `0`, `f`, `t`) and editing in grid cells.
 
 ### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
-- [ ] **36 End-to-End Synthetic User Journeys**:
-  - 6 Markdown authoring CUJs (tables, task lists, formatting).
-  - 6 Code & config CUJs (Shell, Python, JSON, TSV/CSV).
-  - 6 Precision motion & search CUJs (`0`, `^`, `$`, `w`, `b`, `e`, `ge`, `f`, `t`, counts, `/`, `n`, `N`).
-  - 6 Operator mutation CUJs (`dd`, `dw`, `d$`, `d0`, `yy`, `p`, `cc`, `cw`, `x`, `s`, `r`, `J`).
-  - 6 Visual text object CUJs (`vi'`, `vi"`, `vi(`, `vi[`, `vi<`, `vi{`, `v...d`, `V...y`).
-  - 6 History & system pipeline CUJs (undo/redo, clipboard exchange, `:w`, `ZZ`, `:%s`).
-- [ ] **Deduplicated Keystroke Verification Matrix**:
-  - Extract and deduplicate every key/chord pressed across all 36 journeys.
-  - Verify every single key works with 100% fidelity under character-by-character streaming input.
+- [x] **36 End-to-End Synthetic User Journeys**:
+  - [x] 6 Markdown authoring CUJs (tables, task lists, formatting, frontmatter, headers H1–H6, code fences).
+  - [x] 6 Code & config CUJs (Shell, Python, JSON, YAML, CSV, TSV).
+  - [x] 6 Precision motion & search CUJs (`0`, `^`, `$`, `w`, `b`, `e`, `ge`, `f`, `t`, counts, `/`, `n`, `N`, `p`).
+  - [x] 6 Operator mutation CUJs (`dd`, `dw`, `d$`, `d0`, `yy`, `p`, `P`, `cc`, `cw`, `x`, `s`, `r`, `J`).
+  - [x] 6 Visual text object CUJs (`vi'`, `vi"`, `vi(`, `vi[`, `vi<`, `vi{`, `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{`, `v...d`, `V...y`).
+  - [x] 6 History & system pipeline CUJs (undo/redo cycles `u` and `Ctrl-R`, persistence `:w`, `ZZ`, `:%s`, `:sort` modes, freeze panes, drag copy).
+- [x] **Deduplicated Keystroke Verification Matrix**:
+  - [x] Extract and deduplicate every key/chord pressed across all 36 journeys via `KeystrokeRecorder`.
+  - [x] Verify all 100 unique keys with 100% fidelity under character-by-character streaming input.
+  - [x] Print console matrix report summarizing 36/36 CUJs, total keystrokes, and category breakdown.
 
 ---
 
