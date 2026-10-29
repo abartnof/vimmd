@@ -63,20 +63,19 @@ This document tracks all active milestones, user requirements, and architectural
     - `N`: Jump to previous search occurrence backward and auto-scroll to caret.
     - `p`: When yank buffer is empty and search has occurred, navigate backward to previous match (matching user expectations without breaking paste when yank buffer is populated).
     - Retain and display active search query pattern across navigation.
+- [x] **Milestone K: Vim `:sort` Command Subsystem**
+  - [x] **Alphabetical and Numerical Line Sorting (`:sort`)**:
+    - [x] `:sort`: Lexicographically sort lines across the entire buffer (or within active visual range `:'<,'>sort`).
+    - [x] `:sort!`: Reverse/descending sort order.
+    - [x] `:sort i`: Case-insensitive lexicographical sorting.
+    - [x] `:sort u`: Deduplicate identical adjacent lines (unique filter).
+    - [x] `:sort n`: Numeric sorting (evaluating leading or embedded integers).
+    - [x] Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
+    - [x] Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
 
 ---
 
 ## 2. Upcoming Milestones
-
-### Milestone K: Vim `:sort` Command Subsystem
-- [ ] **Alphabetical and Numerical Line Sorting (`:sort`)**:
-  - `:sort`: Lexicographically sort lines across the entire buffer (or within active visual range `:'<,'>sort`).
-  - `:sort!`: Reverse/descending sort order.
-  - `:sort i`: Case-insensitive lexicographical sorting.
-  - `:sort u`: Deduplicate identical adjacent lines (unique filter).
-  - `:sort n`: Numeric sorting (evaluating leading or embedded integers).
-  - Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
-  - Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
 
 ### Milestone M: Excel-Style Spreadsheet View for CSV & TSV (Gridlines, Dynamic Sizing, Wrap, Freeze Panes)
 - [x] **Excel / Numbers Grid Styling**:

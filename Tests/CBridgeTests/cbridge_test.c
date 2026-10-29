@@ -1926,6 +1926,255 @@ static void test_undo_cap_levels(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_sort_alphabetical(void) {
+    const char *initial = "delta\nalpha\ncharlie\nbravo";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    MockDeltaState delta = {0};
+    vim_context_set_delta_callback(ctx, mock_delta_callback, &delta);
+
+    vim_context_execute_ex(ctx, "sort");
+    assert(vim_context_is_dirty(ctx) == true);
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "alpha\nbravo\ncharlie\ndelta") == 0);
+    free(ser);
+
+    assert(delta.call_count == 1);
+    assert(delta.start_line == 1);
+    assert(delta.deleted_count == 4);
+    assert(delta.added_count == 4);
+    assert(strcmp(delta.first_added_line, "alpha") == 0);
+
+    // Test with leading colon and with %sort
+    VimContextRef ctx2 = vim_context_create("z\ny\nx");
+    vim_context_execute_ex(ctx2, ":%sort");
+    char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(ser2, "x\ny\nz") == 0);
+    free(ser2);
+    vim_context_destroy(ctx2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_reverse(void) {
+    const char *initial = "alpha\nbravo\ncharlie\ndelta";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    vim_context_execute_ex(ctx, "sort!");
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "delta\ncharlie\nbravo\nalpha") == 0);
+    free(ser);
+
+    // Test with :%sort!
+    vim_context_execute_ex(ctx, ":%sort!");
+    char *ser2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser2, "delta\ncharlie\nbravo\nalpha") == 0);
+    free(ser2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_case_insensitive(void) {
+    // In ASCII: Apple (65), Cherry (67), apple (97), banana (98)
+    const char *initial = "banana\napple\nApple\nCherry";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    // Without 'i', standard sort: Apple, Cherry, apple, banana
+    // With 'i', case-insensitive sort: Apple & apple before banana before Cherry
+    vim_context_execute_ex(ctx, "sort i");
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "Apple\napple\nbanana\nCherry") == 0);
+    free(ser);
+
+    // Reverse case-insensitive: sort! i
+    vim_context_execute_ex(ctx, ":sort! i");
+    char *ser2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser2, "Cherry\nbanana\napple\nApple") == 0);
+    free(ser2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_unique(void) {
+    const char *initial = "delta\nalpha\nbravo\nalpha\ncharlie\nbravo\ndelta";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    MockDeltaState delta = {0};
+    vim_context_set_delta_callback(ctx, mock_delta_callback, &delta);
+
+    vim_context_execute_ex(ctx, "sort u");
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "alpha\nbravo\ncharlie\ndelta") == 0);
+    free(ser);
+
+    assert(delta.call_count == 1);
+    assert(delta.start_line == 1);
+    assert(delta.deleted_count == 7);
+    assert(delta.added_count == 4);
+
+    // Test sort! u (reverse unique)
+    VimContextRef ctx2 = vim_context_create("b\na\nb\na\nc");
+    vim_context_execute_ex(ctx2, ":sort! u");
+    char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(ser2, "c\nb\na") == 0);
+    free(ser2);
+    vim_context_destroy(ctx2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_numeric(void) {
+    const char *initial = "item 100\nitem 2\nitem 10\nitem 1";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    vim_context_execute_ex(ctx, "sort n");
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "item 1\nitem 2\nitem 10\nitem 100") == 0);
+    free(ser);
+
+    // Test sort! n (reverse numeric)
+    vim_context_execute_ex(ctx, ":sort! n");
+    char *ser2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser2, "item 100\nitem 10\nitem 2\nitem 1") == 0);
+    free(ser2);
+
+    // Combined unique + numeric: sort u n
+    VimContextRef ctx2 = vim_context_create("20\n2\n100\n20\n2");
+    vim_context_execute_ex(ctx2, "sort u n");
+    char *ser3 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(ser3, "2\n20\n100") == 0);
+    free(ser3);
+    vim_context_destroy(ctx2);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_range(void) {
+    const char *initial = "header\nzebra\napple\nmango\nfooter";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    MockDeltaState delta = {0};
+    vim_context_set_delta_callback(ctx, mock_delta_callback, &delta);
+
+    // Explicit range :2,4sort
+    vim_context_execute_ex(ctx, ":2,4sort");
+    assert(strlen(vim_context_get_last_error(ctx)) == 0);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(ser != NULL);
+    assert(strcmp(ser, "header\napple\nmango\nzebra\nfooter") == 0);
+    free(ser);
+
+    assert(delta.call_count == 1);
+    assert(delta.start_line == 2);
+    assert(delta.deleted_count == 3);
+    assert(delta.added_count == 3);
+
+    // Visual range :'<,'>sort
+    VimContextRef ctx2 = vim_context_create("line1\nzoo\nbear\ncat\nline5");
+    vim_context_set_visual_anchor(ctx2, 2, 1);
+    vim_context_set_cursor(ctx2, 4, 1);
+    vim_context_execute_ex(ctx2, ":'<,'>sort");
+    assert(strlen(vim_context_get_last_error(ctx2)) == 0);
+
+    char *ser2 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(ser2, "line1\nbear\ncat\nzoo\nline5") == 0);
+    free(ser2);
+    vim_context_destroy(ctx2);
+
+    // Single-line range: safe no-op
+    VimContextRef ctx3 = vim_context_create("single");
+    vim_context_execute_ex(ctx3, ":1,1sort");
+    assert(strlen(vim_context_get_last_error(ctx3)) == 0);
+    vim_context_destroy(ctx3);
+
+    // Empty buffer: safe no-op
+    VimContextRef ctx4 = vim_context_create("");
+    vim_context_execute_ex(ctx4, ":sort");
+    assert(strlen(vim_context_get_last_error(ctx4)) == 0);
+    vim_context_destroy(ctx4);
+
+    // Invalid range: start > end -> E16: Invalid range
+    vim_context_execute_ex(ctx, ":5,2sort");
+    assert(strstr(vim_context_get_last_error(ctx), "E16: Invalid range") != NULL);
+
+    // Invalid range: start < 1
+    vim_context_execute_ex(ctx, ":0,3sort");
+    assert(strstr(vim_context_get_last_error(ctx), "E16: Invalid range") != NULL);
+
+    // Malformed sort command
+    vim_context_execute_ex(ctx, ":sort xyz");
+    assert(strstr(vim_context_get_last_error(ctx), "E492") != NULL);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_sort_undo_redo(void) {
+    const char *initial = "dog\ncat\nbird";
+    VimContextRef ctx = vim_context_create(initial);
+    assert(ctx != NULL);
+
+    vim_context_execute_ex(ctx, "sort");
+    char *ser1 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser1, "bird\ncat\ndog") == 0);
+    free(ser1);
+
+    // Undo restores original order
+    bool u1 = vim_context_undo(ctx);
+    assert(u1);
+    char *ser2 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser2, initial) == 0);
+    free(ser2);
+
+    // Redo restores sorted order
+    bool r1 = vim_context_redo(ctx);
+    assert(r1);
+    char *ser3 = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser3, "bird\ncat\ndog") == 0);
+    free(ser3);
+
+    // Undo with unique deduplication
+    VimContextRef ctx2 = vim_context_create("b\na\nb\na");
+    vim_context_execute_ex(ctx2, "sort u");
+    char *s1 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(s1, "a\nb") == 0);
+    free(s1);
+
+    assert(vim_context_undo(ctx2));
+    char *s2 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(s2, "b\na\nb\na") == 0);
+    free(s2);
+
+    assert(vim_context_redo(ctx2));
+    char *s3 = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(s3, "a\nb") == 0);
+    free(s3);
+
+    vim_context_destroy(ctx2);
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -1968,6 +2217,13 @@ int main(void) {
     RUN_TEST(test_undo_ex_commands);
     RUN_TEST(test_undo_tree_truncation_on_new_edit);
     RUN_TEST(test_undo_cap_levels);
+    RUN_TEST(test_sort_alphabetical);
+    RUN_TEST(test_sort_reverse);
+    RUN_TEST(test_sort_case_insensitive);
+    RUN_TEST(test_sort_unique);
+    RUN_TEST(test_sort_numeric);
+    RUN_TEST(test_sort_range);
+    RUN_TEST(test_sort_undo_redo);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

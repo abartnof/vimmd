@@ -2271,6 +2271,13 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 }
                 ctx->mode = VIM_MODE_NORMAL;
                 p++;
+            } else if (*p == ':') {
+                ctx->mode = VIM_MODE_COMMAND;
+                ctx->is_search_cmd = false;
+                strcpy(ctx->cmd_buf, ":'<,'>");
+                ctx->cmd_len = strlen(ctx->cmd_buf);
+                ctx->count_accumulator = 0;
+                p++;
             } else if (*p == 'h') {
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
                 ctx->count_accumulator = 0;
@@ -2409,12 +2416,257 @@ static char* replace_substring(const char *str, const char *find, const char *re
     return result;
 }
 
+typedef struct {
+    bool reverse;
+    bool ignore_case;
+    bool numeric;
+} BridgeSortOptions;
+
+static BridgeSortOptions g_bridge_sort_opts;
+
+static bool extract_first_number(const char *s, long long *out_val) {
+    if (!s) {
+        *out_val = 0;
+        return false;
+    }
+    const char *p = s;
+    while (*p) {
+        if (isdigit((unsigned char)*p) ||
+            ((*p == '-' || *p == '+') && isdigit((unsigned char)*(p + 1)))) {
+            char *endptr = NULL;
+            *out_val = strtoll(p, &endptr, 10);
+            return true;
+        }
+        p++;
+    }
+    *out_val = 0;
+    return false;
+}
+
+static int bridge_sort_line_comparator(const void *p1, const void *p2) {
+    const char *s1 = *(const char * const *)p1;
+    const char *s2 = *(const char * const *)p2;
+
+    int cmp = 0;
+    if (g_bridge_sort_opts.numeric) {
+        long long num1 = 0, num2 = 0;
+        extract_first_number(s1, &num1);
+        extract_first_number(s2, &num2);
+        if (num1 < num2) {
+            cmp = -1;
+        } else if (num1 > num2) {
+            cmp = 1;
+        } else {
+            if (g_bridge_sort_opts.ignore_case) {
+                cmp = strcasecmp(s1, s2);
+            } else {
+                cmp = strcmp(s1, s2);
+            }
+        }
+    } else if (g_bridge_sort_opts.ignore_case) {
+        cmp = strcasecmp(s1, s2);
+        if (cmp == 0) {
+            cmp = strcmp(s1, s2);
+        }
+    } else {
+        cmp = strcmp(s1, s2);
+    }
+
+    if (g_bridge_sort_opts.reverse) {
+        cmp = -cmp;
+    }
+    return cmp;
+}
+
+static bool execute_sort_command(VimContextRef ctx, const char *raw_command, const char *cmd) {
+    const char *p = cmd;
+    size_t start_line = 1;
+    size_t end_line = ctx->line_count;
+    bool has_range = false;
+
+    if (*p == '%') {
+        const char *chk = p + 1;
+        while (*chk == ' ') chk++;
+        if (strncmp(chk, "sort", 4) == 0) {
+            has_range = true;
+            start_line = 1;
+            end_line = ctx->line_count;
+            p = chk;
+        }
+    } else if (strncmp(p, "'<,'>", 5) == 0) {
+        const char *chk = p + 5;
+        while (*chk == ' ') chk++;
+        if (strncmp(chk, "sort", 4) == 0) {
+            has_range = true;
+            int32_t a = ctx->visual_anchor.line;
+            int32_t b = ctx->cursor.line;
+            start_line = (size_t)(a < b ? a : b);
+            end_line = (size_t)(a > b ? a : b);
+            p = chk;
+        }
+    } else if (isdigit((unsigned char)*p)) {
+        char *endptr1 = NULL;
+        long s = strtol(p, &endptr1, 10);
+        const char *q = endptr1;
+        while (*q == ' ') q++;
+        if (*q == ',') {
+            q++;
+            while (*q == ' ') q++;
+            if (isdigit((unsigned char)*q)) {
+                char *endptr2 = NULL;
+                long e = strtol(q, &endptr2, 10);
+                const char *r = endptr2;
+                while (*r == ' ') r++;
+                if (strncmp(r, "sort", 4) == 0) {
+                    has_range = true;
+                    if (s < 1 || s > e) {
+                        snprintf(ctx->last_error, sizeof(ctx->last_error), "E16: Invalid range");
+                        return true;
+                    }
+                    start_line = (size_t)s;
+                    end_line = (size_t)e;
+                    p = r;
+                }
+            }
+        }
+    }
+
+    if (strncmp(p, "sort", 4) != 0) {
+        return false;
+    }
+
+    p += 4;
+    bool reverse = false;
+    if (*p == '!') {
+        reverse = true;
+        p++;
+    } else if (*p != '\0' && *p != ' ' && *p != '\t' && *p != 'i' && *p != 'u' && *p != 'n') {
+        snprintf(ctx->last_error, sizeof(ctx->last_error), "E492: Not an editor command: %s", raw_command);
+        return true;
+    }
+
+    bool opt_i = false;
+    bool opt_u = false;
+    bool opt_n = false;
+
+    while (*p) {
+        if (*p == ' ' || *p == '\t') {
+            p++;
+        } else if (*p == '!') {
+            reverse = true;
+            p++;
+        } else if (*p == 'i') {
+            opt_i = true;
+            p++;
+        } else if (*p == 'u') {
+            opt_u = true;
+            p++;
+        } else if (*p == 'n') {
+            opt_n = true;
+            p++;
+        } else {
+            snprintf(ctx->last_error, sizeof(ctx->last_error), "E492: Not an editor command: %s", raw_command);
+            return true;
+        }
+    }
+
+    if (ctx->line_count == 0) {
+        ctx->last_error[0] = '\0';
+        return true;
+    }
+
+    if (start_line < 1 || (has_range && start_line > ctx->line_count)) {
+        snprintf(ctx->last_error, sizeof(ctx->last_error), "E16: Invalid range");
+        return true;
+    }
+    if (end_line > ctx->line_count) {
+        end_line = ctx->line_count;
+    }
+    if (start_line > end_line) {
+        snprintf(ctx->last_error, sizeof(ctx->last_error), "E16: Invalid range");
+        return true;
+    }
+
+    if (start_line == end_line) {
+        ctx->last_error[0] = '\0';
+        return true;
+    }
+
+    snapshot_for_undo(ctx);
+
+    size_t count = end_line - start_line + 1;
+    size_t start_idx = start_line - 1;
+
+    g_bridge_sort_opts.reverse = reverse;
+    g_bridge_sort_opts.ignore_case = opt_i;
+    g_bridge_sort_opts.numeric = opt_n;
+
+    qsort(&ctx->lines[start_idx], count, sizeof(char *), bridge_sort_line_comparator);
+
+    size_t old_count = count;
+    size_t new_end_line = end_line;
+
+    if (opt_u) {
+        size_t write_idx = start_idx;
+        size_t end_idx = end_line - 1;
+
+        for (size_t read_idx = start_idx + 1; read_idx <= end_idx; read_idx++) {
+            bool is_dup = false;
+            if (opt_i) {
+                is_dup = (strcasecmp(ctx->lines[read_idx], ctx->lines[write_idx]) == 0);
+            } else {
+                is_dup = (strcmp(ctx->lines[read_idx], ctx->lines[write_idx]) == 0);
+            }
+
+            if (is_dup) {
+                free(ctx->lines[read_idx]);
+                ctx->lines[read_idx] = NULL;
+            } else {
+                write_idx++;
+                if (write_idx != read_idx) {
+                    ctx->lines[write_idx] = ctx->lines[read_idx];
+                    ctx->lines[read_idx] = NULL;
+                }
+            }
+        }
+
+        size_t removed = end_idx - write_idx;
+        if (removed > 0) {
+            size_t tail_count = ctx->line_count - (end_idx + 1);
+            if (tail_count > 0) {
+                memmove(&ctx->lines[write_idx + 1], &ctx->lines[end_idx + 1], tail_count * sizeof(char *));
+            }
+            ctx->line_count -= removed;
+            new_end_line = write_idx + 1;
+        }
+    }
+
+    size_t new_count = new_end_line - start_line + 1;
+    ctx->is_dirty = true;
+    emit_line_delta(ctx, (int32_t)start_line, (int32_t)old_count, (int32_t)new_count);
+
+    ctx->cursor.line = (int32_t)start_line;
+    ctx->cursor.byteCol = 1;
+    clamp_cursor(ctx);
+
+    if (ctx->mode == VIM_MODE_VISUAL) {
+        ctx->mode = VIM_MODE_NORMAL;
+    }
+
+    ctx->last_error[0] = '\0';
+    return true;
+}
+
 void vim_context_execute_ex(VimContextRef ctx, const char *command) {
     if (!ctx || !command) return;
     vim_activate_context(ctx);
 
     const char *cmd = command;
     while (*cmd == ' ' || *cmd == ':') cmd++;
+
+    if (execute_sort_command(ctx, command, cmd)) {
+        return;
+    }
 
     if (strcmp(cmd, "w") == 0) {
         ctx->pending_action = VIM_ACTION_SAVE;
