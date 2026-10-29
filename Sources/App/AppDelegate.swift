@@ -180,7 +180,37 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSDocumentController.shared.openDocument(nil)
     }
 
+    @discardableResult
+    public static func configureApplicationIcon() -> NSImage? {
+        if #available(macOS 11.0, *) {
+            let size: CGFloat = 256
+            let icon = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+                let circleRect = rect.insetBy(dx: rect.width * 0.07, dy: rect.height * 0.07)
+                let circlePath = NSBezierPath(ovalIn: circleRect)
+
+                // 1. Fill circular body with solid pure white
+                NSColor.white.setFill()
+                circlePath.fill()
+
+                // 2. Stroke subtle border
+                NSColor(white: 0.85, alpha: 1.0).setStroke()
+                circlePath.lineWidth = max(1.0, rect.width * 0.015)
+                circlePath.stroke()
+
+                // 3. Draw v.circle symbol crisply in dark/black over the white-filled circle
+                if let symbol = NSImage(systemSymbolName: "v.circle", accessibilityDescription: "VimMD") {
+                    symbol.draw(in: rect)
+                }
+                return true
+            }
+            NSApplication.shared.applicationIconImage = icon
+            return icon
+        }
+        return nil
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.configureApplicationIcon()
         setupMainMenu()
 
         for arg in CommandLine.arguments.dropFirst() {

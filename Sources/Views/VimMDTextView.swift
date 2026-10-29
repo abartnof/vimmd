@@ -496,19 +496,57 @@ open class VimMDTextView: NSTextView {
 
     // MARK: - Spreadsheet Cursors & Hover Gestures
 
-    public static var downwardArrowCursor: NSCursor = {
-        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: "Down") {
-            return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
-        }
-        return NSCursor.resizeDown
-    }()
+    public static func makeDownwardArrowCursor() -> NSCursor {
+        let size = NSSize(width: 20, height: 20)
+        let img = NSImage(size: size, flipped: true) { _ in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 7, y: 2))
+            path.line(to: NSPoint(x: 13, y: 2))
+            path.line(to: NSPoint(x: 13, y: 10))
+            path.line(to: NSPoint(x: 18, y: 10))
+            path.line(to: NSPoint(x: 10, y: 18))
+            path.line(to: NSPoint(x: 2, y: 10))
+            path.line(to: NSPoint(x: 7, y: 10))
+            path.close()
 
-    public static var rightwardArrowCursor: NSCursor = {
-        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "arrow.right", accessibilityDescription: "Right") {
-            return NSCursor(image: img, hotSpot: NSPoint(x: img.size.width / 2, y: img.size.height / 2))
+            NSColor.white.setFill()
+            path.fill()
+            NSColor.black.setStroke()
+            path.lineWidth = 1.5
+            path.lineJoinStyle = .round
+            path.stroke()
+            return true
         }
-        return NSCursor.resizeRight
-    }()
+        return NSCursor(image: img, hotSpot: NSPoint(x: 10, y: 18))
+    }
+
+    public static func makeRightwardArrowCursor() -> NSCursor {
+        let size = NSSize(width: 20, height: 20)
+        let img = NSImage(size: size, flipped: true) { _ in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 2, y: 7))
+            path.line(to: NSPoint(x: 10, y: 7))
+            path.line(to: NSPoint(x: 10, y: 2))
+            path.line(to: NSPoint(x: 18, y: 10))
+            path.line(to: NSPoint(x: 10, y: 18))
+            path.line(to: NSPoint(x: 10, y: 13))
+            path.line(to: NSPoint(x: 2, y: 13))
+            path.close()
+
+            NSColor.white.setFill()
+            path.fill()
+            NSColor.black.setStroke()
+            path.lineWidth = 1.5
+            path.lineJoinStyle = .round
+            path.stroke()
+            return true
+        }
+        return NSCursor(image: img, hotSpot: NSPoint(x: 18, y: 10))
+    }
+
+    public static var downwardArrowCursor: NSCursor = makeDownwardArrowCursor()
+
+    public static var rightwardArrowCursor: NSCursor = makeRightwardArrowCursor()
 
     public func cursorForPoint(_ point: NSPoint) -> NSCursor? {
         guard isTabularDocument else { return nil }

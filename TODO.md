@@ -125,12 +125,82 @@ This document tracks all active milestones, user requirements, and architectural
 
 ---
 
-## 2. Upcoming Milestones
-*(All queued roadmap milestones completed!)*
+## 2. Active Milestones
+- [ ] **Milestone N: High-Contrast White Cursor & Native SF Symbol App Icon**
+  - [ ] **High-Contrast Mouse Cursors (White with Black Outline)**:
+    - [ ] Design custom high-visibility `downwardArrowCursor` (↓) and `rightwardArrowCursor` (→) rendered with crisp `NSColor.white` fill and `NSColor.black` 1.5pt border outline, matching standard macOS cursor contrast.
+    - [ ] Position hotspots accurately at the arrow tips for pixel-perfect hover precision over column A and row 1.
+    - [ ] Maintain flawless visibility across both Light Mode and Dark Mode backgrounds.
+  - [ ] **Native SF Symbol App Icon (`v.circle`)**:
+    - [ ] Adopt `v.circle` (`NSImage(systemSymbolName: "v.circle", accessibilityDescription: "VimMD")`) as the official lightweight app icon without binary bloat.
+    - [ ] Set `NSApplication.shared.applicationIconImage` dynamically at launch in `AppDelegate`.
+    - [ ] Package multi-resolution `AppIcon.icns` in `VimMD.app/Contents/Resources/` and register `CFBundleIconFile` in `Info.plist` for Finder and Dock support.
+
+- [ ] **Milestone O: Tabular Modal Input & First Responder Parity (Vim Commands in Spreadsheets)**
+  - [ ] **First Responder & Mouse Down Fix**: Ensure clicking anywhere in a tabular document (including row 0 headers and column A cells) properly activates `firstResponder` on `VimMDTextView`, positions the Vim caret at the clicked cell, and allows subsequent typing without swallowing events.
+  - [ ] **Full Modal Parity**: Verify that all standard Vim commands work identically in tabular documents:
+    - Navigation: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `ge`, `0`, `^`, `$`, `gg`, `G`, `f`, `t`.
+    - Mutations: `x`, `s`, `r`, `cw`, `cc`, `c$`, `dd`, `dw`, `d$`, `yy`, `yw`, `p`, `P`, `J`.
+    - Modal Transitions: `i`, `I`, `a`, `A`, `o`, `O` with automatic tabular delimiter alignment.
+    - History: `u` (undo) and `Ctrl-R` (redo) maintaining intact spreadsheet structure.
+    - Ex Commands: `:w`, `:q`, `:sort`, `:%s/find/replace/g`, `/search`.
+
+- [ ] **Milestone P: Fleet of UX Researcher Subagents (Automated End-to-End GUI Simulation)**
+  - [ ] **Spreadsheet UX Researcher Subagent (`.csv`, `.tsv`)**:
+    - Simulates AppKit GUI interactions on real tabular files: window activation, cell clicking, cursor navigation, in-cell typing, column/row additions, menu toggles (`Freeze First Row`, `Freeze First Column`, `Wrap Table Cells`), and clipboard copy gestures.
+  - [ ] **Markdown UX Researcher Subagent (`.md`, `.markdown`)**:
+    - Simulates AppKit GUI interactions on Markdown files: live editing, header formatting, list editing, code block toggles, table alignment, and syntax concealment transitions.
+  - [ ] **Plain Text & Code UX Researcher Subagent (`.txt`, `.sh`, `.json`, `.py`)**:
+    - Simulates AppKit GUI interactions on plain text and code files: monospace typography verification, zoom shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`), live search prompts (`/query`), dirty save warnings, and `:sort`.
+
+- [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
+  - [ ] **Full Overwrite Replace Mode (`R`)**:
+    - Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
+    - Overwrite existing characters one-by-one as typed without shifting the remainder of the line.
+    - Extend line length automatically when typing past line end.
+    - Support Backspace (`⌫`) restoring original overwritten characters during active Replace session.
+    - Pressing `<Esc>` exits Replace mode to Normal mode with single cohesive undo history.
+  - [ ] **Single Character Replacement (`r<ch>`)**:
+    - Replace character under cursor with typed character in Normal mode; support multibyte UTF-8 characters.
+  - [ ] **Visual Replace (`v...r<ch>`, `V...r<ch>`)**:
+    - In visual character or visual line selection, `r<ch>` replaces all selected characters with `<ch>`.
+  - [ ] **Substitution Mutations (`s`, `S`)**:
+    - `s` (substitute character) and `S` (substitute entire line) entering Insert mode.
+  - [ ] **Ex Substituted Manifestations (`:%s`, `:s`, `:'<,'>s`)**:
+    - Line range replacements with flags `g` (global), `i` (case-insensitive), and `I` (case-sensitive).
 
 ---
 
-## 3. Completed Milestones
+## 3. Function & Schema Verification Matrix
+Tracks live verification status of all capabilities across each supported document schema:
+
+| Function Category | Capability / Keystroke | Spreadsheet (`.csv`, `.tsv`) | Markdown (`.md`) | Plain Text / Code (`.txt`, `.sh`, `.json`) |
+| :--- | :--- | :---: | :---: | :---: |
+| **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Pending M-O | Verified (CUJ 13) | Verified (CUJ 13) |
+| **Vertical Motions** | `j`, `k`, `gg`, `G` | Pending M-O | Verified (CUJ 16) | Verified (CUJ 16) |
+| **Word Motions** | `w`, `b`, `e`, `ge` | Pending M-O | Verified (CUJ 14) | Verified (CUJ 14) |
+| **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Pending M-O | Verified (CUJ 15) | Verified (CUJ 15) |
+| **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Pending M-O | Verified (CUJ 16) | Verified (CUJ 16) |
+| **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Pending M-O | Verified (CUJ 1-6) | Verified (CUJ 7-10) |
+| **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Pending M-O | Verified (CUJ 19) | Verified (CUJ 19) |
+| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Pending M-O | Verified (CUJ 20-21) | Verified (CUJ 20-21) |
+| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Pending M-O | Verified (CUJ 22-24) | Verified (CUJ 22-24) |
+| **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Pending M-O | Verified (CUJ 25-30) | Verified (CUJ 25-30) |
+| **Visual Modes** | `v`, `V`, block selections | Pending M-O | Verified (CUJ 30) | Verified (CUJ 30) |
+| **Undo / Redo** | `u`, `Ctrl-R` | Pending M-O | Verified (CUJ 31) | Verified (CUJ 31) |
+| **Ex Substitutions** | `:%s/find/replace/g` | Pending M-O | Verified (CUJ 33) | Verified (CUJ 33) |
+| **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Pending M-O | Verified (CUJ 34) | Verified (CUJ 34) |
+| **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Pending M-O | Verified (CUJ 17-18) | Verified (CUJ 17-18) |
+| **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Pending M-O | Verified (CUJ 32) | Verified (CUJ 32) |
+| **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified | Verified | Verified |
+| **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (CUJ 35) | N/A (Disabled) | N/A (Disabled) |
+| **Table Formatting** | Neutral gridlines, text wrap | Verified | N/A (GFM Tables) | N/A (Monospace) |
+| **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (CUJ 36) | N/A | N/A |
+| **App Branding** | High-contrast cursor, `v.circle` | In Progress (M-N) | In Progress (M-N) | In Progress (M-N) |
+
+---
+
+## 4. Completed Milestones
 - [x] Initial Project Skeleton & C Bridge Harness (`58aff93`)
 - [x] Unicode Coordinate Resolver & Differential Line Index Table (`07e059e`)
 - [x] Multi-Window C Context Switcher & Line Delta Dispatch (`8b4d595`)

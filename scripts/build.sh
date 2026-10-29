@@ -84,6 +84,9 @@ if [ "${OPTIMIZE_SIZE}" = "1" ]; then
     strip -S "${MACOS_DIR}/VimMD"
 fi
 
+echo "[BUILD] Generating AppIcon.icns..."
+swift -module-cache-path "${MODULE_CACHE}" "${ROOT_DIR}/scripts/generate_app_icon.swift" -- "${RESOURCES_DIR}/AppIcon.icns"
+
 cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -93,6 +96,8 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>VimMD</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.vimmd.VimMD</string>
     <key>CFBundleInfoDictionaryVersion</key>
