@@ -730,6 +730,7 @@ static bool vim_search_forward(struct VimDocumentContext *ctx, const char *patte
             ctx->cursor.line = (int32_t)l;
             ctx->cursor.byteCol = (int32_t)(match_col + 1);
             clamp_cursor(ctx);
+            ctx->last_error[0] = '\0';
             return true;
         }
     }
@@ -742,11 +743,12 @@ static bool vim_search_forward(struct VimDocumentContext *ctx, const char *patte
             ctx->cursor.line = (int32_t)l;
             ctx->cursor.byteCol = (int32_t)(match_col + 1);
             clamp_cursor(ctx);
+            ctx->last_error[0] = '\0';
             return true;
         }
     }
 
-    snprintf(ctx->last_error, sizeof(ctx->last_error), "E486: Pattern not found: %s", pattern);
+    snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", pattern);
     return false;
 }
 
@@ -806,6 +808,7 @@ static bool vim_search_backward(struct VimDocumentContext *ctx, const char *patt
             ctx->cursor.line = (int32_t)cur_line;
             ctx->cursor.byteCol = (int32_t)(match_col + 1);
             clamp_cursor(ctx);
+            ctx->last_error[0] = '\0';
             return true;
         }
     }
@@ -820,6 +823,7 @@ static bool vim_search_backward(struct VimDocumentContext *ctx, const char *patt
                 ctx->cursor.line = (int32_t)l;
                 ctx->cursor.byteCol = (int32_t)(match_col + 1);
                 clamp_cursor(ctx);
+                ctx->last_error[0] = '\0';
                 return true;
             }
         }
@@ -838,11 +842,12 @@ static bool vim_search_backward(struct VimDocumentContext *ctx, const char *patt
             ctx->cursor.line = (int32_t)l;
             ctx->cursor.byteCol = (int32_t)(match_col + 1);
             clamp_cursor(ctx);
+            ctx->last_error[0] = '\0';
             return true;
         }
     }
 
-    snprintf(ctx->last_error, sizeof(ctx->last_error), "E486: Pattern not found: %s", pattern);
+    snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", pattern);
     return false;
 }
 
@@ -1884,14 +1889,26 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'n') {
-                if (ctx->last_search[0] != '\0') {
-                    vim_search_forward(ctx, ctx->last_search, true);
+                if (ctx->last_search[0] == '\0') {
+                    snprintf(ctx->last_error, sizeof(ctx->last_error), "E35: No previous regular expression");
+                } else {
+                    if (vim_search_forward(ctx, ctx->last_search, true)) {
+                        ctx->last_error[0] = '\0';
+                    } else {
+                        snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", ctx->last_search);
+                    }
                 }
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'N') {
-                if (ctx->last_search[0] != '\0') {
-                    vim_search_backward(ctx, ctx->last_search);
+                if (ctx->last_search[0] == '\0') {
+                    snprintf(ctx->last_error, sizeof(ctx->last_error), "E35: No previous regular expression");
+                } else {
+                    if (vim_search_backward(ctx, ctx->last_search)) {
+                        ctx->last_error[0] = '\0';
+                    } else {
+                        snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", ctx->last_search);
+                    }
                 }
                 ctx->count_accumulator = 0;
                 p++;
@@ -1966,7 +1983,15 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->pending_operator = 'c';
                 p++;
             } else if (*p == 'p') {
-                paste_text(ctx, true);
+                if (ctx->last_search[0] != '\0' && (ctx->yank_buffer == NULL || ctx->yank_buffer[0] == '\0')) {
+                    if (vim_search_backward(ctx, ctx->last_search)) {
+                        ctx->last_error[0] = '\0';
+                    } else {
+                        snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", ctx->last_search);
+                    }
+                } else {
+                    paste_text(ctx, true);
+                }
                 ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'P') {
@@ -2297,8 +2322,14 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         strncpy(ctx->last_search, pattern, sizeof(ctx->last_search) - 1);
                         ctx->last_search[sizeof(ctx->last_search) - 1] = '\0';
                     }
-                    if (ctx->last_search[0] != '\0') {
-                        vim_search_forward(ctx, ctx->last_search, false);
+                    if (ctx->last_search[0] == '\0') {
+                        snprintf(ctx->last_error, sizeof(ctx->last_error), "E35: No previous regular expression");
+                    } else {
+                        if (vim_search_forward(ctx, ctx->last_search, false)) {
+                            ctx->last_error[0] = '\0';
+                        } else {
+                            snprintf(ctx->last_error, sizeof(ctx->last_error), "Pattern not found: %s", ctx->last_search);
+                        }
                     }
                 } else {
                     vim_context_execute_ex(ctx, ctx->cmd_buf);

@@ -49,6 +49,20 @@ This document tracks all active milestones, user requirements, and architectural
     - `yi'`, `yi"`, `yi(`, `yi)`, `yib`, `yi[`, `yi]`, `yi<`, `yi>`, `yi{`, `yi}`, `yiB`: Yank content inside enclosing pairs to clipboard without modifying buffer.
     - Restores cursor to starting position.
   - [x] Single-line and multiline nested pairs support, empty pair safety, and `<Esc>` cancellation.
+- [x] **Milestone L: Live Search Status Bar Feedback & Navigation Pipeline (`/`, `n`, `N` / `p`)**
+  - [x] **Bottom-Left Search Bar & Command Prompt UI (`/`)**:
+    - When typing `/` or `:` in Command mode, hide `-- COMMAND --` and position the prompt directly at bottom-left (`x = 8`) in monospaced bold font.
+    - Live-stream keystrokes into `session.commandLineBuffer` and immediately display `/query` starting from `x = 8`.
+    - Seamlessly restore `-- NORMAL --` at `x = 8` and status message label at `x = 155` upon leaving Command mode.
+  - [x] **Search Execution & Viewport Auto-Centering**:
+    - On `<CR>`: Execute search forward, jump cursor to match, display `/<query>` in status bar, and scroll viewport to ensure matched occurrence is clearly visible.
+    - If pattern is not found, display prominent warning: `Pattern not found: <pattern>`.
+    - If empty search without previous pattern, display `E35: No previous regular expression`.
+  - [x] **Subsequent Search Navigation (`n` / `N` / `p`)**:
+    - `n`: Jump to next search occurrence forward and auto-scroll to caret.
+    - `N`: Jump to previous search occurrence backward and auto-scroll to caret.
+    - `p`: When yank buffer is empty and search has occurred, navigate backward to previous match (matching user expectations without breaking paste when yank buffer is populated).
+    - Retain and display active search query pattern across navigation.
 
 ---
 
@@ -64,17 +78,37 @@ This document tracks all active milestones, user requirements, and architectural
   - Support range prefixes: `:1,10sort`, `:'<,'>sort` from visual line mode.
   - Seamless undo/redo tracking and line index table re-indexing with differential line deltas.
 
-### Milestone L: Live Search Status Bar Feedback & Navigation Pipeline (`/`, `n`, `N` / `p`)
-- [ ] **Live Search Bar Rendering (`/`)**:
-  - When typing `/` in Normal mode, display the search prompt `/` live starting from the bottom-left of the status bar (hiding mode tag so `/query` has full prominence).
-  - Stream query characters and backspaces live in the status bar command buffer.
-- [ ] **Search Execution & Viewport Centering**:
-  - On `<CR>`: Execute search forward, jump cursor to match, and scroll viewport (`scrollRangeToVisible`) to ensure matched occurrence is clearly visible.
-  - If pattern is not found, display prominent warning in status bar: `Pattern not found: <pattern>`.
-- [ ] **Subsequent Search Navigation (`n` / `N` / `p`)**:
-  - `n`: Jump to next search occurrence forward and auto-scroll to caret.
-  - `N` (and alias `p` for previous search): Jump to previous search occurrence backward and auto-scroll to caret.
-  - Retain `lastSearchPattern` across document navigation until replaced or cleared.
+### Milestone M: Excel-Style Spreadsheet View for CSV & TSV (Gridlines, Dynamic Sizing, Wrap, Freeze Panes)
+- [ ] **Excel / Numbers Grid Styling**:
+  - Replace rainbow column coloring with clean, professional neutral typography and subtle header shading.
+  - Render crisp horizontal and vertical grey gridlines separating rows and columns (adapting to macOS Light/Dark appearance).
+- [ ] **Dynamic Row & Column Addition As You Type**:
+  - **Dynamic Row Insertion (`o`, `O`, `<CR>`)**:
+    - Opening a new row in a tabular file automatically aligns to the table schema ($N-1$ delimiter placeholders) so new rows immediately match the column count of the spreadsheet.
+  - **Dynamic Column Addition (`,` / `<Tab>`)**:
+    - Typing a delimiter at the end of a row or header seamlessly adds a new column to the table.
+    - Grid columns, cell boundaries, and vertical gridlines dynamically expand in real-time as content is typed.
+  - **Fluid Caret Synchronization**:
+    - Caret tracking accurately stays centered inside the active cell while column widths expand dynamically under live keystrokes.
+- [ ] **Column Widths & View Menu 'Text Wrap'**:
+  - Add `Text Wrap` (or `Wrap Table Cells`) option to the **View** menu for tabular documents.
+  - **Wrap OFF (Default)**: Each column expands so its width accommodates its longest entry (`max(cellContentWidth) + padding`), keeping columns vertically aligned across arbitrarily wide datasets.
+  - **Wrap ON**: Apply a sensible default column width (e.g. 240pt / 30 chars), wrapping multi-word content within cell boundaries.
+  - Robust horizontal scrolling support for wide tables (dozens/hundreds of columns) without horizontal truncation.
+- [ ] **Freeze Panes & Dedicated 'Spreadsheet' View Menu Section**:
+  - In the **View** menu, add a dedicated `Spreadsheet` section (or section with separators) containing:
+    - `View -> Freeze First Row` (checkable)
+    - `View -> Freeze First Column` (checkable)
+    - `View -> Wrap Table Cells` (checkable)
+  - **Format-Aware Validation**: These menu items are dynamically enabled ONLY when the active document is a CSV or TSV (`isTabularDocument == true`). For all other file types (Markdown, plain text, shell scripts, JSON, etc.), they automatically grey out via `validateUserInterfaceItem`.
+  - State persistence and dynamic viewport layout integration.
+- [ ] **Interactive Header Copy Gestures (Mouse Hover & Quick Click)**:
+  - **Column A Hover (Row Selector)**: Hovering over column A morphs the cursor into a rightward arrow (`→`). Clicking flashes the targeted row with a subtle highlight animation and automatically copies the row's values to the macOS clipboard.
+  - **Row 1 Hover (Column Selector)**: Hovering over row 1 morphs the cursor into a downward arrow (`↓`). Clicking flashes the entire column vertically with a subtle highlight animation and automatically copies the column's values (newline-delimited) to the macOS clipboard.
+  - Displays a transient status confirmation (e.g. `Row 5 copied to clipboard` / `Column 'Price' copied to clipboard`).
+- [ ] **Vim Editing & Plain-Text Integrity**:
+  - Retain raw UTF-8 comma/tab separated text representation on disk with zero proprietary metadata.
+  - Full modal navigation (`h`, `j`, `k`, `l`, `w`, `b`, `$`, `0`, `f`, `t`) and editing in grid cells.
 
 ### Milestone D: 36 Synthetic CUJ Test Fleet & Keystroke Deduplication
 - [ ] **36 End-to-End Synthetic User Journeys**:

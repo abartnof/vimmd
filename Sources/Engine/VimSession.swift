@@ -272,6 +272,9 @@ public final class VimSession {
 
     private func syncPasteboardIfPasting(keys: String) {
         guard mode == VIM_MODE_NORMAL || mode == VIM_MODE_VISUAL else { return }
+        if keys == "p" && lastSearchPattern != nil && (yankBuffer == nil || yankBuffer?.text.isEmpty == true) {
+            return
+        }
         if keys.contains("p") || keys.contains("P") {
             if let pbText = NSPasteboard.general.string(forType: .string) {
                 let currentYank = yankBuffer?.text

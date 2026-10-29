@@ -1259,7 +1259,51 @@ static void test_search_forward_n_N(void) {
     assert(vim_context_get_cursor(ctx).line == 2);
     assert(vim_context_get_cursor(ctx).byteCol == 1);
 
+    // 'p' with empty yank buffer moves backward to line 1, col 1
+    vim_context_feed_keys(ctx, "p");
+    assert(vim_context_get_cursor(ctx).line == 1);
+    assert(vim_context_get_cursor(ctx).byteCol == 1);
+
+    // 'p' wraps backward to line 3, col 11
+    vim_context_feed_keys(ctx, "p");
+    assert(vim_context_get_cursor(ctx).line == 3);
+    assert(vim_context_get_cursor(ctx).byteCol == 11);
+
+    // Yank line 3: now yank buffer is non-empty
+    vim_context_feed_keys(ctx, "yy");
+    bool lw = false;
+    assert(vim_context_get_yank_buffer(ctx, &lw) != NULL);
+
+    // 'p' now performs paste instead of search navigation!
+    vim_context_feed_keys(ctx, "p");
+    size_t ser_len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &ser_len);
+    // After paste, buffer has 4 lines
+    int nl_count = 0;
+    for (size_t i = 0; i < ser_len; i++) {
+        if (ser[i] == '\n') nl_count++;
+    }
+    assert(nl_count == 3); // 4 lines = 3 newlines
+    free(ser);
+
     vim_context_destroy(ctx);
+
+    // Test E35: No previous regular expression
+    VimContextRef ctx_empty = vim_context_create("hello world");
+    vim_context_feed_keys(ctx_empty, "n");
+    assert(strstr(vim_context_get_last_error(ctx_empty), "E35") != NULL);
+
+    vim_context_feed_keys(ctx_empty, "N");
+    assert(strstr(vim_context_get_last_error(ctx_empty), "E35") != NULL);
+
+    vim_context_feed_keys(ctx_empty, "/\r");
+    assert(strstr(vim_context_get_last_error(ctx_empty), "E35") != NULL);
+
+    // Test Pattern not found
+    vim_context_feed_keys(ctx_empty, "/nonexistent\r");
+    assert(strstr(vim_context_get_last_error(ctx_empty), "Pattern not found: nonexistent") != NULL);
+
+    vim_context_destroy(ctx_empty);
 }
 
 static void test_ex_commands_streaming_and_ZZ(void) {

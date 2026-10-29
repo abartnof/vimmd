@@ -238,27 +238,54 @@ open class VimMDDocument: NSDocument {
         label.textColor = isWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
     }
 
+    public var previousMode: VimEngineMode = VIM_MODE_NORMAL
+
     public func updateStatusDisplay() {
         guard let session = session else { return }
+        let currentMode = session.mode
         let mode = session.modeString
         let pos = session.cursorPosition
-        modeLabel?.stringValue = "-- \(mode) --"
         posLabel?.stringValue = "Ln \(pos.line), Col \(pos.byteCol)"
         if let win = self.windowControllers.first?.window {
             let baseTitle = self.displayName ?? "Untitled"
             win.title = "\(baseTitle) — [\(mode)]"
         }
-        if session.mode == VIM_MODE_COMMAND {
+
+        let rightBound = savedChipView?.frame.origin.x ?? (posLabel?.frame.origin.x ?? 300)
+
+        if currentMode == VIM_MODE_COMMAND {
+            modeLabel?.isHidden = true
+            modeLabel?.stringValue = ""
+
+            let promptWidth = max(60, rightBound - 16)
+            messageLabel?.frame = NSRect(x: 8, y: 3, width: promptWidth, height: 16)
+            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+            messageLabel?.textColor = NSColor.labelColor
             let cmd = session.commandLineBuffer
             messageLabel?.stringValue = cmd
-            messageLabel?.textColor = NSColor.labelColor
-        } else if let err = session.lastError, !err.isEmpty {
-            let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
-            showStatusMessage(warningText, isWarning: true)
         } else {
-            messageLabel?.stringValue = currentStatusMessage ?? ""
-            messageLabel?.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
+            modeLabel?.isHidden = false
+            modeLabel?.stringValue = "-- \(mode) --"
+
+            let normalMsgWidth = max(60, rightBound - 165)
+            messageLabel?.frame = NSRect(x: 155, y: 3, width: normalMsgWidth, height: 16)
+            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+
+            if let err = session.lastError, !err.isEmpty {
+                let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
+                showStatusMessage(warningText, isWarning: true)
+            } else {
+                if previousMode == VIM_MODE_COMMAND && currentMode == VIM_MODE_NORMAL {
+                    if let pattern = session.lastSearchPattern, !pattern.isEmpty {
+                        currentStatusMessage = "/\(pattern)"
+                        isCurrentStatusMessageWarning = false
+                    }
+                }
+                messageLabel?.stringValue = currentStatusMessage ?? ""
+                messageLabel?.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
+            }
         }
+        previousMode = currentMode
     }
 
     override public init() {
@@ -445,7 +472,23 @@ open class VimMDDocument: NSDocument {
         tv.onModeChanged = { [weak self] _ in
             self?.updateStatusDisplay()
         }
+        tv.onStatusChanged = { [weak self] in
+            self?.updateStatusDisplay()
+        }
+        tv.onSearchNavigated = { [weak self] msg in
+            self?.showStatusMessage(msg, isWarning: false)
+        }
+        tv.onCommandCancelled = { [weak self] in
+            self?.currentStatusMessage = ""
+            self?.isCurrentStatusMessageWarning = false
+            self?.updateStatusDisplay()
+        }
         self.session?.onModeChanged = { [weak self] _ in
+            self?.syncDirtyState()
+            self?.updateStatusDisplay()
+        }
+        self.session?.onStatusChanged = { [weak self] in
+            self?.syncDirtyState()
             self?.updateStatusDisplay()
         }
 

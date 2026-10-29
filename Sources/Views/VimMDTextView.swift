@@ -21,6 +21,15 @@ open class VimMDTextView: NSTextView {
     /// Callback invoked when wrap lines is toggled.
     public var onToggleWrapLines: (() -> Void)?
 
+    /// Callback invoked when status bar should be refreshed (command buffer, search, messages).
+    public var onStatusChanged: (() -> Void)?
+
+    /// Callback invoked when search execution or navigation updates the search status line.
+    public var onSearchNavigated: ((String) -> Void)?
+
+    /// Callback invoked when command mode is cancelled with Escape.
+    public var onCommandCancelled: (() -> Void)?
+
     public var wrapLines: Bool = true {
         didSet {
             applyWrapLinesSetting()
@@ -251,6 +260,9 @@ open class VimMDTextView: NSTextView {
             self?.updateSyntaxStyling()
             self?.onModeChanged?(mode)
         }
+        session.onStatusChanged = { [weak self] in
+            self?.onStatusChanged?()
+        }
         updateSyntaxStyling(force: true)
         updateFrameHeightToFitText()
         synchronizeCaretWithSession()
@@ -363,10 +375,33 @@ open class VimMDTextView: NSTextView {
         }
 
         if session.mode == VIM_MODE_NORMAL || session.mode == VIM_MODE_VISUAL || session.mode == VIM_MODE_COMMAND {
+            let wasCommand = (session.mode == VIM_MODE_COMMAND)
+            let isNormal = (session.mode == VIM_MODE_NORMAL)
             if let chars = event.characters, !chars.isEmpty {
+                let isSearchNav = isNormal && (chars == "n" || chars == "N" || chars == "p")
+                let isSearchCR = wasCommand && (chars == "\r" || chars == "\n")
+                let searchBuf = wasCommand ? session.commandLineBuffer : ""
+                let isSearchCmd = searchBuf.hasPrefix("/")
+                let searchPat = isSearchCmd ? String(searchBuf.dropFirst()) : ""
+
                 session.feedKeys(chars)
+
+                if isSearchCR && session.lastError == nil {
+                    let activePat = searchPat.isEmpty ? (session.lastSearchPattern ?? "") : searchPat
+                    if !activePat.isEmpty {
+                        onSearchNavigated?("/\(activePat)")
+                    }
+                } else if isSearchNav && session.lastError == nil, let pat = session.lastSearchPattern {
+                    onSearchNavigated?("/\(pat)")
+                }
+
+                if wasCommand && (chars == "\u{1b}") {
+                    onCommandCancelled?()
+                }
+
                 synchronizeCaretWithSession()
                 onCursorMoved?()
+                onStatusChanged?()
                 if session.shouldQuit {
                     onQuitRequested?()
                 }
@@ -377,19 +412,35 @@ open class VimMDTextView: NSTextView {
                     session.feedKeys("\u{7f}")
                     synchronizeCaretWithSession()
                     onCursorMoved?()
+                    onStatusChanged?()
                     return
                 } else if event.keyCode == 36 || event.keyCode == 76 { // Return / Enter
+                    let searchBuf = session.commandLineBuffer
+                    let isSearchCmd = searchBuf.hasPrefix("/")
+                    let searchPat = isSearchCmd ? String(searchBuf.dropFirst()) : ""
+
                     session.feedKeys("\r")
+
+                    if isSearchCmd && session.lastError == nil {
+                        let activePat = searchPat.isEmpty ? (session.lastSearchPattern ?? "") : searchPat
+                        if !activePat.isEmpty {
+                            onSearchNavigated?("/\(activePat)")
+                        }
+                    }
+
                     synchronizeCaretWithSession()
                     onCursorMoved?()
+                    onStatusChanged?()
                     if session.shouldQuit {
                         onQuitRequested?()
                     }
                     return
                 } else if event.keyCode == 53 { // Escape
+                    onCommandCancelled?()
                     session.feedKeys("\u{1b}")
                     synchronizeCaretWithSession()
                     onCursorMoved?()
+                    onStatusChanged?()
                     return
                 }
             }
