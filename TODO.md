@@ -158,11 +158,12 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Plain Text & Code UX Researcher Subagent (`.txt`, `.sh`, `.json`, `.py`)**:
     - Simulates AppKit GUI interactions on plain text and code files: monospace typography verification, zoom shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`), live search prompts (`/query`), dirty save warnings, repeat find motions (`;`, `,`), and `:sort` (`scripts/plaintext_code_ux_trial.swift`).
 
-- [ ] **Milestone S: Cell-Relative Vertical Navigation in Spreadsheets (`j`, `k`, Up/Down Arrows)**
-  - [ ] In a spreadsheet (`.csv`, `.tsv`), moving up (`k` / Up Arrow) or down (`j` / Down Arrow) must always remain locked relative to the current cell column.
-  - [ ] The cursor must not drift left or right into adjacent cells due to differing character lengths of fields on adjacent rows (e.g. moving between a 2-char number cell and a 40-char title cell).
-  - [ ] When moving between rows $R$ and $R \pm 1$, compute the target cell column index $C$ and position the caret at the start of cell $C$ in the target row (or clamped relative cell offset).
-  - [ ] Standard character-offset vertical navigation is strictly preserved for non-tabular files (Markdown, Plain Text, and Code).
+- [x] **Milestone S: Cell-Relative Vertical Navigation in Spreadsheets (`j`, `k`, Up/Down Arrows)**
+  - [x] In a spreadsheet (`.csv`, `.tsv`), moving up (`k` / Up Arrow) or down (`j` / Down Arrow) remains strictly locked relative to the current cell column index $C$.
+  - [x] The cursor does not drift left or right into adjacent cells due to differing character lengths of fields on adjacent rows (e.g. moving between a 2-char number cell and a 40-char title cell).
+  - [x] When moving between rows $R$ and $R \pm 1$, compute target cell column index $C$ and position caret at the start of cell $C$ in the target row.
+  - [x] Guards against pending command hijacking (`!session.hasPendingCommand`) so `fj`, `rj`, `gj`, and `dj` maintain command integrity.
+  - [x] Standard character-offset vertical navigation is strictly preserved for non-tabular files (Markdown, Plain Text, and Code).
 
 - [x] **Milestone T: Top-Left Window Positioning on Screen & Viewport Scroll Origin**
   - [x] When opening any document, position the `NSWindow` at the top-left of the user's primary display screen (`NSScreen.main?.visibleFrame`), cascading cleanly.
@@ -193,7 +194,7 @@ Tracks live verification status of all capabilities across each supported docume
 | Function Category | Capability / Keystroke | Spreadsheet (`.csv`, `.tsv`) | Markdown (`.md`) | Plain Text / Code (`.txt`, `.sh`, `.json`) |
 | :--- | :--- | :---: | :---: | :---: |
 | **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
-| **Vertical Motions** | `j`, `k`, `gg`, `G` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Vertical Motions** | `j`, `k`, `gg`, `G` | Verified (M-S) | Verified (M-P) | Verified (M-P) |
 | **Word Motions** | `w`, `b`, `e`, `ge` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
