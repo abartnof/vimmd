@@ -158,6 +158,16 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Plain Text & Code UX Researcher Subagent (`.txt`, `.sh`, `.json`, `.py`)**:
     - Simulates AppKit GUI interactions on plain text and code files: monospace typography verification, zoom shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`), live search prompts (`/query`), dirty save warnings, repeat find motions (`;`, `,`), and `:sort` (`scripts/plaintext_code_ux_trial.swift`).
 
+- [ ] **Milestone S: Cell-Relative Vertical Navigation in Spreadsheets (`j`, `k`, Up/Down Arrows)**
+  - [ ] In a spreadsheet (`.csv`, `.tsv`), moving up (`k` / Up Arrow) or down (`j` / Down Arrow) must always remain locked relative to the current cell column.
+  - [ ] The cursor must not drift left or right into adjacent cells due to differing character lengths of fields on adjacent rows (e.g. moving between a 2-char number cell and a 40-char title cell).
+  - [ ] When moving between rows $R$ and $R \pm 1$, compute the target cell column index $C$ and position the caret at the start of cell $C$ in the target row (or clamped relative cell offset).
+  - [ ] Standard character-offset vertical navigation is strictly preserved for non-tabular files (Markdown, Plain Text, and Code).
+
+- [ ] **Milestone T: Top-Left Window Positioning on Screen & Viewport Scroll Origin**
+  - [ ] When opening any document, position the `NSWindow` at the top-left of the user's primary display screen (`NSScreen.main?.visibleFrame`), cascading cleanly.
+  - [ ] Ensure wide Markdown files (and wide code/tables) initialize with the scroll view origin at `(0, 0)` (top-left) so the user never lands on the top-right of wide documents.
+
 - [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [ ] **Full Overwrite Replace Mode (`R`)**:
     - Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
