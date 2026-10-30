@@ -484,32 +484,65 @@ open class VimMDTextView: NSTextView {
         return NSRect(x: startX, y: textContainerInset.height, width: colWidth, height: totalHeight)
     }
 
-    public func rowIndex(at point: NSPoint) -> Int? {
-        guard let storage = self.textStorage else { return nil }
+    public func rowIndex(at point: NSPoint, clamped: Bool = false) -> Int? {
+        guard let storage = self.textStorage else { return clamped ? 0 : nil }
         let fullString = storage.string as NSString
-        var currentLine = 0
+        guard fullString.length > 0 else { return clamped ? 0 : nil }
+
+        var lineRanges: [NSRange] = []
         var idx = 0
         while idx < fullString.length {
             let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            lineRanges.append(lr)
+            idx = lr.location + lr.length
+        }
+        guard !lineRanges.isEmpty else { return clamped ? 0 : nil }
+
+        if let firstRect = rowRect(for: 0) {
+            if point.y < firstRect.minY {
+                return clamped ? 0 : nil
+            }
+        }
+
+        for currentLine in 0..<lineRanges.count {
             if let rect = rowRect(for: currentLine) {
                 if point.y >= rect.minY && point.y <= rect.maxY {
                     return currentLine
                 }
+                if currentLine + 1 < lineRanges.count, let nextRect = rowRect(for: currentLine + 1) {
+                    if point.y > rect.maxY && point.y < nextRect.minY {
+                        return currentLine
+                    }
+                }
             }
-            currentLine += 1
-            idx = lr.location + lr.length
+        }
+
+        if clamped {
+            return lineRanges.count - 1
         }
         return nil
     }
 
-    public func columnIndex(at point: NSPoint) -> Int? {
+    public func columnIndex(at point: NSPoint, clamped: Bool = false) -> Int? {
         let widths = columnWidths()
-        var startX = textContainerInset.width
+        guard !widths.isEmpty else { return clamped ? 0 : nil }
+
+        let startX = textContainerInset.width
+        if point.x < startX {
+            return clamped ? 0 : nil
+        }
+
+        var currentX = startX
         for (i, w) in widths.enumerated() {
-            if point.x >= startX && point.x <= startX + w {
+            let nextX = currentX + w
+            if point.x >= currentX && point.x <= nextX {
                 return i
             }
-            startX += w
+            currentX = nextX
+        }
+
+        if clamped {
+            return widths.count - 1
         }
         return nil
     }
@@ -553,13 +586,9 @@ open class VimMDTextView: NSTextView {
         let targetOffset: Int
         if fields.isEmpty {
             targetOffset = contentRange.location
-        } else if c < 0 {
-            targetOffset = fields[0].range.location
-        } else if c < fields.count {
-            targetOffset = fields[c].range.location
         } else {
-            let lastField = fields[fields.count - 1]
-            targetOffset = lastField.range.location + lastField.range.length
+            let clampedCol = max(0, min(fields.count - 1, c))
+            targetOffset = fields[clampedCol].range.location
         }
 
         self.setSelectedRange(NSRange(location: targetOffset, length: 0))
@@ -572,9 +601,9 @@ open class VimMDTextView: NSTextView {
     }
 
     public func positionCaret(at point: NSPoint) {
-        if let r = rowIndex(at: point), let c = columnIndex(at: point) {
-            positionCaret(atRow: r, column: c)
-        }
+        let r = rowIndex(at: point, clamped: true) ?? 0
+        let c = columnIndex(at: point, clamped: true) ?? 0
+        positionCaret(atRow: r, column: c)
     }
 
     // MARK: - Spreadsheet Cursors & Hover Gestures
@@ -679,7 +708,8 @@ open class VimMDTextView: NSTextView {
         let rIdx = rowIndex(at: point)
         let cIdx = columnIndex(at: point)
 
-        if rIdx == 0, let c = cIdx {
+        if rIdx == 0 {
+            let c = columnIndex(at: point, clamped: true) ?? 0
             // Dragging / clicking header row (columns)
             isDraggingCol = true
             isDraggingRow = false
@@ -689,16 +719,19 @@ open class VimMDTextView: NSTextView {
             positionCaret(atRow: 0, column: c)
             needsDisplay = true
             return true
-        } else if cIdx == 0, let r = rIdx, r > 0 {
-            // Dragging / clicking Column A (rows)
-            isDraggingRow = true
-            isDraggingCol = false
-            dragStartRowIndex = r
-            activeRowDragRange = r...r
-            activeColDragRange = nil
-            positionCaret(atRow: r, column: 0)
-            needsDisplay = true
-            return true
+        } else if cIdx == 0 {
+            let r = rowIndex(at: point, clamped: true) ?? 0
+            if r > 0 {
+                // Dragging / clicking Column A (rows)
+                isDraggingRow = true
+                isDraggingCol = false
+                dragStartRowIndex = r
+                activeRowDragRange = r...r
+                activeColDragRange = nil
+                positionCaret(atRow: r, column: 0)
+                needsDisplay = true
+                return true
+            }
         }
         return false
     }
@@ -1029,10 +1062,10 @@ open class VimMDTextView: NSTextView {
             if handleTabularMouseDown(at: pt) {
                 return
             }
-            if let r = rowIndex(at: pt), let c = columnIndex(at: pt) {
-                positionCaret(atRow: r, column: c)
-                return
-            }
+            let r = rowIndex(at: pt, clamped: true) ?? 0
+            let c = columnIndex(at: pt, clamped: true) ?? 0
+            positionCaret(atRow: r, column: c)
+            return
         }
 
         super.mouseDown(with: event)
@@ -1043,9 +1076,6 @@ open class VimMDTextView: NSTextView {
             session.setCursor(line: vimPos.line, byteCol: vimPos.byteCol)
             synchronizeCaretWithSession()
             onCursorMoved?()
-        } else if isTabularDocument {
-            let pt = convert(event.locationInWindow, from: nil)
-            positionCaret(at: pt)
         }
     }
 
