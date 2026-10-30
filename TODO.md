@@ -145,10 +145,10 @@ This document tracks all active milestones, user requirements, and architectural
     - History: `u` (undo) and `Ctrl-R` (redo) maintaining intact spreadsheet structure.
     - Ex Commands: `:w`, `:q`, `:sort`, `:%s/find/replace/g`, `/search`.
 
-- [ ] **Milestone R: Spreadsheet Cell Click Caret to First Position**
-  - [ ] If a user clicks anywhere on a cell in a spreadsheet (`.csv`, `.tsv`), the cursor immediately goes to the first position of that cell (matching Excel/spreadsheet standard click-to-select-cell behavior and avoiding mid-word, delimiter, or kerning gap misalignment).
-  - [ ] Ensure click handling works accurately for all cells: header cells (Row 0), Column A cells, interior cells, empty cells (`,,`), quoted cells (`"..."`), and trailing cells.
-  - [ ] Full first-responder activation and synchronization with Vim engine cursor coordinates.
+- [x] **Milestone R: Spreadsheet Cell Click Caret to First Position**
+  - [x] If a user clicks anywhere on a cell in a spreadsheet (`.csv`, `.tsv`), the cursor immediately goes to the first position of that cell (matching Excel/spreadsheet standard click-to-select-cell behavior and avoiding mid-word, delimiter, or kerning gap misalignment).
+  - [x] Ensure click handling works accurately for all cells: header cells (Row 0), Column A cells, interior cells, empty cells (`,,`), quoted cells (`"..."`), and trailing cells.
+  - [x] Full first-responder activation and synchronization with Vim engine cursor coordinates.
 
 - [ ] **Milestone P: Fleet of UX Researcher Subagents (Automated End-to-End GUI Simulation)**
   - [ ] **Spreadsheet UX Researcher Subagent (`.csv`, `.tsv`)**:
@@ -200,6 +200,7 @@ Tracks live verification status of all capabilities across each supported docume
 | **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified | Verified | Verified |
 | **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (CUJ 35) | N/A (Disabled) | N/A (Disabled) |
 | **Table Formatting** | Neutral gridlines, text wrap | Verified | N/A (GFM Tables) | N/A (Monospace) |
+| **Cell Caret Positioning** | Click cell -> First character offset | Verified (M-R) | N/A (Standard Caret) | N/A (Standard Caret) |
 | **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (CUJ 36) | N/A | N/A |
 | **App Branding** | High-contrast cursor, `v.circle` | Verified (M-N) | Verified (M-N) | Verified (M-N) |
 
