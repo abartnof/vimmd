@@ -126,15 +126,15 @@ This document tracks all active milestones, user requirements, and architectural
 ---
 
 ## 2. Active Milestones
-- [ ] **Milestone N: High-Contrast White Cursor & Native SF Symbol App Icon**
-  - [ ] **High-Contrast Mouse Cursors (White with Black Outline)**:
-    - [ ] Design custom high-visibility `downwardArrowCursor` (↓) and `rightwardArrowCursor` (→) rendered with crisp `NSColor.white` fill and `NSColor.black` 1.5pt border outline, matching standard macOS cursor contrast.
-    - [ ] Position hotspots accurately at the arrow tips for pixel-perfect hover precision over column A and row 1.
-    - [ ] Maintain flawless visibility across both Light Mode and Dark Mode backgrounds.
-  - [ ] **Native SF Symbol App Icon (`v.circle`)**:
-    - [ ] Adopt `v.circle` (`NSImage(systemSymbolName: "v.circle", accessibilityDescription: "VimMD")`) as the official lightweight app icon without binary bloat.
-    - [ ] Set `NSApplication.shared.applicationIconImage` dynamically at launch in `AppDelegate`.
-    - [ ] Package multi-resolution `AppIcon.icns` in `VimMD.app/Contents/Resources/` and register `CFBundleIconFile` in `Info.plist` for Finder and Dock support.
+- [x] **Milestone N: High-Contrast White Cursor & Native SF Symbol App Icon**
+  - [x] **High-Contrast Mouse Cursors (White with Black Outline)**:
+    - [x] Design custom high-visibility `downwardArrowCursor` (↓) and `rightwardArrowCursor` (→) rendered with crisp `NSColor.white` fill and `NSColor.black` 1.5pt border outline, matching standard macOS cursor contrast.
+    - [x] Position hotspots accurately at the arrow tips for pixel-perfect hover precision over column A and row 1.
+    - [x] Maintain flawless visibility across both Light Mode and Dark Mode backgrounds.
+  - [x] **Native SF Symbol App Icon (`v.circle`)**:
+    - [x] Adopt `v.circle` (`NSImage(systemSymbolName: "v.circle", accessibilityDescription: "VimMD")`) as the official lightweight app icon without binary bloat.
+    - [x] Set `NSApplication.shared.applicationIconImage` dynamically at launch in `AppDelegate`.
+    - [x] Package multi-resolution `AppIcon.icns` in `VimMD.app/Contents/Resources/` and register `CFBundleIconFile` in `Info.plist` for Finder and Dock support.
 
 - [x] **Milestone O: Tabular Modal Input & First Responder Parity (Vim Commands in Spreadsheets)**
   - [x] **First Responder & Mouse Down Fix**: Ensure clicking anywhere in a tabular document (including row 0 headers and column A cells) properly activates `firstResponder` on `VimMDTextView`, positions the Vim caret at the clicked cell, and allows subsequent typing without swallowing events.
@@ -144,6 +144,11 @@ This document tracks all active milestones, user requirements, and architectural
     - Modal Transitions: `i`, `I`, `a`, `A`, `o`, `O` with automatic tabular delimiter alignment.
     - History: `u` (undo) and `Ctrl-R` (redo) maintaining intact spreadsheet structure.
     - Ex Commands: `:w`, `:q`, `:sort`, `:%s/find/replace/g`, `/search`.
+
+- [ ] **Milestone R: Spreadsheet Cell Click Caret to First Position**
+  - [ ] If a user clicks anywhere on a cell in a spreadsheet (`.csv`, `.tsv`), the cursor immediately goes to the first position of that cell (matching Excel/spreadsheet standard click-to-select-cell behavior and avoiding mid-word, delimiter, or kerning gap misalignment).
+  - [ ] Ensure click handling works accurately for all cells: header cells (Row 0), Column A cells, interior cells, empty cells (`,,`), quoted cells (`"..."`), and trailing cells.
+  - [ ] Full first-responder activation and synchronization with Vim engine cursor coordinates.
 
 - [ ] **Milestone P: Fleet of UX Researcher Subagents (Automated End-to-End GUI Simulation)**
   - [ ] **Spreadsheet UX Researcher Subagent (`.csv`, `.tsv`)**:
