@@ -180,21 +180,21 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] When opening a wide document (wide Markdown, tables, code), guarantee the cursor is at Line 1, Col 1 (top-left) and the viewport's visible scroll rect is anchored at `(0, 0)` so the top-left area is guaranteed visible.
   - [ ] Address AppKit asynchronous post-layout runloop passes (`viewDidMoveToWindow`, initial layout pass, `DispatchQueue.main.async`) that previously caused wide unwrapped lines to shift the clip view horizontally to the right.
 
-- [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
-  - [ ] **Full Overwrite Replace Mode (`R`)**:
-    - Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
-    - Overwrite existing characters one-by-one as typed without shifting the remainder of the line.
-    - Extend line length automatically when typing past line end.
-    - Support Backspace (`⌫`) restoring original overwritten characters during active Replace session.
-    - Pressing `<Esc>` exits Replace mode to Normal mode with single cohesive undo history.
-  - [ ] **Single Character Replacement (`r<ch>`)**:
-    - Replace character under cursor with typed character in Normal mode; support multibyte UTF-8 characters.
-  - [ ] **Visual Replace (`v...r<ch>`, `V...r<ch>`)**:
-    - In visual character or visual line selection, `r<ch>` replaces all selected characters with `<ch>`.
-  - [ ] **Substitution Mutations (`s`, `S`)**:
-    - `s` (substitute character) and `S` (substitute entire line) entering Insert mode.
-  - [ ] **Ex Substituted Manifestations (`:%s`, `:s`, `:'<,'>s`)**:
-    - Line range replacements with flags `g` (global), `i` (case-insensitive), and `I` (case-sensitive).
+- [x] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
+  - [x] **Full Overwrite Replace Mode (`R`)**:
+    - [x] Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
+    - [x] Overwrite existing characters one-by-one as typed without shifting the remainder of the line.
+    - [x] Extend line length automatically when typing past line end.
+    - [x] Support Backspace (`⌫`) restoring original overwritten characters during active Replace session.
+    - [x] Pressing `<Esc>` exits Replace mode to Normal mode with single cohesive undo history.
+  - [x] **Single Character Replacement (`r<ch>`)**:
+    - [x] Replace character under cursor with typed character in Normal mode; support multibyte UTF-8 characters (`é`, `世`, `😀`).
+  - [x] **Visual Replace (`v...r<ch>`, `V...r<ch>`)**:
+    - [x] In visual character or visual line selection, `r<ch>` replaces all selected characters with `<ch>`.
+  - [x] **Substitution Mutations (`s`, `S`)**:
+    - [x] `s` (substitute character) and `S` (substitute entire line) entering Insert mode.
+  - [x] **Ex Substituted Manifestations (`:%s`, `:s`, `:'<,'>s`)**:
+    - [x] Line range replacements with flags `g` (global), `i` (case-insensitive), and `I` (case-sensitive).
 
 ---
 
@@ -211,11 +211,11 @@ Tracks live verification status of all capabilities across each supported docume
 | **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
-| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Char Replacements** | `x`, `s`, `r<ch>`, `R`, `S`, `cc`, `J` | Verified (M-Q) | Verified (M-Q) | Verified (M-Q) |
 | **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Visual Modes** | `v`, `V`, block selections | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Undo / Redo** | `u`, `Ctrl-R` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
-| **Ex Substitutions** | `:%s/find/replace/g` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Ex Substitutions** | `:%s`, `:s`, `:'<,'>s`, flags `g`, `i`, `I` | Verified (M-Q) | Verified (M-Q) | Verified (M-Q) |
 | **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
