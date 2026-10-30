@@ -155,6 +155,7 @@ open class VimMDTextView: NSTextView {
         self.autoresizingMask = [.width]
         self.textContainer?.widthTracksTextView = true
         self.textContainer?.containerSize = NSSize(width: self.frame.width, height: CGFloat.greatestFiniteMagnitude)
+        self.insertionPointColor = VimModeTheme.color(for: VIM_MODE_NORMAL)
     }
 
     override open func viewDidMoveToSuperview() {
@@ -405,6 +406,7 @@ open class VimMDTextView: NSTextView {
         }
         session.onModeChanged = { [weak self] mode in
             self?.updateSyntaxStyling()
+            self?.updateCaretAppearance()
             self?.onModeChanged?(mode)
         }
         session.onStatusChanged = { [weak self] in
@@ -488,7 +490,187 @@ open class VimMDTextView: NSTextView {
         if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {
             updateSyntaxStyling()
         }
+        updateCaretAppearance()
         self.enclosingScrollView?.verticalRulerView?.needsDisplay = true
+    }
+
+    // MARK: - Caret Morphology & Geometry
+
+    public var caretMorphology: CursorMorphology {
+        let mode = session?.mode ?? VIM_MODE_NORMAL
+        return VimModeTheme.cursorMorphology(for: mode)
+    }
+
+    public var currentCaretRect: NSRect {
+        let charIndex = selectedRange().location
+        let cellWidth = glyphCellWidth(at: charIndex)
+        let baseRect = insertionBaseRect(at: charIndex)
+        return VimModeTheme.calculateCursorRect(for: caretMorphology, proposedRect: baseRect, cellWidth: cellWidth)
+    }
+
+    public var lastDrawnCursorRect: NSRect?
+
+    public func fontAt(characterIndex: Int) -> NSFont {
+        let fallbackFont = self.font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        guard let storage = self.textStorage, storage.length > 0 else {
+            return fallbackFont
+        }
+        let clamped = max(0, min(storage.length - 1, characterIndex))
+        return (storage.attribute(.font, at: clamped, effectiveRange: nil) as? NSFont) ?? fallbackFont
+    }
+
+    public func glyphCellWidth(at charIndex: Int) -> CGFloat {
+        let effectiveFont = fontAt(characterIndex: charIndex)
+        let defaultWidth = (("M" as NSString).size(withAttributes: [.font: effectiveFont])).width
+
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
+            return defaultWidth
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let nsString = self.string as NSString
+        guard nsString.length > 0 && layoutManager.numberOfGlyphs > 0 else {
+            return defaultWidth
+        }
+        guard charIndex >= 0 && charIndex < nsString.length else {
+            return defaultWidth
+        }
+        let charRange = nsString.rangeOfComposedCharacterSequence(at: charIndex)
+        let sub = nsString.substring(with: charRange)
+        if sub.contains("\n") || sub.contains("\r") {
+            return defaultWidth
+        }
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        guard glyphRange.location != NSNotFound && glyphRange.location + glyphRange.length <= layoutManager.numberOfGlyphs else {
+            return defaultWidth
+        }
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        return (rect.width > 0 && rect.width < 200) ? rect.width : defaultWidth
+    }
+
+    public func insertionBaseRect(at charIndex: Int) -> NSRect {
+        let effectiveFont = fontAt(characterIndex: charIndex)
+        let defaultHeight = effectiveFont.pointSize + 3.0
+
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
+            return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let nsString = self.string as NSString
+        guard nsString.length > 0 && layoutManager.numberOfGlyphs > 0 else {
+            return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
+        }
+
+        let clampedIndex = max(0, min(nsString.length, charIndex))
+
+        if clampedIndex == nsString.length {
+            let lastChar = nsString.character(at: nsString.length - 1)
+            if lastChar == 10 || lastChar == 13 {
+                let extraRect = layoutManager.extraLineFragmentRect
+                if extraRect.height > 0 {
+                    return NSRect(
+                        x: textContainerInset.width,
+                        y: extraRect.origin.y + textContainerInset.height,
+                        width: 2.0,
+                        height: extraRect.height
+                    )
+                } else {
+                    let lastGlyph = layoutManager.numberOfGlyphs - 1
+                    let lineRect = layoutManager.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil)
+                    return NSRect(
+                        x: textContainerInset.width,
+                        y: lineRect.maxY + textContainerInset.height,
+                        width: 2.0,
+                        height: lineRect.height > 0 ? lineRect.height : defaultHeight
+                    )
+                }
+            } else {
+                let lastGlyph = layoutManager.numberOfGlyphs - 1
+                let lineRect = layoutManager.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: nil)
+                let lastGlyphRect = layoutManager.boundingRect(forGlyphRange: NSRange(location: lastGlyph, length: 1), in: textContainer)
+                return NSRect(
+                    x: lastGlyphRect.maxX + textContainerInset.width,
+                    y: lineRect.origin.y + textContainerInset.height,
+                    width: 2.0,
+                    height: lineRect.height > 0 ? lineRect.height : defaultHeight
+                )
+            }
+        }
+
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: clampedIndex)
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
+        }
+        let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+        let point = layoutManager.location(forGlyphAt: glyphIndex)
+        let originX = point.x + textContainerInset.width
+        let originY = lineRect.origin.y + textContainerInset.height
+        let height = lineRect.height > 0 ? lineRect.height : defaultHeight
+        return NSRect(x: originX, y: originY, width: 2.0, height: height)
+    }
+
+    public func updateCaretAppearance() {
+        let mode = session?.mode ?? VIM_MODE_NORMAL
+        self.insertionPointColor = VimModeTheme.color(for: mode)
+        if let oldRect = lastDrawnCursorRect {
+            self.setNeedsDisplay(oldRect)
+        }
+        let newRect = self.currentCaretRect
+        self.setNeedsDisplay(newRect)
+        self.updateInsertionPointStateAndRestartTimer(true)
+    }
+
+    override open func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        let mode = session?.mode ?? VIM_MODE_NORMAL
+        let morph = VimModeTheme.cursorMorphology(for: mode)
+        let modeColor = VimModeTheme.color(for: mode)
+        let charIndex = selectedRange().location
+        let cellWidth = glyphCellWidth(at: charIndex)
+        let cursorRect = VimModeTheme.calculateCursorRect(for: morph, proposedRect: rect, cellWidth: cellWidth)
+
+        let nsStr = self.string as NSString
+        let hasValidChar = charIndex >= 0 && charIndex < nsStr.length
+
+        if flag {
+            modeColor.setFill()
+            cursorRect.fill()
+
+            if morph == .block && hasValidChar {
+                let charRange = nsStr.rangeOfComposedCharacterSequence(at: charIndex)
+                let sub = nsStr.substring(with: charRange)
+                if !sub.contains("\n") && !sub.contains("\r") && !sub.trimmingCharacters(in: .whitespaces).isEmpty {
+                    let effectiveFont = fontAt(characterIndex: charIndex)
+                    let invColor = NSColor.textBackgroundColor
+                    let attr: [NSAttributedString.Key: Any] = [
+                        .font: effectiveFont,
+                        .foregroundColor: invColor
+                    ]
+                    let strSize = (sub as NSString).size(withAttributes: attr)
+                    let textY = cursorRect.origin.y + max(0, (cursorRect.height - strSize.height) / 2.0)
+                    (sub as NSString).draw(at: NSPoint(x: cursorRect.origin.x, y: textY), withAttributes: attr)
+                }
+            }
+        } else {
+            self.backgroundColor.setFill()
+            cursorRect.fill()
+
+            // Only redraw character when restoring from a block cursor.
+            // Never draw characters inside the 2pt vertical bar or underline!
+            if morph == .block && hasValidChar {
+                let charRange = nsStr.rangeOfComposedCharacterSequence(at: charIndex)
+                let sub = nsStr.substring(with: charRange)
+                if !sub.contains("\n") && !sub.contains("\r") && !sub.trimmingCharacters(in: .whitespaces).isEmpty {
+                    let effectiveFont = fontAt(characterIndex: charIndex)
+                    let attr: [NSAttributedString.Key: Any] = [
+                        .font: effectiveFont,
+                        .foregroundColor: self.textColor ?? NSColor.textColor
+                    ]
+                    let strSize = (sub as NSString).size(withAttributes: attr)
+                    let textY = cursorRect.origin.y + max(0, (cursorRect.height - strSize.height) / 2.0)
+                    (sub as NSString).draw(at: NSPoint(x: cursorRect.origin.x, y: textY), withAttributes: attr)
+                }
+            }
+        }
+        lastDrawnCursorRect = cursorRect
     }
 
     override open func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
@@ -1662,14 +1844,7 @@ open class VimMDTextView: NSTextView {
 
     public var modeLabelText: String {
         guard let session = session else { return "" }
-        switch session.mode {
-        case VIM_MODE_NORMAL: return "-- NORMAL --"
-        case VIM_MODE_INSERT: return "-- INSERT --"
-        case VIM_MODE_VISUAL: return "-- VISUAL --"
-        case VIM_MODE_REPLACE: return "-- REPLACE --"
-        case VIM_MODE_COMMAND: return ""
-        default: return "-- \(session.modeString) --"
-        }
+        return VimModeTheme.statusLabelText(for: session.mode)
     }
 
     override open func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
