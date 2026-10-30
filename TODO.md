@@ -150,13 +150,13 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] Ensure click handling works accurately for all cells: header cells (Row 0), Column A cells, interior cells, empty cells (`,,`), quoted cells (`"..."`), and trailing cells.
   - [x] Full first-responder activation and synchronization with Vim engine cursor coordinates.
 
-- [ ] **Milestone P: Fleet of UX Researcher Subagents (Automated End-to-End GUI Simulation)**
-  - [ ] **Spreadsheet UX Researcher Subagent (`.csv`, `.tsv`)**:
-    - Simulates AppKit GUI interactions on real tabular files: window activation, cell clicking, cursor navigation, in-cell typing, column/row additions, menu toggles (`Freeze First Row`, `Freeze First Column`, `Wrap Table Cells`), and clipboard copy gestures.
-  - [ ] **Markdown UX Researcher Subagent (`.md`, `.markdown`)**:
-    - Simulates AppKit GUI interactions on Markdown files: live editing, header formatting, list editing, code block toggles, table alignment, and syntax concealment transitions.
-  - [ ] **Plain Text & Code UX Researcher Subagent (`.txt`, `.sh`, `.json`, `.py`)**:
-    - Simulates AppKit GUI interactions on plain text and code files: monospace typography verification, zoom shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`), live search prompts (`/query`), dirty save warnings, and `:sort`.
+- [x] **Milestone P: Fleet of UX Researcher Subagents (Automated End-to-End GUI Simulation)**
+  - [x] **Spreadsheet UX Researcher Subagent (`.csv`, `.tsv`)**:
+    - Simulates AppKit GUI interactions on real tabular files: window activation, cell clicking, cursor navigation, in-cell typing, column/row additions, menu toggles (`Freeze First Row`, `Freeze First Column`, `Wrap Table Cells`), and clipboard copy gestures (`scripts/spreadsheet_ux_trial.swift`).
+  - [x] **Markdown UX Researcher Subagent (`.md`, `.markdown`)**:
+    - Simulates AppKit GUI interactions on Markdown files: live editing, header formatting, list editing, code block toggles, table alignment, and syntax concealment transitions (`scripts/markdown_ux_research.swift`).
+  - [x] **Plain Text & Code UX Researcher Subagent (`.txt`, `.sh`, `.json`, `.py`)**:
+    - Simulates AppKit GUI interactions on plain text and code files: monospace typography verification, zoom shortcuts (`Cmd+=`, `Cmd+-`, `Cmd+0`), live search prompts (`/query`), dirty save warnings, repeat find motions (`;`, `,`), and `:sort` (`scripts/plaintext_code_ux_trial.swift`).
 
 - [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [ ] **Full Overwrite Replace Mode (`R`)**:
@@ -181,27 +181,27 @@ Tracks live verification status of all capabilities across each supported docume
 
 | Function Category | Capability / Keystroke | Spreadsheet (`.csv`, `.tsv`) | Markdown (`.md`) | Plain Text / Code (`.txt`, `.sh`, `.json`) |
 | :--- | :--- | :---: | :---: | :---: |
-| **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Verified (M-O) | Verified (CUJ 13) | Verified (CUJ 13) |
-| **Vertical Motions** | `j`, `k`, `gg`, `G` | Verified (M-O) | Verified (CUJ 16) | Verified (CUJ 16) |
-| **Word Motions** | `w`, `b`, `e`, `ge` | Verified (M-O) | Verified (CUJ 14) | Verified (CUJ 14) |
-| **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Verified (M-O) | Verified (CUJ 15) | Verified (CUJ 15) |
-| **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Verified (M-O) | Verified (CUJ 16) | Verified (CUJ 16) |
-| **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Verified (M-O) | Verified (CUJ 1-6) | Verified (CUJ 7-10) |
-| **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Verified (M-O) | Verified (CUJ 19) | Verified (CUJ 19) |
-| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Verified (M-O) | Verified (CUJ 20-21) | Verified (CUJ 20-21) |
-| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Verified (M-O) | Verified (CUJ 22-24) | Verified (CUJ 22-24) |
-| **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Verified (M-O) | Verified (CUJ 25-30) | Verified (CUJ 25-30) |
-| **Visual Modes** | `v`, `V`, block selections | Verified (M-O) | Verified (CUJ 30) | Verified (CUJ 30) |
-| **Undo / Redo** | `u`, `Ctrl-R` | Verified (M-O) | Verified (CUJ 31) | Verified (CUJ 31) |
-| **Ex Substitutions** | `:%s/find/replace/g` | Verified (M-O) | Verified (CUJ 33) | Verified (CUJ 33) |
-| **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Verified (M-O) | Verified (CUJ 34) | Verified (CUJ 34) |
-| **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Verified (M-O) | Verified (CUJ 17-18) | Verified (CUJ 17-18) |
-| **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-O) | Verified (CUJ 32) | Verified (CUJ 32) |
-| **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified | Verified | Verified |
-| **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (CUJ 35) | N/A (Disabled) | N/A (Disabled) |
-| **Table Formatting** | Neutral gridlines, text wrap | Verified | N/A (GFM Tables) | N/A (Monospace) |
+| **Horizontal Motions** | `h`, `l`, `0`, `^`, `$` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Vertical Motions** | `j`, `k`, `gg`, `G` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Word Motions** | `w`, `b`, `e`, `ge` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Find Motions** | `f<ch>`, `t<ch>`, `;`, `,` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Char Replacements** | `x`, `s`, `r<ch>`, `cc`, `J` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Visual Modes** | `v`, `V`, block selections | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Undo / Redo** | `u`, `Ctrl-R` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Ex Substitutions** | `:%s/find/replace/g` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Line Sorting** | `:sort`, `:sort!`, `:sort u`, `:sort n` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (M-P) | N/A (Disabled) | N/A (Disabled) |
+| **Table Formatting** | Neutral gridlines, text wrap | Verified (M-P) | N/A (GFM Tables) | N/A (Monospace) |
 | **Cell Caret Positioning** | Click cell -> First character offset | Verified (M-R) | N/A (Standard Caret) | N/A (Standard Caret) |
-| **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (CUJ 36) | N/A | N/A |
+| **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (M-P) | N/A | N/A |
 | **App Branding** | High-contrast cursor, `v.circle` | Verified (M-N) | Verified (M-N) | Verified (M-N) |
 
 ---
