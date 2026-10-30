@@ -164,9 +164,10 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] When moving between rows $R$ and $R \pm 1$, compute the target cell column index $C$ and position the caret at the start of cell $C$ in the target row (or clamped relative cell offset).
   - [ ] Standard character-offset vertical navigation is strictly preserved for non-tabular files (Markdown, Plain Text, and Code).
 
-- [ ] **Milestone T: Top-Left Window Positioning on Screen & Viewport Scroll Origin**
-  - [ ] When opening any document, position the `NSWindow` at the top-left of the user's primary display screen (`NSScreen.main?.visibleFrame`), cascading cleanly.
-  - [ ] Ensure wide Markdown files (and wide code/tables) initialize with the scroll view origin at `(0, 0)` (top-left) so the user never lands on the top-right of wide documents.
+- [x] **Milestone T: Top-Left Window Positioning on Screen & Viewport Scroll Origin**
+  - [x] When opening any document, position the `NSWindow` at the top-left of the user's primary display screen (`NSScreen.main?.visibleFrame`), cascading cleanly.
+  - [x] Ensure wide Markdown files (and wide code/tables) initialize with the scroll view origin at `(0, 0)` (top-left) so the user never lands on the top-right of wide documents.
+  - [x] Verified with ultra-wide (50k+ char), multi-monitor, empty file, and rapid-reload test coverage.
 
 - [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [ ] **Full Overwrite Replace Mode (`R`)**:
