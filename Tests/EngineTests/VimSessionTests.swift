@@ -1096,6 +1096,61 @@ func testVimSessionReplaceModeAndSubstitutions() throws {
     }
 }
 
+func testVimSessionWordEndOperators() throws {
+    // 1. 'de' and cohesive undo via Swift Engine API
+    let session = VimSession(initialText: "first second third")
+    guard session.isValid else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Session invalid"])
+    }
+    session.setCursor(line: 1, byteCol: 1)
+    session.feedKeys("de")
+    guard session.serializeBuffer() == " second third" else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "de failed: got \(session.serializeBuffer())"])
+    }
+    // Undo restores buffer
+    session.feedKeys("u")
+    guard session.serializeBuffer() == "first second third" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Undo after de failed: got \(session.serializeBuffer())"])
+    }
+
+    // 2. 'ce' enters insert mode and cohesive undo reverts insertion in one step
+    session.setCursor(line: 1, byteCol: 1)
+    session.feedKeys("ce")
+    guard session.mode == VIM_MODE_INSERT else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "ce did not enter insert mode"])
+    }
+    session.feedKeys("prime\u{1b}")
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "ESC did not return to normal mode"])
+    }
+    guard session.serializeBuffer() == "prime second third" else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "ce edit failed: got \(session.serializeBuffer())"])
+    }
+    session.feedKeys("u")
+    guard session.serializeBuffer() == "first second third" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Undo after ce failed: got \(session.serializeBuffer())"])
+    }
+
+    // 3. 'ye' yanks to end of word and pastes
+    session.setCursor(line: 1, byteCol: 1)
+    session.feedKeys("ye")
+    guard session.serializeBuffer() == "first second third" else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "ye modified buffer"])
+    }
+    session.feedKeys("$")
+    session.feedKeys("p")
+    guard session.serializeBuffer() == "first second thirdfirst" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Paste after ye failed: got \(session.serializeBuffer())"])
+    }
+
+    // 4. Count multipliers: 2de
+    let session2 = VimSession(initialText: "alpha beta gamma")
+    session2.feedKeys("2de")
+    guard session2.serializeBuffer() == " gamma" else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "2de failed: got \(session2.serializeBuffer())"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -1131,7 +1186,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionExUndoRedo", testVimSessionExUndoRedo),
     ("testVimSessionMultiStepUndoRedoWithCoordinateResolver", testVimSessionMultiStepUndoRedoWithCoordinateResolver),
     ("testVimSessionCommandCount", testVimSessionCommandCount),
-    ("testVimSessionReplaceModeAndSubstitutions", testVimSessionReplaceModeAndSubstitutions)
+    ("testVimSessionReplaceModeAndSubstitutions", testVimSessionReplaceModeAndSubstitutions),
+    ("testVimSessionWordEndOperators", testVimSessionWordEndOperators)
 ]
 
 for (name, test) in tests {

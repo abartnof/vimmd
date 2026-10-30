@@ -2784,6 +2784,243 @@ static void test_ex_substitute_case_insensitive_and_ranges(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_word_end_operators_de_ce_ye(void) {
+    // 1. 'de' deletes to the end of the current word (inclusive) and leaves cursor at current character
+    VimContextRef ctx = vim_context_create("apple banana cherry");
+    assert(ctx != NULL);
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "d");
+    vim_context_feed_keys(ctx, "e");
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, " banana cherry") == 0);
+    free(ser);
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1);
+    assert(pos.byteCol == 1);
+
+    // Test 'de' from middle of word
+    vim_context_feed_keys(ctx, "l"); // move to 'b' of banana (col 2)
+    vim_context_feed_keys(ctx, "l"); // move to 'a' of banana (col 3)
+    vim_context_feed_keys(ctx, "d");
+    vim_context_feed_keys(ctx, "e"); // delete "anana"
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, " b cherry") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1);
+    assert(pos.byteCol == 3); // cursor at ' ' after 'b'
+    vim_context_destroy(ctx);
+
+    // 2. '2de' deletes to end of 2nd word
+    VimContextRef ctx2 = vim_context_create("one two three four");
+    assert(ctx2 != NULL);
+    vim_context_set_cursor(ctx2, 1, 1);
+    vim_context_feed_keys(ctx2, "2");
+    vim_context_feed_keys(ctx2, "d");
+    vim_context_feed_keys(ctx2, "e");
+    ser = vim_context_serialize_buffer(ctx2, NULL);
+    assert(strcmp(ser, " three four") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx2);
+    assert(pos.line == 1);
+    assert(pos.byteCol == 1);
+    vim_context_destroy(ctx2);
+
+    // 3. 'ce' deletes to end of word and enters Insert mode
+    VimContextRef ctx3 = vim_context_create("first second third");
+    assert(ctx3 != NULL);
+    vim_context_set_cursor(ctx3, 1, 1);
+    vim_context_feed_keys(ctx3, "c");
+    vim_context_feed_keys(ctx3, "e");
+    assert(vim_context_get_mode(ctx3) == VIM_MODE_INSERT);
+    ser = vim_context_serialize_buffer(ctx3, NULL);
+    assert(strcmp(ser, " second third") == 0);
+    free(ser);
+    // Type replacement text and exit insert mode with ESC
+    vim_context_feed_keys(ctx3, "replaced\x1b");
+    assert(vim_context_get_mode(ctx3) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx3, NULL);
+    assert(strcmp(ser, "replaced second third") == 0);
+    free(ser);
+    vim_context_destroy(ctx3);
+
+    // 4. 'ye' yanks to end of word and pastes with 'p'
+    VimContextRef ctx4 = vim_context_create("lorem ipsum dolor");
+    assert(ctx4 != NULL);
+    vim_context_set_cursor(ctx4, 1, 1);
+    vim_context_feed_keys(ctx4, "y");
+    vim_context_feed_keys(ctx4, "e");
+    // Verify buffer untouched
+    ser = vim_context_serialize_buffer(ctx4, NULL);
+    assert(strcmp(ser, "lorem ipsum dolor") == 0);
+    free(ser);
+    // Paste at end of line ($p)
+    vim_context_feed_keys(ctx4, "$");
+    vim_context_feed_keys(ctx4, "p");
+    ser = vim_context_serialize_buffer(ctx4, NULL);
+    assert(strcmp(ser, "lorem ipsum dolorlorem") == 0);
+    free(ser);
+    vim_context_destroy(ctx4);
+
+    // 5. Single cohesive undo restores the buffer
+    // For 'de':
+    VimContextRef ctx5 = vim_context_create("quick brown fox");
+    assert(ctx5 != NULL);
+    vim_context_set_cursor(ctx5, 1, 1);
+    vim_context_feed_keys(ctx5, "d");
+    vim_context_feed_keys(ctx5, "e");
+    ser = vim_context_serialize_buffer(ctx5, NULL);
+    assert(strcmp(ser, " brown fox") == 0);
+    free(ser);
+    vim_context_feed_keys(ctx5, "u");
+    ser = vim_context_serialize_buffer(ctx5, NULL);
+    assert(strcmp(ser, "quick brown fox") == 0);
+    free(ser);
+
+    // For 'ce' with multiple typed characters in insert mode:
+    vim_context_set_cursor(ctx5, 1, 1);
+    vim_context_feed_keys(ctx5, "c");
+    vim_context_feed_keys(ctx5, "e");
+    vim_context_feed_keys(ctx5, "slow\x1b");
+    ser = vim_context_serialize_buffer(ctx5, NULL);
+    assert(strcmp(ser, "slow brown fox") == 0);
+    free(ser);
+    // Single cohesive undo should revert entire 'ce' + typed text in one step
+    vim_context_feed_keys(ctx5, "u");
+    ser = vim_context_serialize_buffer(ctx5, NULL);
+    assert(strcmp(ser, "quick brown fox") == 0);
+    free(ser);
+    vim_context_destroy(ctx5);
+}
+
+static void test_word_end_operators_advanced_coverage(void) {
+    // A. Empty line behavior for de, ye, ce
+    VimContextRef ctx = vim_context_create("");
+    assert(ctx != NULL);
+    assert(!vim_context_is_dirty(ctx));
+
+    // Preset yank buffer by yanking something
+    VimContextRef ctx_yank = vim_context_create("preserved");
+    vim_context_feed_keys(ctx_yank, "y");
+    vim_context_feed_keys(ctx_yank, "e");
+    vim_context_destroy(ctx_yank);
+
+    // de on empty line: strict no-op, clean buffer remains clean
+    vim_context_feed_keys(ctx, "d");
+    vim_context_feed_keys(ctx, "e");
+    assert(!vim_context_is_dirty(ctx));
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "") == 0);
+    free(ser);
+
+    // ye on empty line: strict no-op, clean buffer remains clean
+    vim_context_feed_keys(ctx, "y");
+    vim_context_feed_keys(ctx, "e");
+    assert(!vim_context_is_dirty(ctx));
+
+    // ce on empty line: enters insert mode, clean buffer remains clean before typing
+    vim_context_feed_keys(ctx, "c");
+    vim_context_feed_keys(ctx, "e");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_INSERT);
+    assert(!vim_context_is_dirty(ctx));
+    vim_context_feed_keys(ctx, "\x1b"); // exit insert mode
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    assert(!vim_context_is_dirty(ctx));
+    vim_context_destroy(ctx);
+
+    // B. EOL boundary: cursor on final char 'o' in "hello" -> deletes 'o', leaving "hell", cursor clamped
+    VimContextRef ctx_eol = vim_context_create("hello");
+    vim_context_set_cursor(ctx_eol, 1, 5); // on 'o'
+    vim_context_feed_keys(ctx_eol, "d");
+    vim_context_feed_keys(ctx_eol, "e");
+    ser = vim_context_serialize_buffer(ctx_eol, NULL);
+    assert(strcmp(ser, "hell") == 0);
+    free(ser);
+    VimBytePos pos = vim_context_get_cursor(ctx_eol);
+    assert(pos.line == 1 && pos.byteCol == 4); // clamped to 'l'
+    vim_context_destroy(ctx_eol);
+
+    // C. Single-character words: "a b c"
+    VimContextRef ctx_single = vim_context_create("a b c");
+    vim_context_set_cursor(ctx_single, 1, 1);
+    vim_context_feed_keys(ctx_single, "y");
+    vim_context_feed_keys(ctx_single, "e"); // yanks "a"
+    vim_context_feed_keys(ctx_single, "$");
+    vim_context_feed_keys(ctx_single, "p"); // pastes "a" at end
+    ser = vim_context_serialize_buffer(ctx_single, NULL);
+    assert(strcmp(ser, "a b ca") == 0);
+    free(ser);
+
+    vim_context_set_cursor(ctx_single, 1, 1);
+    vim_context_feed_keys(ctx_single, "d");
+    vim_context_feed_keys(ctx_single, "e"); // deletes "a"
+    ser = vim_context_serialize_buffer(ctx_single, NULL);
+    assert(strcmp(ser, " b ca") == 0);
+    free(ser);
+
+    vim_context_set_cursor(ctx_single, 1, 2); // on 'b'
+    vim_context_feed_keys(ctx_single, "c");
+    vim_context_feed_keys(ctx_single, "e"); // ce deletes 'b'
+    vim_context_feed_keys(ctx_single, "z\x1b");
+    ser = vim_context_serialize_buffer(ctx_single, NULL);
+    assert(strcmp(ser, " z ca") == 0);
+    free(ser);
+    vim_context_destroy(ctx_single);
+
+    // D. Punctuation transitions: "foo.bar_baz"
+    VimContextRef ctx_punct = vim_context_create("foo.bar_baz");
+    vim_context_set_cursor(ctx_punct, 1, 1);
+    vim_context_feed_keys(ctx_punct, "d");
+    vim_context_feed_keys(ctx_punct, "e"); // deletes "foo"
+    ser = vim_context_serialize_buffer(ctx_punct, NULL);
+    assert(strcmp(ser, ".bar_baz") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx_punct);
+    assert(pos.line == 1 && pos.byteCol == 1); // at '.'
+
+    vim_context_feed_keys(ctx_punct, "d");
+    vim_context_feed_keys(ctx_punct, "e"); // deletes "."
+    ser = vim_context_serialize_buffer(ctx_punct, NULL);
+    assert(strcmp(ser, "bar_baz") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx_punct);
+    assert(pos.line == 1 && pos.byteCol == 1); // at 'b'
+    vim_context_destroy(ctx_punct);
+
+    // E. Count multipliers: explicit assertions for 2ce and 2ye
+    // 2ce:
+    VimContextRef ctx_count = vim_context_create("one two three");
+    vim_context_set_cursor(ctx_count, 1, 1);
+    vim_context_feed_keys(ctx_count, "2");
+    vim_context_feed_keys(ctx_count, "c");
+    vim_context_feed_keys(ctx_count, "e");
+    assert(vim_context_get_mode(ctx_count) == VIM_MODE_INSERT);
+    ser = vim_context_serialize_buffer(ctx_count, NULL);
+    assert(strcmp(ser, " three") == 0);
+    free(ser);
+    vim_context_feed_keys(ctx_count, "done\x1b");
+    ser = vim_context_serialize_buffer(ctx_count, NULL);
+    assert(strcmp(ser, "done three") == 0);
+    free(ser);
+    vim_context_destroy(ctx_count);
+
+    // 2ye:
+    VimContextRef ctx_2ye = vim_context_create("alpha beta gamma");
+    vim_context_set_cursor(ctx_2ye, 1, 1);
+    vim_context_feed_keys(ctx_2ye, "2");
+    vim_context_feed_keys(ctx_2ye, "y");
+    vim_context_feed_keys(ctx_2ye, "e");
+    ser = vim_context_serialize_buffer(ctx_2ye, NULL);
+    assert(strcmp(ser, "alpha beta gamma") == 0);
+    free(ser);
+    vim_context_feed_keys(ctx_2ye, "$");
+    vim_context_feed_keys(ctx_2ye, "p");
+    ser = vim_context_serialize_buffer(ctx_2ye, NULL);
+    assert(strcmp(ser, "alpha beta gammaalpha beta") == 0);
+    free(ser);
+    vim_context_destroy(ctx_2ye);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -2818,6 +3055,8 @@ int main(void) {
     RUN_TEST(test_navigation_motions_and_counts);
     RUN_TEST(test_find_repeat_semicolon_comma);
     RUN_TEST(test_operator_mutations);
+    RUN_TEST(test_word_end_operators_de_ce_ye);
+    RUN_TEST(test_word_end_operators_advanced_coverage);
     RUN_TEST(test_visual_selection_and_operators);
     RUN_TEST(test_visual_motions_word_and_find);
     RUN_TEST(test_esc_cancellation);

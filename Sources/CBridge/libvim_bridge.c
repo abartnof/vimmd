@@ -603,6 +603,39 @@ static inline int char_category(char c) {
     return 2; // punctuation
 }
 
+static size_t find_operator_end_of_word(const char *line, size_t len, size_t start, int count) {
+    if (len == 0 || start >= len) return start;
+    if (count < 1) count = 1;
+
+    size_t idx = start;
+    for (int rep = 0; rep < count; rep++) {
+        if (rep > 0) {
+            while (idx + 1 < len && char_category(line[idx + 1]) == 0) {
+                idx++;
+            }
+            if (idx + 1 < len) {
+                idx++;
+            } else {
+                idx = len;
+                break;
+            }
+        } else {
+            while (idx < len && char_category(line[idx]) == 0) {
+                idx++;
+            }
+            if (idx >= len) return len;
+        }
+
+        int cat = char_category(line[idx]);
+        while (idx + 1 < len && char_category(line[idx + 1]) == cat) {
+            idx++;
+        }
+    }
+    size_t end = idx < len ? idx + 1 : len;
+    if (end > len) end = len;
+    return end;
+}
+
 static void motion_caret(struct VimDocumentContext *ctx) {
     if (ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return;
     const char *line = ctx->lines[ctx->cursor.line - 1];
@@ -1758,6 +1791,33 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         }
                         p++;
                         continue;
+                    } else if (*p == 'e') { // de: delete to end of word
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        if (len == 0) {
+                            p++;
+                            continue;
+                        }
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+                        size_t end = find_operator_end_of_word(line, len, start, count);
+
+                        if (end > start) {
+                            snapshot_for_undo(ctx);
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                            memmove(line + start, line + end, len - end + 1);
+                            ctx->is_dirty = true;
+                            clamp_cursor(ctx);
+                            emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        }
+                        p++;
+                        continue;
                     } else if (*p == '$') { // d$: delete to end of line
                         snapshot_for_undo(ctx);
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
@@ -1824,6 +1884,28 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         }
                         p++;
                         continue;
+                    } else if (*p == 'e') { // ye: yank to end of word
+                        size_t l_idx = (size_t)(ctx->cursor.line - 1);
+                        const char *line = ctx->lines[l_idx];
+                        size_t len = strlen(line);
+                        if (len == 0) {
+                            p++;
+                            continue;
+                        }
+                        size_t start = (size_t)(ctx->cursor.byteCol - 1);
+                        size_t end = find_operator_end_of_word(line, len, start, count);
+
+                        if (end > start) {
+                            char *yanked = (char *)malloc(end - start + 1);
+                            if (yanked) {
+                                memcpy(yanked, line + start, end - start);
+                                yanked[end - start] = '\0';
+                                set_yank_buffer(ctx, yanked, false);
+                                free(yanked);
+                            }
+                        }
+                        p++;
+                        continue;
                     } else if (*p == '$') { // y$: yank to end of line
                         const char *line = ctx->lines[ctx->cursor.line - 1];
                         size_t start = (size_t)(ctx->cursor.byteCol - 1);
@@ -1859,16 +1941,12 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         emit_line_delta(ctx, ctx->cursor.line, 1, 1);
                         p++;
                         continue;
-                    } else if (*p == 'w') { // cw: change word
+                    } else if (*p == 'w' || *p == 'e') { // cw, ce: change word / change to end of word
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
                         char *line = ctx->lines[l_idx];
                         size_t len = strlen(line);
                         size_t start = (size_t)(ctx->cursor.byteCol - 1);
-
-                        VimBytePos orig = ctx->cursor;
-                        motion_e(ctx, count);
-                        size_t end = (ctx->cursor.line == orig.line) ? (size_t)ctx->cursor.byteCol : len;
-                        ctx->cursor = orig;
+                        size_t end = find_operator_end_of_word(line, len, start, count);
 
                         if (end > start) {
                             snapshot_for_undo(ctx);
@@ -1884,6 +1962,10 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                             ctx->mode = VIM_MODE_INSERT;
                             ctx->is_dirty = true;
                             emit_line_delta(ctx, ctx->cursor.line, 1, 1);
+                        } else {
+                            snapshot_for_undo(ctx);
+                            ctx->in_insert_undo_group = true;
+                            ctx->mode = VIM_MODE_INSERT;
                         }
                         p++;
                         continue;

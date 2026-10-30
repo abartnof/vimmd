@@ -527,6 +527,66 @@ func testIntraCellOffsetPreservedOnUpNavigation() throws {
     }
 }
 
+// 15. Navigating from row 2 col 0 to row 1 col 0 keeps the 1st character of row 1 fully within visible rect with ruler
+func testNavigatingFromRow2Col0ToRow1Col0KeepsFirstCharVisibleWithRuler() throws {
+    let csv = "ColA,ColB\nValA,ValB\nRow2A,Row2B\n"
+    let window = NSWindow(
+        contentRect: NSRect(x: 100, y: 100, width: 800, height: 600),
+        styleMask: [.titled, .closable, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let tv = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    tv.documentSyntaxType = .csv
+    tv.isTabularDocument = true
+    let session = VimSession(initialText: csv)
+    tv.session = session
+    scrollView.documentView = tv
+
+    let ruler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    ruler.clientView = tv
+    scrollView.hasVerticalRuler = true
+    scrollView.verticalRulerView = ruler
+    scrollView.rulersVisible = true
+    ruler.updateThickness(for: tv)
+
+    window.contentView = scrollView
+    window.makeFirstResponder(tv)
+
+    // Position caret at Row 2, Column 0 (before 1st char of row 2: line 2, byteCol 1)
+    tv.positionCaret(atRow: 1, column: 0)
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "TabularVerticalNav", code: 201, userInfo: [NSLocalizedDescriptionKey: "Expected cursor at line 2, col 1, got \(session.cursorPosition)"])
+    }
+
+    // Go up a row with 'k'
+    sendKey(tv, char: "k")
+
+    // Cursor must now be at Row 1, Column 0 (line 1, byteCol 1)
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "TabularVerticalNav", code: 202, userInfo: [NSLocalizedDescriptionKey: "Expected cursor at line 1, col 1 after k, got \(session.cursorPosition)"])
+    }
+    guard tv.selectedRange().location == 0 else {
+        throw NSError(domain: "TabularVerticalNav", code: 203, userInfo: [NSLocalizedDescriptionKey: "Expected selectedRange location 0, got \(tv.selectedRange().location)"])
+    }
+
+    let rulerThickness = scrollView.verticalRulerView?.ruleThickness ?? 0
+    guard rulerThickness > 0 else {
+        throw NSError(domain: "TabularVerticalNav", code: 204, userInfo: [NSLocalizedDescriptionKey: "rulerThickness should be > 0"])
+    }
+
+    // Clip view origin x must be at -rulerThickness (ruler-aware origin), NOT shifted to 0 which hides text behind the ruler!
+    let clipOriginX = scrollView.contentView.bounds.origin.x
+    guard abs(clipOriginX - (-rulerThickness)) < 0.5 else {
+        throw NSError(
+            domain: "TabularVerticalNav",
+            code: 205,
+            userInfo: [NSLocalizedDescriptionKey: "Clip view origin x (\(clipOriginX)) shifted away from ruler origin (-\(rulerThickness)); 1st character on row 1 is hidden behind ruler!"]
+        )
+    }
+}
+
 // MARK: - Test Runner Main
 var testsPassed = 0
 var testsFailed = 0
@@ -547,7 +607,8 @@ let allTests: [(String, () throws -> Void)] = [
     ("testPendingCommandNonInterference", testPendingCommandNonInterference),
     ("testIntraCellColumnOffsetPreservedOnDownNavigation", testIntraCellColumnOffsetPreservedOnDownNavigation),
     ("testIntraCellOffsetClampingAtShorterCellAndSubsequentDownNavigation", testIntraCellOffsetClampingAtShorterCellAndSubsequentDownNavigation),
-    ("testIntraCellOffsetPreservedOnUpNavigation", testIntraCellOffsetPreservedOnUpNavigation)
+    ("testIntraCellOffsetPreservedOnUpNavigation", testIntraCellOffsetPreservedOnUpNavigation),
+    ("testNavigatingFromRow2Col0ToRow1Col0KeepsFirstCharVisibleWithRuler", testNavigatingFromRow2Col0ToRow1Col0KeepsFirstCharVisibleWithRuler)
 ]
 
 for (name, test) in allTests {

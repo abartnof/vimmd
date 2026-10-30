@@ -191,10 +191,12 @@ open class VimMDTextView: NSTextView {
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
         }
+        self.scrollToBeginningOfDocument(nil)
+        self.scrollRangeToVisible(NSRange(location: 0, length: 0))
         if let scrollView = self.enclosingScrollView {
-            let clipView = scrollView.contentView
-            clipView.scroll(to: NSPoint.zero)
-            scrollView.reflectScrolledClipView(clipView)
+            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
+            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         self.setSelectedRange(NSRange(location: 0, length: 0))
         if let session = self.session {
@@ -208,10 +210,13 @@ open class VimMDTextView: NSTextView {
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
         }
-        guard let scrollView = self.enclosingScrollView else { return }
-        let clipView = scrollView.contentView
-        clipView.scroll(to: NSPoint(x: 0, y: 0))
-        scrollView.reflectScrolledClipView(clipView)
+        self.scrollToBeginningOfDocument(nil)
+        self.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        if let scrollView = self.enclosingScrollView {
+            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
+            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     @objc private func scrollViewDidScroll(_ notification: Notification) {

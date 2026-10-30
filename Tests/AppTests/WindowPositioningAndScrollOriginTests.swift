@@ -16,6 +16,10 @@ func runTest(name: String, test: () throws -> Void) -> Bool {
     }
 }
 
+func expectedScrollOriginX(for scrollView: NSScrollView) -> CGFloat {
+    return (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
+}
+
 func testWindowPlacementInTopLeftQuadrant() throws {
     // Reset any cascade state before testing
     VimMDDocument.lastTopLeftPoint = nil
@@ -133,15 +137,16 @@ func testWideMarkdownFileOpensAtScrollOriginZero() throws {
         throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected text view frame width > 2000 for 5200 char line, got \(tv.frame.width)"])
     }
 
-    // Crucial check: documentVisibleRect and clipView origin MUST be at (0, 0), NOT scrolled to the right!
+    // Crucial check: documentVisibleRect and clipView origin MUST be ruler-aware at top-left, NOT scrolled to the right!
     let visibleOrigin = scrollView.documentVisibleRect.origin
     let clipOrigin = scrollView.contentView.bounds.origin
+    let expectedX = expectedScrollOriginX(for: scrollView)
 
-    guard abs(visibleOrigin.x) < 0.001 else {
+    guard abs(visibleOrigin.x - expectedX) < 0.5 else {
         throw NSError(
             domain: "WindowPositioningTests",
             code: 5,
-            userInfo: [NSLocalizedDescriptionKey: "documentVisibleRect scrolled to right! x=\(visibleOrigin.x), expected 0"]
+            userInfo: [NSLocalizedDescriptionKey: "documentVisibleRect scrolled to right! x=\(visibleOrigin.x), expected \(expectedX)"]
         )
     }
     guard abs(visibleOrigin.y) < 0.001 else {
@@ -151,11 +156,11 @@ func testWideMarkdownFileOpensAtScrollOriginZero() throws {
             userInfo: [NSLocalizedDescriptionKey: "documentVisibleRect scrolled vertically! y=\(visibleOrigin.y), expected 0"]
         )
     }
-    guard abs(clipOrigin.x) < 0.001 else {
+    guard abs(clipOrigin.x - expectedX) < 0.5 else {
         throw NSError(
             domain: "WindowPositioningTests",
             code: 7,
-            userInfo: [NSLocalizedDescriptionKey: "contentView.bounds.origin.x=\(clipOrigin.x), expected 0"]
+            userInfo: [NSLocalizedDescriptionKey: "contentView.bounds.origin.x=\(clipOrigin.x), expected \(expectedX)"]
         )
     }
 
@@ -186,13 +191,14 @@ func testReadWithExistingTextViewResetsScrollOrigin() throws {
     let newWideText = "# New Wide File " + String(repeating: "X", count: 3000)
     try doc.read(from: newWideText.data(using: .utf8)!, ofType: "net.daringfireball.markdown")
 
-    // After read, origin must be reset to (0, 0)
+    // After read, origin must be reset to ruler-aware top-left
     let visibleOrigin = scrollView.documentVisibleRect.origin
-    guard abs(visibleOrigin.x) < 0.001 else {
+    let expectedX = expectedScrollOriginX(for: scrollView)
+    guard abs(visibleOrigin.x - expectedX) < 0.5 else {
         throw NSError(
             domain: "WindowPositioningTests",
             code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "Expected visible origin x to be 0 after read, got \(visibleOrigin.x)"]
+            userInfo: [NSLocalizedDescriptionKey: "Expected visible origin x to be \(expectedX) after read, got \(visibleOrigin.x)"]
         )
     }
     guard abs(visibleOrigin.y) < 0.001 else {
@@ -290,8 +296,9 @@ func testUltraWideLineExceeding50kCharactersOpensAtScrollOriginZero() throws {
     }
 
     let visibleOrigin = scrollView.documentVisibleRect.origin
-    guard abs(visibleOrigin.x) < 0.001 else {
-        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Ultra-wide file scrolled horizontally to \(visibleOrigin.x)"])
+    let expectedX = expectedScrollOriginX(for: scrollView)
+    guard abs(visibleOrigin.x - expectedX) < 0.5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Ultra-wide file scrolled horizontally to \(visibleOrigin.x), expected \(expectedX)"])
     }
     guard abs(visibleOrigin.y) < 0.001 else {
         throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Ultra-wide file scrolled vertically to \(visibleOrigin.y)"])
@@ -340,8 +347,9 @@ func testEmptyFileOpensAtScrollOriginZero() throws {
     tv.updateFrameForUnwrappedLines()
 
     let visibleOrigin = scrollView.documentVisibleRect.origin
-    guard abs(visibleOrigin.x) < 0.001 else {
-        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Empty file x = \(visibleOrigin.x)"])
+    let expectedX = expectedScrollOriginX(for: scrollView)
+    guard abs(visibleOrigin.x - expectedX) < 0.5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Empty file x = \(visibleOrigin.x), expected \(expectedX)"])
     }
     guard abs(visibleOrigin.y) < 0.001 else {
         throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Empty file y = \(visibleOrigin.y)"])
@@ -371,8 +379,9 @@ func testRapidReloadsPreserveScrollOrigin() throws {
         try doc.read(from: text.data(using: .utf8)!, ofType: "net.daringfireball.markdown")
 
         let visibleOrigin = scrollView.documentVisibleRect.origin
-        guard abs(visibleOrigin.x) < 0.001 else {
-            throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Rapid reload \(i) x = \(visibleOrigin.x)"])
+        let expectedX = expectedScrollOriginX(for: scrollView)
+        guard abs(visibleOrigin.x - expectedX) < 0.5 else {
+            throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Rapid reload \(i) x = \(visibleOrigin.x), expected \(expectedX)"])
         }
         guard abs(visibleOrigin.y) < 0.001 else {
             throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Rapid reload \(i) y = \(visibleOrigin.y)"])
@@ -400,10 +409,11 @@ func testLegitimateHorizontalScrollingWhenNavigatingToColumn80() throws {
 
     tv.updateFrameForUnwrappedLines()
 
-    // 1. Initial state at col 1 must be (0, 0)
+    // 1. Initial state at col 1 must be expectedX
     let initialOrigin = scrollView.documentVisibleRect.origin
-    guard abs(initialOrigin.x) < 0.001 else {
-        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial x is \(initialOrigin.x)"])
+    let expectedX = expectedScrollOriginX(for: scrollView)
+    guard abs(initialOrigin.x - expectedX) < 0.5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial x is \(initialOrigin.x), expected \(expectedX)"])
     }
 
     // 2. Navigate deep into line 1 (e.g. column 150)
@@ -425,11 +435,11 @@ func testLegitimateHorizontalScrollingWhenNavigatingToColumn80() throws {
     tv.synchronizeCaretWithSession()
 
     let resetOrigin = scrollView.documentVisibleRect.origin
-    guard abs(resetOrigin.x) < 0.001 else {
+    guard abs(resetOrigin.x - expectedX) < 0.5 else {
         throw NSError(
             domain: "WindowPositioningTests",
             code: 4,
-            userInfo: [NSLocalizedDescriptionKey: "Returning to column 1 did not reset origin.x to 0, got \(resetOrigin.x)"]
+            userInfo: [NSLocalizedDescriptionKey: "Returning to column 1 did not reset origin.x to \(expectedX), got \(resetOrigin.x)"]
         )
     }
 
@@ -513,8 +523,9 @@ func testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZer
         throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Sync session cursor expected (1, 1), got \(String(describing: tv.session?.cursorPosition))"])
     }
     let syncOrigin = scrollView.documentVisibleRect.origin
-    guard abs(syncOrigin.x) < 0.001 && abs(syncOrigin.y) < 0.001 else {
-        throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Sync documentVisibleRect expected (0,0), got \(syncOrigin)"])
+    let expectedX = expectedScrollOriginX(for: scrollView)
+    guard abs(syncOrigin.x - expectedX) < 0.5 && abs(syncOrigin.y) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Sync documentVisibleRect expected (\(expectedX),0), got \(syncOrigin)"])
     }
 
     // Pump main run loop to execute scheduled async blocks (DispatchQueue.main.async)
@@ -528,8 +539,8 @@ func testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZer
         throw NSError(domain: "WindowPositioningTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Async session cursor expected (1, 1), got \(session.cursorPosition)"])
     }
     let asyncOrigin = scrollView.documentVisibleRect.origin
-    guard abs(asyncOrigin.x) < 0.001 && abs(asyncOrigin.y) < 0.001 else {
-        throw NSError(domain: "WindowPositioningTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Async documentVisibleRect expected (0,0), got \(asyncOrigin)"])
+    guard abs(asyncOrigin.x - expectedX) < 0.5 && abs(asyncOrigin.y) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Async documentVisibleRect expected (\(expectedX),0), got \(asyncOrigin)"])
     }
 
     doc.close()
@@ -580,6 +591,121 @@ func testPinViewportToTopLeftGuaranteesVisibleRectOriginZero() throws {
     }
 }
 
+func testNavigatingFromRow2Col0ToRow1Col0WithRulerKeepsFirstCharVisible() throws {
+    let doc = VimMDDocument()
+    let text = "HeaderA,HeaderB\nValA,ValB\nRow2A,Row2B"
+    try doc.read(from: text.data(using: .utf8)!, ofType: "public.comma-separated-values-text")
+    doc.makeWindowControllers()
+
+    guard let tv = doc.textView, let scrollView = tv.enclosingScrollView, let session = tv.session else {
+        throw NSError(domain: "WindowPositioningTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "textView, scrollView, or session nil"])
+    }
+
+    // Position at line 2, byteCol 1 (Row 2, col 0)
+    session.setCursor(line: 2, byteCol: 1)
+    tv.synchronizeCaretWithSession()
+
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Setup cursor failed"])
+    }
+
+    // Navigate up to line 1, byteCol 1 (Row 1, col 0)
+    session.setCursor(line: 1, byteCol: 1)
+    tv.synchronizeCaretWithSession()
+
+    guard tv.selectedRange().location == 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected caret at 0, got \(tv.selectedRange().location)"])
+    }
+
+    let rulerThickness = scrollView.verticalRulerView?.ruleThickness ?? 0
+    guard rulerThickness > 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "rulerThickness should be > 0"])
+    }
+
+    // Clip view origin x must be at -rulerThickness (ruler-aware origin), NOT shifted to 0 which hides text behind the ruler!
+    let clipOriginX = scrollView.contentView.bounds.origin.x
+    guard abs(clipOriginX - (-rulerThickness)) < 0.5 else {
+        throw NSError(
+            domain: "WindowPositioningTests",
+            code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "Clip view origin x (\(clipOriginX)) is not at ruler origin (-\(rulerThickness)); first character is hidden behind the ruler!"]
+        )
+    }
+
+    doc.close()
+}
+
+func testRulerlessAndHiddenRulerScrollViewsHaveZeroOrigin() throws {
+    // 1. Rulerless NSScrollView
+    let sv1 = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let tv1 = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 2000, height: 1000))
+    let session1 = VimSession(initialText: "Rulerless line 1\nRulerless line 2")
+    tv1.session = session1
+    sv1.documentView = tv1
+
+    tv1.resetScrollToTopLeft()
+    guard abs(sv1.documentVisibleRect.origin.x) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Rulerless origin.x is \(sv1.documentVisibleRect.origin.x), expected 0.0"])
+    }
+
+    // 2. Hidden ruler: rulersVisible = false
+    let sv2 = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let tv2 = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 2000, height: 1000))
+    let session2 = VimSession(initialText: "Hidden ruler line 1\nHidden ruler line 2")
+    tv2.session = session2
+    sv2.documentView = tv2
+
+    let ruler = LineNumberRulerView(scrollView: sv2, orientation: .verticalRuler)
+    ruler.clientView = tv2
+    sv2.hasVerticalRuler = true
+    sv2.verticalRulerView = ruler
+    sv2.rulersVisible = false // Ruler hidden!
+
+    tv2.resetScrollToTopLeft()
+    guard abs(sv2.documentVisibleRect.origin.x) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Hidden ruler origin.x is \(sv2.documentVisibleRect.origin.x), expected 0.0"])
+    }
+}
+
+func testDynamicRulerThicknessScalingMaintainsViewportAlignment() throws {
+    let doc = VimMDDocument()
+    // Start with 5 lines (1 digit)
+    let shortText = (1...5).map { "Line \($0)" }.joined(separator: "\n")
+    try doc.read(from: shortText.data(using: .utf8)!, ofType: "net.daringfireball.markdown")
+    doc.makeWindowControllers()
+
+    guard let tv = doc.textView, let scrollView = tv.enclosingScrollView, let ruler = scrollView.verticalRulerView as? LineNumberRulerView else {
+        throw NSError(domain: "WindowPositioningTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "doc views nil"])
+    }
+
+    let thickness5 = ruler.ruleThickness
+    guard thickness5 > 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Initial thickness <= 0"])
+    }
+    let expectedX5 = expectedScrollOriginX(for: scrollView)
+    guard abs(scrollView.documentVisibleRect.origin.x - expectedX5) < 0.5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Initial visible origin \(scrollView.documentVisibleRect.origin.x) != \(expectedX5)"])
+    }
+
+    // Now expand to 250 lines (3 digits)
+    let longText = (1...250).map { "Line \($0)" }.joined(separator: "\n")
+    try doc.read(from: longText.data(using: .utf8)!, ofType: "net.daringfireball.markdown")
+    ruler.updateThickness(for: tv)
+
+    let thickness250 = ruler.ruleThickness
+    guard thickness250 >= thickness5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expanded thickness (\(thickness250)) < initial (\(thickness5))"])
+    }
+
+    // Viewport must remain aligned to the scaled ruler thickness
+    let expectedX250 = expectedScrollOriginX(for: scrollView)
+    guard abs(scrollView.documentVisibleRect.origin.x - expectedX250) < 0.5 else {
+        throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expanded visible origin \(scrollView.documentVisibleRect.origin.x) != \(expectedX250)"])
+    }
+
+    doc.close()
+}
+
 print("=== Window Positioning & Viewport Scroll Origin Tests ===")
 var total = 0
 var passed = 0
@@ -598,7 +724,10 @@ let tests: [(String, () throws -> Void)] = [
     ("testLegitimateHorizontalScrollingWhenNavigatingToColumn80", testLegitimateHorizontalScrollingWhenNavigatingToColumn80),
     ("testWindowCascadeResetsWhenReachingScreenBoundaries", testWindowCascadeResetsWhenReachingScreenBoundaries),
     ("testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZeroAsync", testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZeroAsync),
-    ("testPinViewportToTopLeftGuaranteesVisibleRectOriginZero", testPinViewportToTopLeftGuaranteesVisibleRectOriginZero)
+    ("testPinViewportToTopLeftGuaranteesVisibleRectOriginZero", testPinViewportToTopLeftGuaranteesVisibleRectOriginZero),
+    ("testNavigatingFromRow2Col0ToRow1Col0WithRulerKeepsFirstCharVisible", testNavigatingFromRow2Col0ToRow1Col0WithRulerKeepsFirstCharVisible),
+    ("testRulerlessAndHiddenRulerScrollViewsHaveZeroOrigin", testRulerlessAndHiddenRulerScrollViewsHaveZeroOrigin),
+    ("testDynamicRulerThicknessScalingMaintainsViewportAlignment", testDynamicRulerThicknessScalingMaintainsViewportAlignment)
 ]
 
 for (name, test) in tests {
