@@ -405,7 +405,10 @@ open class VimMDDocument: NSDocument {
             tv.documentSyntaxType = self.documentSyntaxType
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
-            tv.resetScrollToTopLeft()
+            tv.pinViewportToTopLeft()
+            DispatchQueue.main.async { [weak tv] in
+                tv?.pinViewportToTopLeft()
+            }
             tv.window?.makeFirstResponder(tv)
         }
         self.updateChangeCount(.changeCleared)
@@ -417,7 +420,10 @@ open class VimMDDocument: NSDocument {
         configureWrapLinesPolicy()
         self.textView?.documentSyntaxType = self.documentSyntaxType
         try super.read(from: url, ofType: typeName)
-        self.textView?.resetScrollToTopLeft()
+        self.textView?.pinViewportToTopLeft()
+        DispatchQueue.main.async { [weak self] in
+            self?.textView?.pinViewportToTopLeft()
+        }
         self.updateChangeCount(.changeCleared)
     }
 
@@ -651,8 +657,15 @@ open class VimMDDocument: NSDocument {
         let windowController = NSWindowController(window: window)
         self.addWindowController(windowController)
 
-        tv.resetScrollToTopLeft()
+        tv.pinViewportToTopLeft()
+        DispatchQueue.main.async { [weak tv] in
+            tv?.pinViewportToTopLeft()
+        }
         updateStatusDisplay()
+    }
+
+    public func pinViewportToTopLeft() {
+        self.textView?.pinViewportToTopLeft()
     }
 
     override open func close() {

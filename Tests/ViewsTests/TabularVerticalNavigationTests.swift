@@ -421,6 +421,112 @@ func testPendingCommandNonInterference() throws {
     }
 }
 
+// 12. Intra-cell column offset preservation: character 2 in cell C on row 0 moving down to row 1 lands at character 2 in cell C
+func testIntraCellColumnOffsetPreservedOnDownNavigation() throws {
+    let csv = "ColA,ABCDEF,ColC\nRow1A,123456,Row1C\n"
+    let ctx = TestContext(text: csv)
+
+    // Position caret at Row 0, Column 1 ("ABCDEF")
+    ctx.tv.positionCaret(atRow: 0, column: 1)
+    // Move caret 2 characters to the right ('C') within cell
+    sendKey(ctx.tv, char: "l")
+    sendKey(ctx.tv, char: "l")
+
+    // Verify we are at character 2 of cell (0, 1)
+    guard let cell0 = ctx.tv.currentTabularCell(), cell0.row == 0 && cell0.column == 1 else {
+        throw NSError(domain: "TabularVerticalNav", code: 110, userInfo: [NSLocalizedDescriptionKey: "Failed to position at cell (0, 1)"])
+    }
+    // "ColA," is length 5. Cell (0, 1) starts at 5. Offset 5 + 2 = 7.
+    let expectedOffsetRow0 = 5 + 2
+    guard ctx.tv.selectedRange().location == expectedOffsetRow0 else {
+        throw NSError(domain: "TabularVerticalNav", code: 111, userInfo: [NSLocalizedDescriptionKey: "Expected offset \(expectedOffsetRow0) on row 0, got \(ctx.tv.selectedRange().location)"])
+    }
+
+    // Press 'j' to navigate down to Row 1
+    sendKey(ctx.tv, char: "j")
+
+    guard let cell1 = ctx.tv.currentTabularCell(), cell1.row == 1 && cell1.column == 1 else {
+        throw NSError(domain: "TabularVerticalNav", code: 112, userInfo: [NSLocalizedDescriptionKey: "Expected cell (1, 1) after j, got \(String(describing: ctx.tv.currentTabularCell()))"])
+    }
+    // Line 0 is "ColA,ABCDEF,ColC\n" (len 17).
+    // Line 1 is "Row1A,123456,Row1C\n".
+    // "Row1A," is 6 characters. So Row 1, Col 1 starts at 17 + 6 = 23.
+    // Character 2 is at offset 23 + 2 = 25.
+    let expectedOffsetRow1 = 17 + 6 + 2
+    guard ctx.tv.selectedRange().location == expectedOffsetRow1 else {
+        throw NSError(domain: "TabularVerticalNav", code: 113, userInfo: [NSLocalizedDescriptionKey: "Expected offset \(expectedOffsetRow1) (char 2 of cell (1, 1)), got \(ctx.tv.selectedRange().location)"])
+    }
+}
+
+// 13. Intra-cell column offset clamping: 4-char cell moving to 3-char cell clamps to offset 3; then moving to 10-char cell stays at offset 3
+func testIntraCellOffsetClampingAtShorterCellAndSubsequentDownNavigation() throws {
+    let csv = "1234,Other\n567,Other\n0123456789,Other\n"
+    let ctx = TestContext(text: csv)
+
+    ctx.tv.positionCaret(atRow: 0, column: 0)
+    sendKey(ctx.tv, char: "l")
+    sendKey(ctx.tv, char: "l")
+    sendKey(ctx.tv, char: "l")
+    sendKey(ctx.tv, char: "a") // append mode puts caret after '4', at offset 4
+    guard ctx.tv.selectedRange().location == 4 else {
+        throw NSError(domain: "TabularVerticalNav", code: 120, userInfo: [NSLocalizedDescriptionKey: "Expected caret at offset 4, got \(ctx.tv.selectedRange().location)"])
+    }
+
+    // Down arrow in insert mode
+    sendKey(ctx.tv, char: "\u{F701}", keyCode: 125)
+
+    // Row 1: "567,Other\n" (line 0 length: 11 -> "1234,Other\n").
+    // Cell (1, 0) is "567", starts at 11, length 3.
+    // Clamped intraCellOffset should be min(3, 4) = 3.
+    // Expected offset: 11 + 3 = 14.
+    guard ctx.tv.selectedRange().location == 14 else {
+        throw NSError(domain: "TabularVerticalNav", code: 121, userInfo: [NSLocalizedDescriptionKey: "Expected clamped offset 14 (end of 3-char cell), got \(ctx.tv.selectedRange().location)"])
+    }
+
+    // Down arrow again into Row 2: "0123456789,Other\n"
+    // Line 1 length: 10 -> "567,Other\n" (11 + 10 = 21).
+    // Cell (2, 0) starts at 21, length 10.
+    // IntraCellOffset 3 in 10-char cell:
+    // Expected offset: 21 + 3 = 24.
+    sendKey(ctx.tv, char: "\u{F701}", keyCode: 125)
+
+    guard ctx.tv.selectedRange().location == 24 else {
+        throw NSError(domain: "TabularVerticalNav", code: 122, userInfo: [NSLocalizedDescriptionKey: "Expected offset 24 (char 3 in 10-char cell), got \(ctx.tv.selectedRange().location)"])
+    }
+}
+
+// 14. Intra-cell column offset preservation on up navigation (`k`)
+func testIntraCellOffsetPreservedOnUpNavigation() throws {
+    let csv = "ColA,0123456789\nColB,123\nColC,ABCD\n"
+    let ctx = TestContext(text: csv)
+
+    // Position at Row 2, Column 1 ("ABCD")
+    ctx.tv.positionCaret(atRow: 2, column: 1)
+    // Row 0: "ColA,0123456789\n" (len 16)
+    // Row 1: "ColB,123\n" (len 9)
+    // Row 2 starts at 25: "ColC,ABCD\n". Col 1 starts at 25 + 5 = 30.
+    // Move 2 characters to the right within "ABCD":
+    sendKey(ctx.tv, char: "l")
+    sendKey(ctx.tv, char: "l")
+    guard ctx.tv.selectedRange().location == 32 else {
+        throw NSError(domain: "TabularVerticalNav", code: 130, userInfo: [NSLocalizedDescriptionKey: "Expected offset 32 on row 2, got \(ctx.tv.selectedRange().location)"])
+    }
+
+    // Press 'k' to go up to Row 1 ("ColB,123\n")
+    // Col 1 is "123", starts at 16 + 5 = 21. Character 2 is at offset 21 + 2 = 23.
+    sendKey(ctx.tv, char: "k")
+    guard ctx.tv.selectedRange().location == 23 else {
+        throw NSError(domain: "TabularVerticalNav", code: 131, userInfo: [NSLocalizedDescriptionKey: "Expected offset 23 (char 2 of Row 1 Col 1) after k, got \(ctx.tv.selectedRange().location)"])
+    }
+
+    // Press 'k' to go up to Row 0 ("ColA,0123456789\n")
+    // Col 1 starts at 5. Character 2 is at offset 5 + 2 = 7.
+    sendKey(ctx.tv, char: "k")
+    guard ctx.tv.selectedRange().location == 7 else {
+        throw NSError(domain: "TabularVerticalNav", code: 132, userInfo: [NSLocalizedDescriptionKey: "Expected offset 7 (char 2 of Row 0 Col 1) after second k, got \(ctx.tv.selectedRange().location)"])
+    }
+}
+
 // MARK: - Test Runner Main
 var testsPassed = 0
 var testsFailed = 0
@@ -438,7 +544,10 @@ let allTests: [(String, () throws -> Void)] = [
     ("testQuotedCellsWithEmbeddedCommas", testQuotedCellsWithEmbeddedCommas),
     ("testMultibyteUtf8AndEmojiCells", testMultibyteUtf8AndEmojiCells),
     ("testRaggedRowsWithMismatchedColumnCounts", testRaggedRowsWithMismatchedColumnCounts),
-    ("testPendingCommandNonInterference", testPendingCommandNonInterference)
+    ("testPendingCommandNonInterference", testPendingCommandNonInterference),
+    ("testIntraCellColumnOffsetPreservedOnDownNavigation", testIntraCellColumnOffsetPreservedOnDownNavigation),
+    ("testIntraCellOffsetClampingAtShorterCellAndSubsequentDownNavigation", testIntraCellOffsetClampingAtShorterCellAndSubsequentDownNavigation),
+    ("testIntraCellOffsetPreservedOnUpNavigation", testIntraCellOffsetPreservedOnUpNavigation)
 ]
 
 for (name, test) in allTests {

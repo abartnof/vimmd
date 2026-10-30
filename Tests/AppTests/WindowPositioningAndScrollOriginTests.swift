@@ -485,6 +485,101 @@ func testWindowCascadeResetsWhenReachingScreenBoundaries() throws {
     }
 }
 
+func testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZeroAsync() throws {
+    let doc = VimMDDocument()
+    let wideLine = "# Title " + String(repeating: "ABCDEFGHIJKLMNOPQRSTUVWXYZ ", count: 200) + "\nLine 2"
+    guard let data = wideLine.data(using: .utf8) else {
+        throw NSError(domain: "WindowPositioningTests", code: 1, userInfo: nil)
+    }
+
+    UserDefaults.standard.set(false, forKey: VimMDDocument.wrapLinesPreferenceKey)
+    defer {
+        UserDefaults.standard.removeObject(forKey: VimMDDocument.wrapLinesPreferenceKey)
+    }
+
+    try doc.read(from: data, ofType: "net.daringfireball.markdown")
+    doc.wrapLines = false
+    doc.makeWindowControllers()
+
+    guard let tv = doc.textView, let scrollView = tv.enclosingScrollView else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "doc.textView or scrollView is nil"])
+    }
+
+    // Verify synchronously
+    guard tv.selectedRange().location == 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Sync caret location expected 0, got \(tv.selectedRange().location)"])
+    }
+    guard let session = tv.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Sync session cursor expected (1, 1), got \(String(describing: tv.session?.cursorPosition))"])
+    }
+    let syncOrigin = scrollView.documentVisibleRect.origin
+    guard abs(syncOrigin.x) < 0.001 && abs(syncOrigin.y) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Sync documentVisibleRect expected (0,0), got \(syncOrigin)"])
+    }
+
+    // Pump main run loop to execute scheduled async blocks (DispatchQueue.main.async)
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+
+    // Verify asynchronously
+    guard tv.selectedRange().location == 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Async caret location expected 0, got \(tv.selectedRange().location)"])
+    }
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "WindowPositioningTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Async session cursor expected (1, 1), got \(session.cursorPosition)"])
+    }
+    let asyncOrigin = scrollView.documentVisibleRect.origin
+    guard abs(asyncOrigin.x) < 0.001 && abs(asyncOrigin.y) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Async documentVisibleRect expected (0,0), got \(asyncOrigin)"])
+    }
+
+    doc.close()
+}
+
+func testPinViewportToTopLeftGuaranteesVisibleRectOriginZero() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let tv = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 3000, height: 2000))
+    let session = VimSession(initialText: "First line of document\nSecond line\nThird line")
+    tv.wrapLines = false
+    tv.session = session
+    tv.setFrameSize(NSSize(width: 3000, height: 2000))
+    scrollView.documentView = tv
+
+    // Artificially move caret and scroll away from top-left
+    session.setCursor(line: 2, byteCol: 5)
+    tv.synchronizeCaretWithSession()
+    tv.setFrameOrigin(NSPoint(x: 100, y: 100))
+    scrollView.contentView.scroll(to: NSPoint(x: 550, y: 350))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+
+    guard scrollView.documentVisibleRect.origin.x > 400 && scrollView.documentVisibleRect.origin.y > 200 else {
+        throw NSError(domain: "WindowPositioningTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scroll setup failed: origin is \(scrollView.documentVisibleRect.origin)"])
+    }
+
+    // Call pinViewportToTopLeft()
+    tv.pinViewportToTopLeft()
+
+    guard tv.frame.origin == .zero else {
+        throw NSError(domain: "WindowPositioningTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected tv.frame.origin .zero, got \(tv.frame.origin)"])
+    }
+    guard abs(scrollView.documentVisibleRect.origin.x) < 0.001 && abs(scrollView.documentVisibleRect.origin.y) < 0.001 else {
+        throw NSError(domain: "WindowPositioningTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected visibleRect (0, 0), got \(scrollView.documentVisibleRect.origin)"])
+    }
+    guard tv.selectedRange().location == 0 else {
+        throw NSError(domain: "WindowPositioningTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected caret location 0, got \(tv.selectedRange().location)"])
+    }
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "WindowPositioningTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected session cursor (1, 1), got \(session.cursorPosition)"])
+    }
+
+    // Also test VimMDDocument pinViewportToTopLeft delegation
+    let doc = VimMDDocument()
+    doc.textView = tv
+    doc.pinViewportToTopLeft()
+    guard tv.frame.origin == .zero else {
+        throw NSError(domain: "WindowPositioningTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Doc delegation failed to maintain frame origin zero"])
+    }
+}
+
 print("=== Window Positioning & Viewport Scroll Origin Tests ===")
 var total = 0
 var passed = 0
@@ -501,7 +596,9 @@ let tests: [(String, () throws -> Void)] = [
     ("testEmptyFileOpensAtScrollOriginZero", testEmptyFileOpensAtScrollOriginZero),
     ("testRapidReloadsPreserveScrollOrigin", testRapidReloadsPreserveScrollOrigin),
     ("testLegitimateHorizontalScrollingWhenNavigatingToColumn80", testLegitimateHorizontalScrollingWhenNavigatingToColumn80),
-    ("testWindowCascadeResetsWhenReachingScreenBoundaries", testWindowCascadeResetsWhenReachingScreenBoundaries)
+    ("testWindowCascadeResetsWhenReachingScreenBoundaries", testWindowCascadeResetsWhenReachingScreenBoundaries),
+    ("testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZeroAsync", testWideDocumentLoadedViaVimMDDocumentHasCursorAtTopLeftAndVisibleOriginZeroAsync),
+    ("testPinViewportToTopLeftGuaranteesVisibleRectOriginZero", testPinViewportToTopLeftGuaranteesVisibleRectOriginZero)
 ]
 
 for (name, test) in tests {

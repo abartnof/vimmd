@@ -177,8 +177,30 @@ open class VimMDTextView: NSTextView {
         super.viewDidMoveToWindow()
         if self.window != nil {
             if let session = self.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1 {
-                resetScrollToTopLeft()
+                pinViewportToTopLeft()
+                DispatchQueue.main.async { [weak self] in
+                    if let s = self?.session, s.cursorPosition.line == 1 && s.cursorPosition.byteCol <= 1 {
+                        self?.pinViewportToTopLeft()
+                    }
+                }
             }
+        }
+    }
+
+    public func pinViewportToTopLeft() {
+        if self.frame.origin != .zero {
+            self.setFrameOrigin(.zero)
+        }
+        if let scrollView = self.enclosingScrollView {
+            let clipView = scrollView.contentView
+            clipView.scroll(to: NSPoint.zero)
+            scrollView.reflectScrolledClipView(clipView)
+        }
+        self.setSelectedRange(NSRange(location: 0, length: 0))
+        if let session = self.session {
+            session.setCursor(line: 1, byteCol: 1)
+            synchronizeCaretWithSession()
+            onCursorMoved?()
         }
     }
 
@@ -583,7 +605,7 @@ open class VimMDTextView: NSTextView {
         return nil
     }
 
-    public func positionCaret(atRow r: Int, column c: Int) {
+    public func positionCaret(atRow r: Int, column c: Int, intraCellOffset: Int = 0) {
         guard let storage = self.textStorage else { return }
         let fullString = storage.string as NSString
         guard fullString.length > 0 else {
@@ -624,7 +646,9 @@ open class VimMDTextView: NSTextView {
             targetOffset = contentRange.location
         } else {
             let clampedCol = max(0, min(fields.count - 1, c))
-            targetOffset = fields[clampedCol].range.location
+            let targetField = fields[clampedCol]
+            let clampedIntra = max(0, min(targetField.range.length, intraCellOffset))
+            targetOffset = targetField.range.location + clampedIntra
         }
 
         self.setSelectedRange(NSRange(location: targetOffset, length: 0))
@@ -656,10 +680,10 @@ open class VimMDTextView: NSTextView {
         return count
     }
 
-    public func currentTabularCell() -> (row: Int, column: Int)? {
+    public func currentTabularCellDetails() -> (row: Int, column: Int, intraCellOffset: Int)? {
         guard isTabularDocument, let storage = self.textStorage else { return nil }
         let fullString = storage.string as NSString
-        guard fullString.length > 0 else { return (row: 0, column: 0) }
+        guard fullString.length > 0 else { return (row: 0, column: 0, intraCellOffset: 0) }
 
         var lineRanges: [NSRange] = []
         var idx = 0
@@ -668,7 +692,7 @@ open class VimMDTextView: NSTextView {
             lineRanges.append(lr)
             idx = lr.location + lr.length
         }
-        guard !lineRanges.isEmpty else { return (row: 0, column: 0) }
+        guard !lineRanges.isEmpty else { return (row: 0, column: 0, intraCellOffset: 0) }
 
         let offset = session?.cursorUtf16Offset ?? selectedRange().location
 
@@ -700,7 +724,7 @@ open class VimMDTextView: NSTextView {
         let (fields, _) = tabularResolver.parseLine(in: fullString, range: contentRange, isTSV: isTSV)
 
         guard !fields.isEmpty else {
-            return (row: foundRow, column: 0)
+            return (row: foundRow, column: 0, intraCellOffset: 0)
         }
 
         var foundCol = 0
@@ -718,7 +742,14 @@ open class VimMDTextView: NSTextView {
                 }
             }
         }
-        return (row: foundRow, column: foundCol)
+        let currentField = fields[foundCol]
+        let intraCellOffset = max(0, offset - currentField.range.location)
+        return (row: foundRow, column: foundCol, intraCellOffset: intraCellOffset)
+    }
+
+    public func currentTabularCell() -> (row: Int, column: Int)? {
+        guard let details = currentTabularCellDetails() else { return nil }
+        return (row: details.row, column: details.column)
     }
 
     public func updateStatusDisplay() {
@@ -1279,13 +1310,13 @@ open class VimMDTextView: NSTextView {
                 }
 
                 if isDown || isUp || isDownCount || isUpCount {
-                    if let currentCell = currentTabularCell() {
+                    if let currentCell = currentTabularCellDetails() {
                         let count = parsedCount ?? max(1, session.commandCount)
                         session.clearCommandCount()
                         let direction = (isDown || isDownCount) ? 1 : -1
                         let totalRows = totalTabularRows()
                         let targetRow = max(0, min(totalRows - 1, currentCell.row + direction * count))
-                        positionCaret(atRow: targetRow, column: currentCell.column)
+                        positionCaret(atRow: targetRow, column: currentCell.column, intraCellOffset: currentCell.intraCellOffset)
                         updateStatusDisplay()
                         return
                     }
@@ -1383,11 +1414,11 @@ open class VimMDTextView: NSTextView {
             let isDown = (event.keyCode == 125 || chars == "\u{F701}")
             let isUp = (event.keyCode == 126 || chars == "\u{F700}")
             if isDown || isUp {
-                if let currentCell = currentTabularCell() {
+                if let currentCell = currentTabularCellDetails() {
                     let direction = isDown ? 1 : -1
                     let totalRows = totalTabularRows()
                     let targetRow = max(0, min(totalRows - 1, currentCell.row + direction))
-                    positionCaret(atRow: targetRow, column: currentCell.column)
+                    positionCaret(atRow: targetRow, column: currentCell.column, intraCellOffset: currentCell.intraCellOffset)
                     updateStatusDisplay()
                     return
                 }
