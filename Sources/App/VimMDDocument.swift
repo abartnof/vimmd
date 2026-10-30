@@ -405,6 +405,7 @@ open class VimMDDocument: NSDocument {
             tv.documentSyntaxType = self.documentSyntaxType
             tv.wrapLines = self.wrapLines
             tv.updateFrameHeightToFitText()
+            tv.resetScrollToTopLeft()
             tv.window?.makeFirstResponder(tv)
         }
         self.updateChangeCount(.changeCleared)
@@ -416,6 +417,7 @@ open class VimMDDocument: NSDocument {
         configureWrapLinesPolicy()
         self.textView?.documentSyntaxType = self.documentSyntaxType
         try super.read(from: url, ofType: typeName)
+        self.textView?.resetScrollToTopLeft()
         self.updateChangeCount(.changeCleared)
     }
 
@@ -454,13 +456,50 @@ open class VimMDDocument: NSDocument {
         super.shouldCloseWindowController(windowController, delegate: delegate, shouldClose: shouldCloseSelector, contextInfo: contextInfo)
     }
 
+    public static var lastTopLeftPoint: NSPoint?
+
+    public static func initialWindowTopLeftPoint(for visibleFrame: NSRect) -> NSPoint {
+        return NSPoint(x: visibleFrame.minX + 24, y: visibleFrame.maxY - 24)
+    }
+
+    public static func positionWindowTopLeft(_ window: NSWindow) {
+        let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let initialPoint = initialWindowTopLeftPoint(for: visibleFrame)
+
+        let winHeight = window.frame.height > 0 ? window.frame.height : 600.0
+        let winWidth = window.frame.width > 0 ? window.frame.width : 800.0
+
+        if let lastPoint = lastTopLeftPoint,
+           (lastPoint.x >= visibleFrame.minX && lastPoint.x + winWidth + 24.0 <= visibleFrame.maxX) &&
+           (lastPoint.y <= visibleFrame.maxY && lastPoint.y - winHeight - 24.0 >= visibleFrame.minY) {
+            var cascadedPoint = window.cascadeTopLeft(from: lastPoint)
+            if cascadedPoint == lastPoint {
+                cascadedPoint = NSPoint(x: lastPoint.x + 24.0, y: lastPoint.y - 24.0)
+            }
+            window.setFrameTopLeftPoint(cascadedPoint)
+            lastTopLeftPoint = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        } else {
+            window.setFrameTopLeftPoint(initialPoint)
+            lastTopLeftPoint = NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        }
+    }
+
     override open func makeWindowControllers() {
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let initialTopLeft = VimMDDocument.initialWindowTopLeftPoint(for: visibleFrame)
+        let defaultWidth: CGFloat = 800
+        let defaultHeight: CGFloat = 600
+        let initialOrigin = NSPoint(x: initialTopLeft.x, y: initialTopLeft.y - defaultHeight)
+
         let window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 800, height: 600),
+            contentRect: NSRect(origin: initialOrigin, size: NSSize(width: defaultWidth, height: defaultHeight)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        VimMDDocument.positionWindowTopLeft(window)
         let baseTitle = self.displayName ?? "Untitled"
         window.title = "\(baseTitle) — [NORMAL]"
 
@@ -612,6 +651,7 @@ open class VimMDDocument: NSDocument {
         let windowController = NSWindowController(window: window)
         self.addWindowController(windowController)
 
+        tv.resetScrollToTopLeft()
         updateStatusDisplay()
     }
 

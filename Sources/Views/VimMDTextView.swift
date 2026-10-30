@@ -173,6 +173,25 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    override open func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if self.window != nil {
+            if let session = self.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1 {
+                resetScrollToTopLeft()
+            }
+        }
+    }
+
+    public func resetScrollToTopLeft() {
+        if self.frame.origin != .zero {
+            self.setFrameOrigin(.zero)
+        }
+        guard let scrollView = self.enclosingScrollView else { return }
+        let clipView = scrollView.contentView
+        clipView.scroll(to: NSPoint(x: 0, y: 0))
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
     @objc private func scrollViewDidScroll(_ notification: Notification) {
         if freezeFirstRow || freezeFirstColumn {
             self.needsDisplay = true
@@ -224,6 +243,9 @@ open class VimMDTextView: NSTextView {
             }
             updateFrameForUnwrappedLines()
         }
+        if let session = self.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1 {
+            resetScrollToTopLeft()
+        }
     }
 
     public func updateFrameForUnwrappedLines() {
@@ -241,6 +263,12 @@ open class VimMDTextView: NSTextView {
         let targetWidth = max(viewportWidth, max(tableWidth, usedRect.size.width) + self.textContainerInset.width * 2 + 50.0)
         let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
         self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
+        if self.frame.origin != .zero {
+            self.setFrameOrigin(.zero)
+        }
+        if let session = self.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1 {
+            resetScrollToTopLeft()
+        }
     }
 
     @objc open func toggleWrapLines(_ sender: Any? = nil) {
@@ -275,6 +303,9 @@ open class VimMDTextView: NSTextView {
         let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
         if abs(self.frame.size.height - targetHeight) > 1.0 {
             self.setFrameSize(NSSize(width: self.frame.size.width, height: targetHeight))
+            if self.frame.origin != .zero {
+                self.setFrameOrigin(.zero)
+            }
         }
     }
 
@@ -355,6 +386,7 @@ open class VimMDTextView: NSTextView {
         updateSyntaxStyling(force: true)
         updateFrameHeightToFitText()
         synchronizeCaretWithSession()
+        resetScrollToTopLeft()
     }
 
     public func applyDelta(startLine: Int = 0, deletedCount: Int = -1, targetRange: NSRange, newLines: [String]) {
@@ -420,7 +452,11 @@ open class VimMDTextView: NSTextView {
             let clamped = max(0, min(docLength, offset))
             self.currentSelectedRange = NSRange(location: clamped, length: 0)
             self.setSelectedRange(self.currentSelectedRange)
-            self.scrollRangeToVisible(self.currentSelectedRange)
+            if clamped == 0 || (session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1) {
+                resetScrollToTopLeft()
+            } else {
+                self.scrollRangeToVisible(self.currentSelectedRange)
+            }
         }
         if session.mode == VIM_MODE_INSERT {
             updateSyntaxStyling()
