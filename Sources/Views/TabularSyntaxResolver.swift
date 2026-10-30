@@ -17,8 +17,8 @@ public struct TabularSyntaxResolver {
 
     public init() {}
 
-    public func renderTabularSyntax(in storage: NSTextStorage, isTSV: Bool, wrapTableCells: Bool = false) {
-        renderTabularSyntax(in: storage as NSMutableAttributedString, isTSV: isTSV, wrapTableCells: wrapTableCells)
+    public func renderTabularSyntax(in storage: NSTextStorage, isTSV: Bool, wrapTableCells: Bool = false, customColumnWidths: [Int: CGFloat] = [:]) {
+        renderTabularSyntax(in: storage as NSMutableAttributedString, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
     }
 
     public func calculateColumnWidths(
@@ -27,7 +27,8 @@ public struct TabularSyntaxResolver {
         wrapTableCells: Bool,
         defaultWrapWidth: CGFloat = 240.0,
         minColumnWidth: CGFloat = 60.0,
-        padding: CGFloat = 20.0
+        padding: CGFloat = 20.0,
+        customColumnWidths: [Int: CGFloat] = [:]
     ) -> [CGFloat] {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return [] }
@@ -65,7 +66,14 @@ public struct TabularSyntaxResolver {
         }
 
         if wrapTableCells {
-            return Array(repeating: defaultWrapWidth, count: maxCols)
+            var widths = Array(repeating: defaultWrapWidth, count: maxCols)
+            for (col, w) in customColumnWidths {
+                if col < maxCols {
+                    let clampedW = max(30.0, (w.isFinite && !w.isNaN) ? w : 30.0)
+                    widths[col] = clampedW
+                }
+            }
+            return widths
         }
 
         var colWidths = Array(repeating: minColumnWidth, count: maxCols)
@@ -86,10 +94,17 @@ public struct TabularSyntaxResolver {
             }
         }
 
+        for (col, w) in customColumnWidths {
+            if col < maxCols {
+                let clampedW = max(30.0, (w.isFinite && !w.isNaN) ? w : 30.0)
+                colWidths[col] = clampedW
+            }
+        }
+
         return colWidths
     }
 
-    public func renderTabularSyntax(in storage: NSMutableAttributedString, isTSV: Bool, wrapTableCells: Bool = false) {
+    public func renderTabularSyntax(in storage: NSMutableAttributedString, isTSV: Bool, wrapTableCells: Bool = false, customColumnWidths: [Int: CGFloat] = [:]) {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return }
 
@@ -105,7 +120,7 @@ public struct TabularSyntaxResolver {
         let regularFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let boldFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
 
-        let colWidths = calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells)
+        let colWidths = calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
 
         // Build tabStops for paragraph style
         var tabStops: [NSTextTab] = []
