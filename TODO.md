@@ -170,6 +170,16 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] Ensure wide Markdown files (and wide code/tables) initialize with the scroll view origin at `(0, 0)` (top-left) so the user never lands on the top-right of wide documents.
   - [x] Verified with ultra-wide (50k+ char), multi-monitor, empty file, and rapid-reload test coverage.
 
+- [ ] **Milestone U: Intra-Cell Column Offset Preservation on Vertical Spreadsheet Navigation**
+  - [ ] When navigating vertically (`j`, `k`, Up/Down arrows) across rows in a spreadsheet (`.csv`, `.tsv`), respect Vim's column position rules **within the cell**.
+  - [ ] If the cursor is at character offset $X$ within cell column $C$ on row $i$ (e.g. the 2nd character), moving to row $i \pm 1$ must land at character offset $X$ within cell $C$ of the target row.
+  - [ ] If the target cell is shorter than $X$, clamp cleanly to the end of that cell (e.g. at end of a 4-char cell moving to a 3-char cell lands at end; moving to a 10-char cell preserves offset 4).
+  - [ ] Replaces the previous behavior that always snapped to the 1st position of the cell.
+
+- [ ] **Milestone V: Asynchronous Layout Viewport & Cursor Top-Left Pinning on Wide Documents**
+  - [ ] When opening a wide document (wide Markdown, tables, code), guarantee the cursor is at Line 1, Col 1 (top-left) and the viewport's visible scroll rect is anchored at `(0, 0)` so the top-left area is guaranteed visible.
+  - [ ] Address AppKit asynchronous post-layout runloop passes (`viewDidMoveToWindow`, initial layout pass, `DispatchQueue.main.async`) that previously caused wide unwrapped lines to shift the clip view horizontally to the right.
+
 - [ ] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [ ] **Full Overwrite Replace Mode (`R`)**:
     - Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
