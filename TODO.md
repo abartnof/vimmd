@@ -180,15 +180,16 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] When opening a wide document (wide Markdown, tables, code), guarantee the cursor is at Line 1, Col 1 (top-left) and the viewport's visible scroll rect is anchored at `(0, 0)` so the top-left area is guaranteed visible.
   - [x] Address AppKit asynchronous post-layout runloop passes (`viewDidMoveToWindow`, initial layout pass, `DispatchQueue.main.async`) that previously caused wide unwrapped lines to shift the clip view horizontally to the right.
 
-- [ ] **Milestone W: Ruler-Aware Viewport Alignment & Word End Operators (`de`, `ce`, `ye`)**
-  - [ ] **Ruler-Aware Viewport Alignment**:
-    - Fix `resetScrollToTopLeft()` and `pinViewportToTopLeft()` in `VimMDTextView`: account for `LineNumberRulerView` thickness and use AppKit's native `scrollToBeginningOfDocument(nil)` / `scrollRangeToVisible(NSRange(location: 0, length: 0))` rather than hardcoding `clipView.scroll(to: .zero)`.
-    - Ensure navigating up to row 1 from row 2 never clips or hides the 1st character behind the ruler or viewport edge.
-  - [ ] **Word End Operators (`de`, `ce`, `ye`)**:
-    - In `libvim_bridge.c`, add `*p == 'e'` handling to `op == 'd'` (`de`: delete to end of word inclusive).
-    - Add `*p == 'e'` handling to `op == 'c'` (`ce`: change to end of word inclusive, enter Insert mode).
-    - Add `*p == 'e'` handling to `op == 'y'` (`ye`: yank to end of word inclusive).
-    - Support count multipliers (e.g. `2de`, `3ce`).
+- [x] **Milestone W: Ruler-Aware Viewport Alignment & Word End Operators (`de`, `ce`, `ye`)**
+  - [x] **Ruler-Aware Viewport Alignment**:
+    - [x] Fix `resetScrollToTopLeft()` and `pinViewportToTopLeft()` in `VimMDTextView`: account for `LineNumberRulerView` thickness (`-rulerThickness`) and use AppKit's native `scrollToBeginningOfDocument(nil)` / `scrollRangeToVisible(NSRange(location: 0, length: 0))`.
+    - [x] Ensures navigating up to row 1 from row 2 never clips or hides the 1st character behind the ruler or viewport edge.
+  - [x] **Word End Operators (`de`, `ce`, `ye`)**:
+    - [x] In `libvim_bridge.c`, add `*p == 'e'` handling to `op == 'd'` (`de`: delete to end of word inclusive).
+    - [x] Add `*p == 'e'` handling to `op == 'c'` (`ce`: change to end of word inclusive, enter Insert mode).
+    - [x] Add `*p == 'e'` handling to `op == 'y'` (`ye`: yank to end of word inclusive).
+    - [x] Support count multipliers (e.g. `2de`, `3ce`, `2ye`) and single-step undo recovery.
+    - [x] Memory safety: empty lines are strict no-ops preserving yank buffers and clean states.
 
 - [x] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [x] **Full Overwrite Replace Mode (`R`)**:
@@ -220,7 +221,7 @@ Tracks live verification status of all capabilities across each supported docume
 | **Counted Jumps** | `3w`, `2j`, `5G`, `10l` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Insert Transitions** | `i`, `I`, `a`, `A`, `o`, `O` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Line Deletion & Yank** | `dd`, `yy`, `p`, `P` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
-| **Word & Part Mutations** | `dw`, `cw`, `d$`, `c$`, `d0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
+| **Word & Part Mutations** | `dw`, `de`, `cw`, `ce`, `d$`, `c$`, `d0` | Verified (M-W) | Verified (M-W) | Verified (M-W) |
 | **Char Replacements** | `x`, `s`, `r<ch>`, `R`, `S`, `cc`, `J` | Verified (M-Q) | Verified (M-Q) | Verified (M-Q) |
 | **Text Objects** | `di'`, `ci"`, `yi(`, `di[`, `ci<`, `ci{` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Visual Modes** | `v`, `V`, block selections | Verified (M-P) | Verified (M-P) | Verified (M-P) |
