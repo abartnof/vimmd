@@ -73,6 +73,9 @@ bool vim_context_is_empty_visual_selection(VimContextRef ctx);
 bool vim_context_is_dirty(VimContextRef ctx);
 void vim_context_clear_dirty(VimContextRef ctx);
 bool vim_context_should_quit(VimContextRef ctx);
+int vim_context_get_count_accumulator(VimContextRef ctx);
+void vim_context_clear_count_accumulator(VimContextRef ctx);
+bool vim_context_has_pending_command(VimContextRef ctx);
 
 // Search State
 const char* vim_context_get_last_search(VimContextRef ctx);

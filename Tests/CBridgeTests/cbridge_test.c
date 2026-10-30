@@ -2435,6 +2435,49 @@ static void test_sort_undo_redo(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_count_accumulator(void) {
+    VimContextRef ctx = vim_context_create("line 1\nline 2\nline 3\nline 4\nline 5\n");
+    assert(ctx != NULL);
+
+    assert(vim_context_get_count_accumulator(ctx) == 0);
+    assert(!vim_context_has_pending_command(ctx));
+
+    // Feed '2'
+    vim_context_feed_keys(ctx, "2");
+    assert(vim_context_get_count_accumulator(ctx) == 2);
+
+    // Feed '3' -> accumulator becomes 23
+    vim_context_feed_keys(ctx, "3");
+    assert(vim_context_get_count_accumulator(ctx) == 23);
+
+    // Clear accumulator
+    vim_context_clear_count_accumulator(ctx);
+    assert(vim_context_get_count_accumulator(ctx) == 0);
+
+    // Overflow protection: feeding 9999999999 should not overflow or become negative
+    vim_context_feed_keys(ctx, "9999999999");
+    int acc = vim_context_get_count_accumulator(ctx);
+    assert(acc > 0);
+    assert(acc <= 999999999);
+
+    vim_context_clear_count_accumulator(ctx);
+
+    // Test has_pending_command with 'f'
+    assert(!vim_context_has_pending_command(ctx));
+    vim_context_feed_keys(ctx, "f");
+    assert(vim_context_has_pending_command(ctx));
+    vim_context_feed_keys(ctx, "1"); // complete find
+    assert(!vim_context_has_pending_command(ctx));
+
+    // Test has_pending_command with 'r'
+    vim_context_feed_keys(ctx, "r");
+    assert(vim_context_has_pending_command(ctx));
+    vim_context_feed_keys(ctx, "x"); // complete replace
+    assert(!vim_context_has_pending_command(ctx));
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -2486,6 +2529,7 @@ int main(void) {
     RUN_TEST(test_sort_numeric);
     RUN_TEST(test_sort_range);
     RUN_TEST(test_sort_undo_redo);
+    RUN_TEST(test_count_accumulator);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

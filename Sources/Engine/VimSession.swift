@@ -173,6 +173,21 @@ public final class VimSession {
         return lineIndexTable.documentUtf16Offset(line: pos.line, vimByteCol: pos.byteCol)
     }
 
+    public var commandCount: Int {
+        guard let ctx = context else { return 0 }
+        return Int(vim_context_get_count_accumulator(ctx))
+    }
+
+    public func clearCommandCount() {
+        guard let ctx = context else { return }
+        vim_context_clear_count_accumulator(ctx)
+    }
+
+    public var hasPendingCommand: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_has_pending_command(ctx)
+    }
+
     public var visualAnchor: VimBytePos {
         guard let ctx = context else { return VimBytePos(line: 1, byteCol: 1) }
         return vim_context_get_visual_anchor(ctx)

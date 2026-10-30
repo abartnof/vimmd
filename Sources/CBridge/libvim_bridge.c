@@ -439,6 +439,25 @@ void vim_context_set_visual_anchor(VimContextRef ctx, int32_t line, int32_t byte
     ctx->visual_anchor.byteCol = byteCol;
 }
 
+int vim_context_get_count_accumulator(VimContextRef ctx) {
+    if (!ctx) return 0;
+    return ctx->count_accumulator;
+}
+
+void vim_context_clear_count_accumulator(VimContextRef ctx) {
+    if (!ctx) return;
+    ctx->count_accumulator = 0;
+}
+
+bool vim_context_has_pending_command(VimContextRef ctx) {
+    if (!ctx) return false;
+    return (ctx->pending_leader != 0 ||
+            ctx->pending_operator != 0 ||
+            ctx->pending_find != 0 ||
+            ctx->pending_replace != 0 ||
+            ctx->pending_text_object != 0);
+}
+
 bool vim_context_is_visual_linewise(VimContextRef ctx) {
     if (!ctx) return false;
     return ctx->visual_is_linewise;
@@ -1833,7 +1852,9 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
 
             // 6. Number count accumulator (1-9 or 0 if count > 0)
             if ((*p >= '1' && *p <= '9') || (ctx->count_accumulator > 0 && *p == '0')) {
-                ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                if (ctx->count_accumulator < 100000000) {
+                    ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                }
                 p++;
                 continue;
             }
@@ -2297,7 +2318,9 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->pending_text_object = 'i';
                 p++;
             } else if ((*p >= '1' && *p <= '9') || (ctx->count_accumulator > 0 && *p == '0')) {
-                ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                if (ctx->count_accumulator < 100000000) {
+                    ctx->count_accumulator = ctx->count_accumulator * 10 + (*p - '0');
+                }
                 p++;
                 continue;
             } else if (*p == 'd' || *p == 'c') { // Visual delete or change

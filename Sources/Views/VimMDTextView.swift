@@ -642,6 +642,89 @@ open class VimMDTextView: NSTextView {
         positionCaret(atRow: r, column: c)
     }
 
+    public func totalTabularRows() -> Int {
+        guard let storage = self.textStorage else { return 0 }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return 0 }
+        var count = 0
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            count += 1
+            idx = lr.location + lr.length
+        }
+        return count
+    }
+
+    public func currentTabularCell() -> (row: Int, column: Int)? {
+        guard isTabularDocument, let storage = self.textStorage else { return nil }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return (row: 0, column: 0) }
+
+        var lineRanges: [NSRange] = []
+        var idx = 0
+        while idx < fullString.length {
+            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+            lineRanges.append(lr)
+            idx = lr.location + lr.length
+        }
+        guard !lineRanges.isEmpty else { return (row: 0, column: 0) }
+
+        let offset = session?.cursorUtf16Offset ?? selectedRange().location
+
+        var foundRow = 0
+        for (r, lr) in lineRanges.enumerated() {
+            if offset >= lr.location && offset < (lr.location + lr.length) {
+                foundRow = r
+                break
+            } else if offset == (lr.location + lr.length) && r == lineRanges.count - 1 {
+                foundRow = r
+                break
+            }
+        }
+        if offset >= fullString.length {
+            foundRow = lineRanges.count - 1
+        }
+
+        let lr = lineRanges[foundRow]
+        var contentLength = lr.length
+        while contentLength > 0 {
+            let char = fullString.character(at: lr.location + contentLength - 1)
+            if char == 10 || char == 13 {
+                contentLength -= 1
+            } else {
+                break
+            }
+        }
+        let contentRange = NSRange(location: lr.location, length: contentLength)
+        let (fields, _) = tabularResolver.parseLine(in: fullString, range: contentRange, isTSV: isTSV)
+
+        guard !fields.isEmpty else {
+            return (row: foundRow, column: 0)
+        }
+
+        var foundCol = 0
+        for i in 0..<fields.count {
+            if i < fields.count - 1 {
+                let nextFieldStart = fields[i + 1].range.location
+                if offset >= fields[i].range.location && offset < nextFieldStart {
+                    foundCol = i
+                    break
+                }
+            } else {
+                if offset >= fields[i].range.location {
+                    foundCol = i
+                    break
+                }
+            }
+        }
+        return (row: foundRow, column: foundCol)
+    }
+
+    public func updateStatusDisplay() {
+        onStatusChanged?()
+    }
+
     // MARK: - Spreadsheet Cursors & Hover Gestures
 
     public static func makeDownwardArrowCursor() -> NSCursor {
@@ -1174,6 +1257,41 @@ open class VimMDTextView: NSTextView {
         if session.mode == VIM_MODE_NORMAL || session.mode == VIM_MODE_VISUAL || session.mode == VIM_MODE_COMMAND {
             let wasCommand = (session.mode == VIM_MODE_COMMAND)
             let isNormal = (session.mode == VIM_MODE_NORMAL)
+
+            // Cell-relative vertical navigation in spreadsheets for Normal mode
+            if isNormal && isTabularDocument && !session.hasPendingCommand {
+                let chars = event.characters ?? ""
+                let isDown = (chars == "j" || event.keyCode == 125 || chars == "\u{F701}")
+                let isUp = (chars == "k" || event.keyCode == 126 || chars == "\u{F700}")
+
+                var parsedCount: Int? = nil
+                var isDownCount = false
+                var isUpCount = false
+                if !isDown && !isUp && chars.count > 1 {
+                    if let lastChar = chars.last, (lastChar == "j" || lastChar == "k") {
+                        let prefix = chars.dropLast()
+                        if let c = Int(prefix), c > 0 {
+                            parsedCount = c
+                            if lastChar == "j" { isDownCount = true }
+                            if lastChar == "k" { isUpCount = true }
+                        }
+                    }
+                }
+
+                if isDown || isUp || isDownCount || isUpCount {
+                    if let currentCell = currentTabularCell() {
+                        let count = parsedCount ?? max(1, session.commandCount)
+                        session.clearCommandCount()
+                        let direction = (isDown || isDownCount) ? 1 : -1
+                        let totalRows = totalTabularRows()
+                        let targetRow = max(0, min(totalRows - 1, currentCell.row + direction * count))
+                        positionCaret(atRow: targetRow, column: currentCell.column)
+                        updateStatusDisplay()
+                        return
+                    }
+                }
+            }
+
             if let chars = event.characters, !chars.isEmpty {
                 let isSearchNav = isNormal && (chars == "n" || chars == "N" || chars == "p")
                 let isSearchCR = wasCommand && (chars == "\r" || chars == "\n")
@@ -1256,6 +1374,23 @@ open class VimMDTextView: NSTextView {
             synchronizeCaretWithSession()
             onCursorMoved?()
             return
+        }
+
+        // 1b. Spreadsheet cell-relative arrow keys
+        if isTabularDocument {
+            let chars = event.characters ?? ""
+            let isDown = (event.keyCode == 125 || chars == "\u{F701}")
+            let isUp = (event.keyCode == 126 || chars == "\u{F700}")
+            if isDown || isUp {
+                if let currentCell = currentTabularCell() {
+                    let direction = isDown ? 1 : -1
+                    let totalRows = totalTabularRows()
+                    let targetRow = max(0, min(totalRows - 1, currentCell.row + direction))
+                    positionCaret(atRow: targetRow, column: currentCell.column)
+                    updateStatusDisplay()
+                    return
+                }
+            }
         }
 
         // 2. Active IME composition

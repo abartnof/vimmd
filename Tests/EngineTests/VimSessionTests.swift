@@ -995,6 +995,28 @@ func testVimSessionMultiStepUndoRedoWithCoordinateResolver() throws {
     }
 }
 
+func testVimSessionCommandCount() throws {
+    let session = VimSession(initialText: "line 1\nline 2\nline 3\nline 4\nline 5\n")
+    guard session.commandCount == 0 else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Initial commandCount must be 0"])
+    }
+
+    session.feedKeys("3")
+    guard session.commandCount == 3 else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected commandCount 3 after '3', got \(session.commandCount)"])
+    }
+
+    session.feedKeys("5")
+    guard session.commandCount == 35 else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected commandCount 35 after '5', got \(session.commandCount)"])
+    }
+
+    session.clearCommandCount()
+    guard session.commandCount == 0 else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected commandCount 0 after clear, got \(session.commandCount)"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -1028,7 +1050,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionUndoRedoBasic", testVimSessionUndoRedoBasic),
     ("testVimSessionUndoInsertSession", testVimSessionUndoInsertSession),
     ("testVimSessionExUndoRedo", testVimSessionExUndoRedo),
-    ("testVimSessionMultiStepUndoRedoWithCoordinateResolver", testVimSessionMultiStepUndoRedoWithCoordinateResolver)
+    ("testVimSessionMultiStepUndoRedoWithCoordinateResolver", testVimSessionMultiStepUndoRedoWithCoordinateResolver),
+    ("testVimSessionCommandCount", testVimSessionCommandCount)
 ]
 
 for (name, test) in tests {
