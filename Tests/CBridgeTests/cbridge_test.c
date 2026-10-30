@@ -2478,6 +2478,312 @@ static void test_count_accumulator(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_replace_mode_overwrite_and_backspace_restore(void) {
+    const char *text = "hello world\nsecond line";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Enter replace mode with 'R'
+    vim_context_feed_keys(ctx, "R");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_REPLACE);
+
+    // Overwrite with 'X', 'Y', 'Z'
+    vim_context_feed_keys(ctx, "XYZ");
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "XYZlo world\nsecond line") == 0);
+    free(ser);
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 4);
+
+    // Backspace twice: restore 'e' and 'l'
+    vim_context_feed_keys(ctx, "\x7f\x7f");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Xello world\nsecond line") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 2);
+
+    // Backspace once more: restore 'h'
+    vim_context_feed_keys(ctx, "\x7f");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "hello world\nsecond line") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // Backspacing at column 1 stays at column 1 and does not crash or underflow
+    vim_context_feed_keys(ctx, "\x7f");
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // 4-byte UTF-8 emoji replacement (😀: \xF0\x9F\x98\x80) and Backspace restoration in Replace mode
+    vim_context_feed_keys(ctx, "\xf0\x9f\x98\x80");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strncmp(ser, "\xf0\x9f\x98\x80", 4) == 0);
+    free(ser);
+    // Backspace restores original 1-byte char 'h'
+    vim_context_feed_keys(ctx, "\x7f");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strncmp(ser, "hello", 5) == 0);
+    free(ser);
+
+    // Exit Replace mode with Esc
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_replace_mode_extend_line_and_esc_undo(void) {
+    const char *text = "abc";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Move to col 2 ('b')
+    vim_context_feed_keys(ctx, "l");
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.byteCol == 2);
+
+    // Enter Replace mode and type '1', '2', '3', '4', '5'
+    // '1' overwrites 'b', '2' overwrites 'c', '3','4','5' extend the line
+    vim_context_feed_keys(ctx, "R12345");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_REPLACE);
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "a12345") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.byteCol == 7);
+
+    // Backspace once restores/truncates '5'
+    vim_context_feed_keys(ctx, "\x7f");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "a1234") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.byteCol == 6);
+
+    // Esc returns to Normal mode, clamps cursor to col 5 (on '4')
+    vim_context_feed_keys(ctx, "\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.byteCol == 5);
+
+    // Single cohesive undo restores the original buffer "abc"
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "abc") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_single_char_replace_multibyte(void) {
+    const char *text = "hello world";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Single ASCII replace
+    vim_context_feed_keys(ctx, "rX");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Xello world") == 0);
+    free(ser);
+
+    // Move to col 2 ('e') and replace with 2-byte UTF-8 'é' (\xC3\xA9)
+    vim_context_feed_keys(ctx, "l");
+    vim_context_feed_keys(ctx, "r\xc3\xa9");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "X\xc3\xa9llo world") == 0);
+    free(ser);
+
+    // Replace the 2-byte 'é' with a 3-byte UTF-8 '世' (\xE4\xB8\x96)
+    vim_context_feed_keys(ctx, "r\xe4\xb8\x96");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "X\xe4\xb8\x96llo world") == 0);
+    free(ser);
+
+    // Undo should restore 'é'
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "X\xc3\xa9llo world") == 0);
+    free(ser);
+
+    // Undo again restores 'e'
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Xello world") == 0);
+    free(ser);
+
+    // r<Esc> cancellation leaves buffer unchanged
+    vim_context_feed_keys(ctx, "r\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Xello world") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_visual_selection_replace(void) {
+    const char *text = "abcdef\n123456";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Characterwise visual selection: select "abc" and replace with '*'
+    // 'v' starts visual at col 1, 'l' to col 2, 'l' to col 3
+    vim_context_feed_keys(ctx, "vllr*");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "***def\n123456") == 0);
+    free(ser);
+    VimBytePos pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 1);
+
+    // Single undo restores "abcdef\n123456"
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "abcdef\n123456") == 0);
+    free(ser);
+
+    // Linewise visual selection: select both lines and replace with 'X'
+    vim_context_feed_keys(ctx, "VjrX");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "XXXXXX\nXXXXXX") == 0);
+    free(ser);
+
+    // Single undo restores original
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "abcdef\n123456") == 0);
+    free(ser);
+
+    // Multiline characterwise visual replace (v...j...r*)
+    // Start at line 1 col 3 ('c'), select down to line 2 col 4 ('4')
+    vim_context_feed_keys(ctx, "ggllvjl");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_VISUAL);
+    vim_context_feed_keys(ctx, "r*");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "ab****\n****56") == 0);
+    free(ser);
+    pos = vim_context_get_cursor(ctx);
+    assert(pos.line == 1 && pos.byteCol == 3);
+
+    // Single undo restores original
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "abcdef\n123456") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_substitute_line_S(void) {
+    const char *text = "first line\nsecond line";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 'S' clears current line and enters insert mode
+    vim_context_feed_keys(ctx, "SReplacement\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "Replacement\nsecond line") == 0);
+    free(ser);
+
+    // Single undo restores "first line\nsecond line"
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "first line\nsecond line") == 0);
+    free(ser);
+
+    // Also verify 's' (single char substitute) with undo
+    vim_context_feed_keys(ctx, "sF\x1b");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "First line\nsecond line") == 0);
+    free(ser);
+
+    vim_context_feed_keys(ctx, "u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "first line\nsecond line") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
+static void test_ex_substitute_case_insensitive_and_ranges(void) {
+    const char *text = "Foo foo FOO\nBar bar BAR\nBaz baz BAZ\nQux qux QUX";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. Case-insensitive substitution with 'i' flag
+    vim_context_execute_ex(ctx, ":%s/foo/REP/gi");
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strncmp(ser, "REP REP REP\n", 12) == 0);
+    free(ser);
+
+    // 2. Case-sensitive substitution with 'I' flag
+    vim_context_execute_ex(ctx, ":%s/BAR/DONE/gI");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "Bar bar DONE") != NULL);
+    free(ser);
+
+    // 3. Explicit line range :3,4s/.../g
+    vim_context_execute_ex(ctx, ":3,4s/a/X/g");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    // Line 2 (Bar bar DONE) should still have 'a'
+    assert(strstr(ser, "Bar bar DONE") != NULL);
+    // Line 3 (Baz baz BAZ) should have lowercase 'a' replaced with 'X'
+    assert(strstr(ser, "BXz bXz BAZ") != NULL);
+    free(ser);
+
+    // 4. Visual selection range :'<,'>s/.../g
+    vim_context_set_cursor(ctx, 4, 1);
+    vim_context_set_visual_anchor(ctx, 4, 1);
+    vim_context_execute_ex(ctx, ":'<,'>s/qux/FOUND/g");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "Qux FOUND QUX") != NULL);
+    free(ser);
+
+    // 5. Current line substitution :s/find/rep/ (without % or ranges)
+    vim_context_set_cursor(ctx, 3, 1);
+    vim_context_execute_ex(ctx, ":s/BAZ/UPDATED/");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "BXz bXz UPDATED") != NULL);
+    // Line 4 should NOT be affected
+    assert(strstr(ser, "Qux FOUND QUX") != NULL);
+    free(ser);
+
+    // 6. Explicit range substitution :1,2s/find/rep/g
+    vim_context_execute_ex(ctx, ":1,2s/REP/FINAL/g");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "FINAL FINAL FINAL") != NULL);
+    free(ser);
+
+    // Undo step 6 reverts "FINAL" back to "REP"
+    vim_context_execute_ex(ctx, ":u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "REP REP REP") != NULL);
+    free(ser);
+
+    // Undo step 5 reverts ":s/BAZ/UPDATED/"
+    vim_context_execute_ex(ctx, ":u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "BXz bXz BAZ") != NULL);
+    free(ser);
+
+    // Undo step 4 reverts visual range substitution on line 4
+    vim_context_execute_ex(ctx, ":u");
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strstr(ser, "Qux qux QUX") != NULL);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -2530,6 +2836,12 @@ int main(void) {
     RUN_TEST(test_sort_range);
     RUN_TEST(test_sort_undo_redo);
     RUN_TEST(test_count_accumulator);
+    RUN_TEST(test_replace_mode_overwrite_and_backspace_restore);
+    RUN_TEST(test_replace_mode_extend_line_and_esc_undo);
+    RUN_TEST(test_single_char_replace_multibyte);
+    RUN_TEST(test_visual_selection_replace);
+    RUN_TEST(test_substitute_line_S);
+    RUN_TEST(test_ex_substitute_case_insensitive_and_ranges);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

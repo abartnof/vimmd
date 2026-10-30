@@ -1017,6 +1017,85 @@ func testVimSessionCommandCount() throws {
     }
 }
 
+func testVimSessionReplaceModeAndSubstitutions() throws {
+    // 1. Verify VimMode mapping
+    guard VimMode(engineMode: VIM_MODE_REPLACE) == .replace else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected VimMode.replace mapping"])
+    }
+    guard VimMode.replace.engineMode == VIM_MODE_REPLACE else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_MODE_REPLACE engineMode"])
+    }
+
+    // 2. Full Overwrite Replace Mode ('R')
+    let session = VimSession(initialText: "Hello Replace World")
+    session.feedKeys("R")
+    guard session.mode == VIM_MODE_REPLACE else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected session.mode to be VIM_MODE_REPLACE"])
+    }
+    guard session.vimMode == .replace else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected session.vimMode to be .replace"])
+    }
+    guard session.modeString == "REPLACE" else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected modeString to be 'REPLACE'"])
+    }
+
+    // Overwrite with "ABC"
+    session.feedKeys("ABC")
+    guard session.serializeBuffer() == "ABClo Replace World" else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected 'ABClo Replace World', got '\(session.serializeBuffer())'"])
+    }
+
+    // Backspace twice: restore 'e' and 'l'
+    session.feedKeys("\u{7f}\u{7f}")
+    guard session.serializeBuffer() == "Aello Replace World" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected 'Aello Replace World', got '\(session.serializeBuffer())'"])
+    }
+
+    // Escape exits to Normal mode
+    session.feedKeys("\u{1b}")
+    guard session.mode == VIM_MODE_NORMAL && session.vimMode == .normal else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected Normal mode after Esc"])
+    }
+
+    // Single cohesive undo restores original buffer
+    session.feedKeys("u")
+    guard session.serializeBuffer() == "Hello Replace World" else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Undo failed to restore original text"])
+    }
+
+    // 3. Single character replace multibyte
+    session.feedKeys("ré")
+    guard session.serializeBuffer().hasPrefix("éello") else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Multibyte replace failed, got '\(session.serializeBuffer())'"])
+    }
+    session.feedKeys("u")
+    guard session.serializeBuffer().hasPrefix("Hello") else {
+        throw NSError(domain: "EngineTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Undo after multibyte replace failed"])
+    }
+
+    // 4. Line substitute 'S'
+    session.feedKeys("SSubstituted\u{1b}")
+    guard session.serializeBuffer() == "Substituted" else {
+        throw NSError(domain: "EngineTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Line substitute failed, got '\(session.serializeBuffer())'"])
+    }
+    session.feedKeys("u")
+    guard session.serializeBuffer() == "Hello Replace World" else {
+        throw NSError(domain: "EngineTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Undo after 'S' failed"])
+    }
+
+    // 5. Ex case-insensitive and ranges
+    let exSession = VimSession(initialText: "apple APPLE apple\nbanana BANANA\ncherry CHERRY")
+    exSession.executeEx(":%s/apple/PEAR/gi")
+    guard exSession.serializeBuffer().hasPrefix("PEAR PEAR PEAR") else {
+        throw NSError(domain: "EngineTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Ex case-insensitive failed: \(exSession.serializeBuffer())"])
+    }
+
+    exSession.executeEx(":2,3s/banana/ORANGE/gI")
+    guard exSession.serializeBuffer().contains("ORANGE BANANA") else {
+        throw NSError(domain: "EngineTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "Ex range / case-sensitive failed: \(exSession.serializeBuffer())"])
+    }
+}
+
 print("=== Engine Unit Tests ===")
 var total = 0
 var passed = 0
@@ -1051,7 +1130,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionUndoInsertSession", testVimSessionUndoInsertSession),
     ("testVimSessionExUndoRedo", testVimSessionExUndoRedo),
     ("testVimSessionMultiStepUndoRedoWithCoordinateResolver", testVimSessionMultiStepUndoRedoWithCoordinateResolver),
-    ("testVimSessionCommandCount", testVimSessionCommandCount)
+    ("testVimSessionCommandCount", testVimSessionCommandCount),
+    ("testVimSessionReplaceModeAndSubstitutions", testVimSessionReplaceModeAndSubstitutions)
 ]
 
 for (name, test) in tests {

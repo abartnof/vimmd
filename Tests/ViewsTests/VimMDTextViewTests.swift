@@ -1104,6 +1104,117 @@ func testTextViewTabularCaretAlignmentMatchesRawOffsets() throws {
     }
 }
 
+func testTextViewReplaceModeKeyHandlingAndLabel() throws {
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+    let session = VimSession(initialText: "Hello World")
+    textView.session = session
+
+    guard textView.modeLabelText == "-- NORMAL --" else {
+        throw NSError(domain: "ViewsTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected initial mode label '-- NORMAL --', got '\(textView.modeLabelText)'"])
+    }
+
+    // 1. Enter replace mode with 'R'
+    let eventR = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "R",
+        charactersIgnoringModifiers: "R",
+        isARepeat: false,
+        keyCode: 15 // 'r'
+    )!
+    textView.keyDown(with: eventR)
+
+    guard session.mode == VIM_MODE_REPLACE else {
+        throw NSError(domain: "ViewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected VIM_MODE_REPLACE, got \(session.mode)"])
+    }
+    guard textView.modeLabelText == "-- REPLACE --" else {
+        throw NSError(domain: "ViewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected '-- REPLACE --', got '\(textView.modeLabelText)'"])
+    }
+
+    // 2. Type '1', '2' in Replace mode
+    let event1 = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "1",
+        charactersIgnoringModifiers: "1",
+        isARepeat: false,
+        keyCode: 18
+    )!
+    let event2 = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "2",
+        charactersIgnoringModifiers: "2",
+        isARepeat: false,
+        keyCode: 19
+    )!
+    textView.keyDown(with: event1)
+    textView.keyDown(with: event2)
+
+    guard textView.string == "12llo World" else {
+        throw NSError(domain: "ViewsTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected '12llo World', got '\(textView.string)'"])
+    }
+
+    // 3. Backspace in Replace mode
+    var statusChangedCalled = false
+    textView.onStatusChanged = {
+        statusChangedCalled = true
+    }
+    let eventBack = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "\u{7f}",
+        charactersIgnoringModifiers: "\u{7f}",
+        isARepeat: false,
+        keyCode: 51
+    )!
+    textView.keyDown(with: eventBack)
+    guard textView.string == "1ello World" else {
+        throw NSError(domain: "ViewsTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected '1ello World' after backspace, got '\(textView.string)'"])
+    }
+
+    // 4. Escape in Replace mode
+    let eventEsc = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        characters: "\u{1b}",
+        charactersIgnoringModifiers: "\u{1b}",
+        isARepeat: false,
+        keyCode: 53
+    )!
+    textView.keyDown(with: eventEsc)
+
+    guard session.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "ViewsTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected Normal mode after Esc, got \(session.mode)"])
+    }
+    guard textView.modeLabelText == "-- NORMAL --" else {
+        throw NSError(domain: "ViewsTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Expected '-- NORMAL --' after Esc, got '\(textView.modeLabelText)'"])
+    }
+    guard statusChangedCalled else {
+        throw NSError(domain: "ViewsTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected onStatusChanged called on Esc"])
+    }
+}
+
 print("=== VimMDTextView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -1139,7 +1250,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testTextViewWrapLinesPropertyAndConfiguration", testTextViewWrapLinesPropertyAndConfiguration),
     ("testTextViewTabularLiveTypingInInsertMode", testTextViewTabularLiveTypingInInsertMode),
     ("testTextViewTSVLiveEditingAndStyling", testTextViewTSVLiveEditingAndStyling),
-    ("testTextViewTabularCaretAlignmentMatchesRawOffsets", testTextViewTabularCaretAlignmentMatchesRawOffsets)
+    ("testTextViewTabularCaretAlignmentMatchesRawOffsets", testTextViewTabularCaretAlignmentMatchesRawOffsets),
+    ("testTextViewReplaceModeKeyHandlingAndLabel", testTextViewReplaceModeKeyHandlingAndLabel)
 ]
 
 for (name, test) in tests {

@@ -36,6 +36,35 @@ private func vimYankTrampoline(
     session.handleYank(text: text, linewise: linewise)
 }
 
+public enum VimMode: Equatable {
+    case normal
+    case insert
+    case visual
+    case command
+    case replace
+
+    public init(engineMode: VimEngineMode) {
+        switch engineMode {
+        case VIM_MODE_NORMAL: self = .normal
+        case VIM_MODE_INSERT: self = .insert
+        case VIM_MODE_VISUAL: self = .visual
+        case VIM_MODE_COMMAND: self = .command
+        case VIM_MODE_REPLACE: self = .replace
+        default: self = .normal
+        }
+    }
+
+    public var engineMode: VimEngineMode {
+        switch self {
+        case .normal: return VIM_MODE_NORMAL
+        case .insert: return VIM_MODE_INSERT
+        case .visual: return VIM_MODE_VISUAL
+        case .command: return VIM_MODE_COMMAND
+        case .replace: return VIM_MODE_REPLACE
+        }
+    }
+}
+
 public final class VimSession {
     private var context: VimContextRef?
 
@@ -135,12 +164,17 @@ public final class VimSession {
         return vim_context_get_mode(ctx)
     }
 
+    public var vimMode: VimMode {
+        return VimMode(engineMode: mode)
+    }
+
     public var modeString: String {
         switch mode {
         case VIM_MODE_NORMAL: return "NORMAL"
         case VIM_MODE_INSERT: return "INSERT"
         case VIM_MODE_VISUAL: return "VISUAL"
         case VIM_MODE_COMMAND: return "COMMAND"
+        case VIM_MODE_REPLACE: return "REPLACE"
         default: return "NORMAL"
         }
     }

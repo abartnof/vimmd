@@ -344,7 +344,7 @@ open class VimMDTextView: NSTextView {
             }
         case .markdown:
             let currentMode = session?.mode ?? VIM_MODE_NORMAL
-            let isInsert = (currentMode == VIM_MODE_INSERT)
+            let isInsert = (currentMode == VIM_MODE_INSERT || currentMode == VIM_MODE_REPLACE)
             let activeLine = session?.cursorPosition.line
 
             syntaxResolver.renderSyntax(
@@ -458,7 +458,7 @@ open class VimMDTextView: NSTextView {
                 self.scrollRangeToVisible(self.currentSelectedRange)
             }
         }
-        if session.mode == VIM_MODE_INSERT {
+        if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {
             updateSyntaxStyling()
         }
         self.enclosingScrollView?.verticalRulerView?.needsDisplay = true
@@ -1373,6 +1373,7 @@ open class VimMDTextView: NSTextView {
             unmarkText()
             synchronizeCaretWithSession()
             onCursorMoved?()
+            onStatusChanged?()
             return
         }
 
@@ -1447,7 +1448,7 @@ open class VimMDTextView: NSTextView {
     }
 
     override open func deleteBackward(_ sender: Any?) {
-        guard let session = session, session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_COMMAND else { return }
+        guard let session = session, session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_COMMAND || session.mode == VIM_MODE_REPLACE else { return }
         session.feedKeys("\u{7f}")
         synchronizeCaretWithSession()
         onCursorMoved?()
@@ -1590,7 +1591,7 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        if session.mode == VIM_MODE_INSERT {
+        if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {
             session.feedKeys(text)
             synchronizeCaretWithSession()
             onCursorMoved?()
@@ -1617,9 +1618,21 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        if session?.mode == VIM_MODE_INSERT {
+        if session?.mode == VIM_MODE_INSERT || session?.mode == VIM_MODE_REPLACE {
             session?.feedKeys(text)
             synchronizeCaretWithSession()
+        }
+    }
+
+    public var modeLabelText: String {
+        guard let session = session else { return "" }
+        switch session.mode {
+        case VIM_MODE_NORMAL: return "-- NORMAL --"
+        case VIM_MODE_INSERT: return "-- INSERT --"
+        case VIM_MODE_VISUAL: return "-- VISUAL --"
+        case VIM_MODE_REPLACE: return "-- REPLACE --"
+        case VIM_MODE_COMMAND: return ""
+        default: return "-- \(session.modeString) --"
         }
     }
 

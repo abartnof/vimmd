@@ -15,7 +15,8 @@ typedef enum {
     VIM_MODE_NORMAL = 0,
     VIM_MODE_INSERT,
     VIM_MODE_VISUAL,
-    VIM_MODE_COMMAND
+    VIM_MODE_COMMAND,
+    VIM_MODE_REPLACE = 4
 } VimEngineMode;
 
 typedef enum {
