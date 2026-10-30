@@ -133,6 +133,54 @@ echo "[TEST] Executing SyntheticCUJSuite..."
 echo "[TEST] SyntheticCUJSuite passed."
 echo ""
 
+# 8. Spreadsheet AppKit GUI UX Research Trial
+echo "[TEST] Building & running Spreadsheet AppKit GUI UX Research Trial..."
+echo "[TEST] Compiling spreadsheet_ux_trial..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/scripts/spreadsheet_ux_trial.swift" \
+    -o "${BUILD_DIR}/spreadsheet_ux_trial"
+
+echo "[TEST] Executing spreadsheet_ux_trial..."
+"${BUILD_DIR}/spreadsheet_ux_trial"
+echo "[TEST] spreadsheet_ux_trial passed."
+echo ""
+
+# 9. Plain Text & Code AppKit GUI UX Research Trial
+echo "[TEST] Building & running Plain Text & Code AppKit GUI UX Research Trial..."
+echo "[TEST] Compiling plaintext_code_ux_trial..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/scripts/plaintext_code_ux_trial.swift" \
+    -o "${BUILD_DIR}/plaintext_code_ux_trial"
+
+echo "[TEST] Executing plaintext_code_ux_trial..."
+"${BUILD_DIR}/plaintext_code_ux_trial"
+echo "[TEST] plaintext_code_ux_trial passed."
+echo ""
+
+# 10. Markdown AppKit GUI UX Research Trial
+echo "[TEST] Building & running Markdown AppKit GUI UX Research Trial..."
+echo "[TEST] Compiling markdown_ux_research..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/scripts/markdown_ux_research.swift" \
+    -o "${BUILD_DIR}/markdown_ux_research"
+
+echo "[TEST] Executing markdown_ux_research..."
+"${BUILD_DIR}/markdown_ux_research"
+echo "[TEST] markdown_ux_research passed."
+echo ""
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="

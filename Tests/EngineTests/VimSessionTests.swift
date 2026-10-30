@@ -487,6 +487,90 @@ func testVimSessionVisualTextObjects() throws {
     }
 }
 
+func testVimSessionBackwardVisualSelectionAndEmptyObjects() throws {
+    // 1. Backward visual motions: vb, vh, v0
+    let session = VimSession(initialText: "quick brown fox jumps")
+    session.setCursor(line: 1, byteCol: 13) // on 'f' in 'fox'
+    session.feedKeys("v")
+    session.feedKeys("b") // backward word to 'b' in 'brown' (byteCol 7)
+    guard session.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "EngineTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected VISUAL mode"])
+    }
+    guard let rB = session.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil visualSelectionRange for vb"])
+    }
+    let subB = (session.serializeBuffer() as NSString).substring(with: rB)
+    guard subB == "brown f" else {
+        throw NSError(domain: "EngineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "vb expected 'brown f', got '\(subB)'"])
+    }
+
+    // 2. vh: single character backward step (anchor.byteCol == cursor.byteCol + 1)
+    session.feedKeys("\u{1b}")
+    session.setCursor(line: 1, byteCol: 3) // on 'i' in 'quick'
+    session.feedKeys("v")
+    session.feedKeys("h") // to 'u' (byteCol 2)
+    guard let rH = session.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil range for vh"])
+    }
+    let subH = (session.serializeBuffer() as NSString).substring(with: rH)
+    guard subH == "ui" else {
+        throw NSError(domain: "EngineTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "vh expected 'ui', got '\(subH)'"])
+    }
+
+    // 3. v0: line start
+    session.feedKeys("\u{1b}")
+    session.setCursor(line: 1, byteCol: 10) // on 'r' in 'brown'
+    session.feedKeys("v")
+    session.feedKeys("0")
+    guard let r0 = session.visualSelectionRange else {
+        throw NSError(domain: "EngineTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected non-nil range for v0"])
+    }
+    let sub0 = (session.serializeBuffer() as NSString).substring(with: r0)
+    guard sub0 == "quick brow" else {
+        throw NSError(domain: "EngineTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "v0 expected 'quick brow', got '\(sub0)'"])
+    }
+
+    // 4. Empty inner text objects: vi", vi', vi[
+    let emptySession = VimSession(initialText: "let s = \"\"; let c = ''; let a = [];")
+    emptySession.setCursor(line: 1, byteCol: 9) // on opening '"'
+    emptySession.feedKeys("v")
+    emptySession.feedKeys("i")
+    emptySession.feedKeys("\"")
+    guard emptySession.mode == VIM_MODE_VISUAL else {
+        throw NSError(domain: "EngineTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected VISUAL mode after vi\" on empty string"])
+    }
+    guard emptySession.isEmptyVisualSelection else {
+        throw NSError(domain: "EngineTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected isEmptyVisualSelection == true"])
+    }
+    guard let rEmpty = emptySession.visualSelectionRange, rEmpty.length == 0 else {
+        throw NSError(domain: "EngineTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected 0-length visual selection for vi\" on empty quotes"])
+    }
+    // Delete on empty inner quotes does not delete delimiters
+    emptySession.feedKeys("d")
+    guard emptySession.mode == VIM_MODE_NORMAL else {
+        throw NSError(domain: "EngineTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected NORMAL mode after delete"])
+    }
+    guard emptySession.serializeBuffer() == "let s = \"\"; let c = ''; let a = [];" else {
+        throw NSError(domain: "EngineTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Empty quote delete modified text: '\(emptySession.serializeBuffer())'"])
+    }
+
+    // vi' on empty single quotes
+    emptySession.setCursor(line: 1, byteCol: 21) // on opening '\''
+    emptySession.feedKeys("vi'")
+    guard emptySession.isEmptyVisualSelection && emptySession.visualSelectionRange?.length == 0 else {
+        throw NSError(domain: "EngineTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected 0-length selection for vi' on empty single quotes"])
+    }
+    emptySession.feedKeys("\u{1b}")
+
+    // vi[ on empty brackets
+    emptySession.setCursor(line: 1, byteCol: 34) // on opening '['
+    emptySession.feedKeys("vi[")
+    guard emptySession.isEmptyVisualSelection && emptySession.visualSelectionRange?.length == 0 else {
+        throw NSError(domain: "EngineTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected 0-length selection for vi[ on empty brackets"])
+    }
+    emptySession.feedKeys("\u{1b}")
+}
+
 func testVimSessionSearchAndNavigation() throws {
     let session = VimSession(initialText: "target one\nsecond target\ntarget three")
 
@@ -934,6 +1018,7 @@ let tests: [(String, () throws -> Void)] = [
     ("testVimSessionSetCursorAndModeNotifications", testVimSessionSetCursorAndModeNotifications),
     ("testVimSessionStreamingGGAndG", testVimSessionStreamingGGAndG),
     ("testVimSessionVisualTextObjects", testVimSessionVisualTextObjects),
+    ("testVimSessionBackwardVisualSelectionAndEmptyObjects", testVimSessionBackwardVisualSelectionAndEmptyObjects),
     ("testVimSessionSearchAndNavigation", testVimSessionSearchAndNavigation),
     ("testVimSessionExCommandsAndZZ", testVimSessionExCommandsAndZZ),
     ("testVimSessionCore8020Commands", testVimSessionCore8020Commands),

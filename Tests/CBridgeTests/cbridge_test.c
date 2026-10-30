@@ -1412,6 +1412,94 @@ static void test_navigation_motions_and_counts(void) {
     vim_context_destroy(ctx);
 }
 
+static void test_find_repeat_semicolon_comma(void) {
+    // 0. Calling ';' or ',' before any find motion is executed
+    {
+        VimContextRef ctx0 = vim_context_create("hello world");
+        assert(ctx0 != NULL);
+        assert(vim_context_get_cursor(ctx0).byteCol == 1);
+        vim_context_feed_keys(ctx0, ";");
+        assert(vim_context_get_cursor(ctx0).byteCol == 1);
+        vim_context_feed_keys(ctx0, ",");
+        assert(vim_context_get_cursor(ctx0).byteCol == 1);
+        vim_context_feed_keys(ctx0, "2;");
+        assert(vim_context_get_cursor(ctx0).byteCol == 1);
+        vim_context_destroy(ctx0);
+    }
+
+    const char *text = "alpha.bravo.charlie.delta.echo";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // Initial cursor at (1, 1) on 'a'
+    // Find '.' forward
+    vim_context_feed_keys(ctx, "f.");
+    assert(vim_context_get_cursor(ctx).byteCol == 6); // on first '.'
+
+    // Repeat find forward with ';'
+    vim_context_feed_keys(ctx, ";");
+    assert(vim_context_get_cursor(ctx).byteCol == 12); // on second '.'
+
+    // Repeat find forward with ';'
+    vim_context_feed_keys(ctx, ";");
+    assert(vim_context_get_cursor(ctx).byteCol == 20); // on third '.'
+
+    // Repeat find backward with ','
+    vim_context_feed_keys(ctx, ",");
+    assert(vim_context_get_cursor(ctx).byteCol == 12); // back to second '.'
+
+    // Repeat find backward with ',' again
+    vim_context_feed_keys(ctx, ",");
+    assert(vim_context_get_cursor(ctx).byteCol == 6); // back to first '.'
+
+    // Now test 't' (till)
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "t.");
+    assert(vim_context_get_cursor(ctx).byteCol == 5); // on 'a' before '.'
+
+    vim_context_feed_keys(ctx, ";");
+    assert(vim_context_get_cursor(ctx).byteCol == 11); // on 'o' before second '.'
+
+    vim_context_feed_keys(ctx, ",");
+    assert(vim_context_get_cursor(ctx).byteCol == 7); // on 'b' after first '.'
+
+    // Count multipliers: 2; and 2,
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "f."); // col 6 (first '.')
+    assert(vim_context_get_cursor(ctx).byteCol == 6);
+    vim_context_feed_keys(ctx, "2;"); // skips second '.', lands on third '.' at col 20
+    assert(vim_context_get_cursor(ctx).byteCol == 20);
+    vim_context_feed_keys(ctx, "2,"); // backward 2 dots: from col 20 to col 6
+    assert(vim_context_get_cursor(ctx).byteCol == 6);
+
+    // Search misses where character is not found
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "fz"); // 'z' not in text
+    assert(vim_context_get_cursor(ctx).byteCol == 1); // cursor unmoved
+
+    // EOL clamping when repeating forward
+    vim_context_set_cursor(ctx, 1, 1);
+    vim_context_feed_keys(ctx, "f."); // col 6
+    vim_context_feed_keys(ctx, ";");  // col 12
+    vim_context_feed_keys(ctx, ";");  // col 20
+    vim_context_feed_keys(ctx, ";");  // col 26 (fourth '.')
+    assert(vim_context_get_cursor(ctx).byteCol == 26);
+    vim_context_feed_keys(ctx, ";");  // no more '.' forward -> remains at 26
+    assert(vim_context_get_cursor(ctx).byteCol == 26);
+    vim_context_feed_keys(ctx, "5;"); // count beyond available matches -> remains at 26
+    assert(vim_context_get_cursor(ctx).byteCol == 26);
+
+    // BOL clamping at column 1 when repeating backward
+    vim_context_feed_keys(ctx, "3,"); // backward 3 dots to first '.' (col 6)
+    assert(vim_context_get_cursor(ctx).byteCol == 6);
+    vim_context_feed_keys(ctx, ",");  // no more '.' backward -> remains at 6
+    assert(vim_context_get_cursor(ctx).byteCol == 6);
+    vim_context_feed_keys(ctx, "5,"); // large count backward -> remains at 6
+    assert(vim_context_get_cursor(ctx).byteCol == 6);
+
+    vim_context_destroy(ctx);
+}
+
 static void test_operator_mutations(void) {
     const char *text = "alpha beta gamma\none two three\nfoo bar baz";
     VimContextRef ctx = vim_context_create(text);
@@ -1558,7 +1646,179 @@ static void test_visual_selection_and_operators(void) {
     assert(strcmp(ser2, "one  three\nfour five six\nfour five six") == 0);
     free(ser2);
 
+    // 3. Visual characterwise delete only sets dirty flag if actual mutation occurs
+    {
+        VimContextRef ctx_dirty = vim_context_create("let x = \"\";");
+        assert(ctx_dirty != NULL);
+        assert(!vim_context_is_dirty(ctx_dirty));
+
+        // vi" selects inner empty quotes
+        vim_context_set_cursor(ctx_dirty, 1, 9);
+        vim_context_feed_keys(ctx_dirty, "vi\"");
+        assert(vim_context_get_mode(ctx_dirty) == VIM_MODE_VISUAL);
+        assert(vim_context_is_empty_visual_selection(ctx_dirty));
+
+        // Deleting empty selection (end <= start) should NOT mutate buffer or mark dirty
+        vim_context_feed_keys(ctx_dirty, "d");
+        assert(vim_context_get_mode(ctx_dirty) == VIM_MODE_NORMAL);
+        assert(!vim_context_is_dirty(ctx_dirty));
+        char *ser_clean = vim_context_serialize_buffer(ctx_dirty, NULL);
+        assert(strcmp(ser_clean, "let x = \"\";") == 0);
+        free(ser_clean);
+
+        vim_context_destroy(ctx_dirty);
+    }
+
     vim_context_destroy(ctx);
+}
+
+static void test_visual_motions_word_and_find(void) {
+    const char *text = "alpha beta gamma delta";
+    VimContextRef ctx = vim_context_create(text);
+    assert(ctx != NULL);
+
+    // 1. vey (visual select word to end, yank)
+    vim_context_set_cursor(ctx, 1, 1); // on 'a' in 'alpha'
+    vim_context_feed_keys(ctx, "vey");
+    assert(vim_context_get_mode(ctx) == VIM_MODE_NORMAL);
+    bool linewise = true;
+    const char *yanked = vim_context_get_yank_buffer(ctx, &linewise);
+    assert(yanked != NULL);
+    assert(linewise == false);
+    assert(strcmp(yanked, "alpha") == 0);
+
+    // 2. vfgd (visual find 'g' in 'gamma' and delete)
+    vim_context_set_cursor(ctx, 1, 7); // on 'b' in 'beta'
+    vim_context_feed_keys(ctx, "vfgd"); // select from 'beta' to 'g' in 'gamma' and delete
+    size_t out_len = 0;
+    char *ser = vim_context_serialize_buffer(ctx, &out_len);
+    assert(ser != NULL);
+    assert(strcmp(ser, "alpha amma delta") == 0);
+    free(ser);
+    vim_context_destroy(ctx);
+
+    // 3. Visual backward motions (vb, vh)
+    {
+        VimContextRef ctx_b = vim_context_create("one two three four");
+        assert(ctx_b != NULL);
+        // Place cursor on 't' in 'three' (col 9)
+        vim_context_set_cursor(ctx_b, 1, 9);
+        vim_context_feed_keys(ctx_b, "v");
+        assert(vim_context_get_mode(ctx_b) == VIM_MODE_VISUAL);
+        // 'b' backward motion in visual mode
+        vim_context_feed_keys(ctx_b, "b");
+        assert(vim_context_get_cursor(ctx_b).byteCol == 5); // on 't' in 'two'
+        // '2h' backward motion in visual mode
+        vim_context_feed_keys(ctx_b, "2h");
+        assert(vim_context_get_cursor(ctx_b).byteCol == 3); // on 'e' in 'one'
+        // Delete backward visual selection (from col 3 to col 9)
+        vim_context_feed_keys(ctx_b, "d");
+        assert(vim_context_get_mode(ctx_b) == VIM_MODE_NORMAL);
+        char *ser_b = vim_context_serialize_buffer(ctx_b, NULL);
+        assert(strcmp(ser_b, "onhree four") == 0);
+        free(ser_b);
+        vim_context_destroy(ctx_b);
+    }
+
+    // 4. Visual repeat find motions (; and ,)
+    {
+        VimContextRef ctx_find = vim_context_create("first.second.third.fourth");
+        assert(ctx_find != NULL);
+        vim_context_set_cursor(ctx_find, 1, 1);
+        vim_context_feed_keys(ctx_find, "v");
+        vim_context_feed_keys(ctx_find, "f."); // to first '.' at col 6
+        assert(vim_context_get_cursor(ctx_find).byteCol == 6);
+        vim_context_feed_keys(ctx_find, ";");  // to second '.' at col 13
+        assert(vim_context_get_cursor(ctx_find).byteCol == 13);
+        vim_context_feed_keys(ctx_find, ";");  // to third '.' at col 19
+        assert(vim_context_get_cursor(ctx_find).byteCol == 19);
+        vim_context_feed_keys(ctx_find, ",");  // backward repeat to second '.' at col 13
+        assert(vim_context_get_cursor(ctx_find).byteCol == 13);
+        vim_context_feed_keys(ctx_find, "y");
+        assert(vim_context_get_mode(ctx_find) == VIM_MODE_NORMAL);
+        bool lwise = true;
+        const char *y = vim_context_get_yank_buffer(ctx_find, &lwise);
+        assert(y != NULL && strcmp(y, "first.second.") == 0);
+        vim_context_destroy(ctx_find);
+    }
+
+    // 5. Visual till motions (vt)
+    {
+        VimContextRef ctx_till = vim_context_create("prefix:target:suffix");
+        assert(ctx_till != NULL);
+        vim_context_set_cursor(ctx_till, 1, 1);
+        vim_context_feed_keys(ctx_till, "vt:"); // till ':' -> col 6 ('x')
+        assert(vim_context_get_cursor(ctx_till).byteCol == 6);
+        vim_context_feed_keys(ctx_till, "y");
+        bool lwise = true;
+        const char *y = vim_context_get_yank_buffer(ctx_till, &lwise);
+        assert(y != NULL && strcmp(y, "prefix") == 0);
+        vim_context_destroy(ctx_till);
+    }
+
+    // 6. Visual line boundary motions (v0, v$, v^)
+    {
+        VimContextRef ctx_bnd = vim_context_create("   indented line   ");
+        assert(ctx_bnd != NULL);
+        // Cursor at col 12 ('l' in line)
+        vim_context_set_cursor(ctx_bnd, 1, 12);
+
+        // v0 -> cursor to col 1
+        vim_context_feed_keys(ctx_bnd, "v0\x1b");
+        assert(vim_context_get_cursor(ctx_bnd).byteCol == 1);
+        assert(vim_context_get_mode(ctx_bnd) == VIM_MODE_NORMAL);
+
+        // v^ -> cursor to first non-whitespace (col 4 'i')
+        vim_context_set_cursor(ctx_bnd, 1, 12);
+        vim_context_feed_keys(ctx_bnd, "v^\x1b");
+        assert(vim_context_get_cursor(ctx_bnd).byteCol == 4);
+
+        // v$ -> cursor to last character (col 19)
+        vim_context_set_cursor(ctx_bnd, 1, 4);
+        vim_context_feed_keys(ctx_bnd, "v$\x1b");
+        assert(vim_context_get_cursor(ctx_bnd).byteCol == 19);
+
+        vim_context_destroy(ctx_bnd);
+    }
+
+    // 7. Motion count multipliers in visual mode (e.g. v2wd)
+    {
+        VimContextRef ctx_cnt = vim_context_create("word1 word2 word3 word4");
+        assert(ctx_cnt != NULL);
+        vim_context_set_cursor(ctx_cnt, 1, 1);
+        vim_context_feed_keys(ctx_cnt, "v2wd"); // select forward 2 words (inclusive of 'w' in word3) and delete
+        assert(vim_context_get_mode(ctx_cnt) == VIM_MODE_NORMAL);
+        char *ser_cnt = vim_context_serialize_buffer(ctx_cnt, NULL);
+        assert(strcmp(ser_cnt, "ord3 word4") == 0);
+        free(ser_cnt);
+        vim_context_destroy(ctx_cnt);
+    }
+
+    // 8. Esc cancellation in visual mode (vf<Esc>, vg<Esc>)
+    {
+        VimContextRef ctx_esc = vim_context_create("alpha beta gamma");
+        assert(ctx_esc != NULL);
+        vim_context_set_cursor(ctx_esc, 1, 1);
+
+        // vf<Esc>: cancels pending find, mode remains VISUAL
+        vim_context_feed_keys(ctx_esc, "vf");
+        vim_context_feed_keys(ctx_esc, "\x1b"); // cancel find
+        assert(vim_context_get_mode(ctx_esc) == VIM_MODE_VISUAL);
+        // Next key 'w' is a motion, NOT target for 'f'
+        vim_context_feed_keys(ctx_esc, "w");
+        assert(vim_context_get_cursor(ctx_esc).byteCol == 7);
+        vim_context_feed_keys(ctx_esc, "\x1b"); // exit visual mode
+        assert(vim_context_get_mode(ctx_esc) == VIM_MODE_NORMAL);
+
+        // vg<Esc>: cancels pending leader, mode remains VISUAL
+        vim_context_feed_keys(ctx_esc, "vg");
+        vim_context_feed_keys(ctx_esc, "\x1b"); // cancel leader
+        assert(vim_context_get_mode(ctx_esc) == VIM_MODE_VISUAL);
+        vim_context_feed_keys(ctx_esc, "\x1b"); // exit visual mode
+        assert(vim_context_get_mode(ctx_esc) == VIM_MODE_NORMAL);
+
+        vim_context_destroy(ctx_esc);
+    }
 }
 
 static void test_esc_cancellation(void) {
@@ -2207,8 +2467,10 @@ int main(void) {
     RUN_TEST(test_search_forward_n_N);
     RUN_TEST(test_ex_commands_streaming_and_ZZ);
     RUN_TEST(test_navigation_motions_and_counts);
+    RUN_TEST(test_find_repeat_semicolon_comma);
     RUN_TEST(test_operator_mutations);
     RUN_TEST(test_visual_selection_and_operators);
+    RUN_TEST(test_visual_motions_word_and_find);
     RUN_TEST(test_esc_cancellation);
     RUN_TEST(test_yank_callback_and_clipboard);
     RUN_TEST(test_undo_redo_basic);

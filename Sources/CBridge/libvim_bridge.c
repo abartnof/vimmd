@@ -13,6 +13,7 @@ struct VimDocumentContext {
     VimBytePos cursor;
     VimBytePos visual_anchor;
     bool visual_is_linewise;
+    bool is_empty_visual_selection;
     bool is_dirty;
     bool should_quit;
     VimSystemAction pending_action;
@@ -29,6 +30,9 @@ struct VimDocumentContext {
     char pending_replace;
     char pending_text_object;
     int count_accumulator;
+    char last_find_char;
+    bool last_find_till;
+    bool last_find_forward;
 
     // Yank register
     char *yank_buffer;
@@ -295,6 +299,7 @@ VimContextRef vim_context_create(const char *initial_utf8) {
     ctx->visual_anchor.line = 1;
     ctx->visual_anchor.byteCol = 1;
     ctx->visual_is_linewise = false;
+    ctx->is_empty_visual_selection = false;
     ctx->is_dirty = false;
     ctx->should_quit = false;
     ctx->pending_action = VIM_ACTION_NONE;
@@ -437,6 +442,11 @@ void vim_context_set_visual_anchor(VimContextRef ctx, int32_t line, int32_t byte
 bool vim_context_is_visual_linewise(VimContextRef ctx) {
     if (!ctx) return false;
     return ctx->visual_is_linewise;
+}
+
+bool vim_context_is_empty_visual_selection(VimContextRef ctx) {
+    if (!ctx) return false;
+    return ctx->is_empty_visual_selection;
 }
 
 const char* vim_context_get_last_search(VimContextRef ctx) {
@@ -666,20 +676,50 @@ static void motion_ge(struct VimDocumentContext *ctx, int count) {
     clamp_cursor(ctx);
 }
 
-static void motion_find(struct VimDocumentContext *ctx, char target, bool till) {
+static void motion_find(struct VimDocumentContext *ctx, char target, bool till, bool forward, int count) {
     if (ctx->cursor.line < 1 || (size_t)ctx->cursor.line > ctx->line_count) return;
     const char *line = ctx->lines[ctx->cursor.line - 1];
+    if (!line) return;
     size_t len = strlen(line);
-    size_t start = (size_t)ctx->cursor.byteCol; // 0-based index of character after cursor
+    if (count <= 0) count = 1;
 
-    for (size_t i = start; i < len; i++) {
-        if (line[i] == target) {
-            if (till) {
-                ctx->cursor.byteCol = (i > 0) ? (int32_t)i : 1;
-            } else {
-                ctx->cursor.byteCol = (int32_t)(i + 1);
+    if (forward) {
+        size_t start = (size_t)ctx->cursor.byteCol;
+        if (till && start < len && line[start] == target) {
+            start++;
+        }
+        for (size_t i = start; i < len; i++) {
+            if (line[i] == target) {
+                count--;
+                if (count == 0) {
+                    if (till) {
+                        ctx->cursor.byteCol = (i > 0) ? (int32_t)i : 1;
+                    } else {
+                        ctx->cursor.byteCol = (int32_t)(i + 1);
+                    }
+                    break;
+                }
             }
-            break;
+        }
+    } else {
+        if (ctx->cursor.byteCol > 1) {
+            ssize_t start = (ssize_t)ctx->cursor.byteCol - 2;
+            if (till && ctx->cursor.byteCol >= 2 && line[ctx->cursor.byteCol - 2] == target) {
+                start = (ssize_t)ctx->cursor.byteCol - 3;
+            }
+            for (ssize_t i = start; i >= 0; i--) {
+                if (line[i] == target) {
+                    count--;
+                    if (count == 0) {
+                        if (till) {
+                            ctx->cursor.byteCol = (int32_t)(i + 2);
+                        } else {
+                            ctx->cursor.byteCol = (int32_t)(i + 1);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
     clamp_cursor(ctx);
@@ -1011,11 +1051,13 @@ static bool handle_visual_text_object(struct VimDocumentContext *ctx, char delim
         ctx->visual_anchor.byteCol = bounds.open_col + 1;
         ctx->cursor.line = bounds.open_line;
         ctx->cursor.byteCol = bounds.open_col;
+        ctx->is_empty_visual_selection = true;
     } else {
         ctx->visual_anchor.line = bounds.open_line;
         ctx->visual_anchor.byteCol = bounds.open_col + 1;
         ctx->cursor.line = bounds.close_line;
         ctx->cursor.byteCol = bounds.close_col - 1;
+        ctx->is_empty_visual_selection = false;
     }
     clamp_cursor(ctx);
     return true;
@@ -1470,7 +1512,11 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             // 2. Pending find / till
             if (ctx->pending_find != 0) {
                 bool till = (ctx->pending_find == 't');
-                motion_find(ctx, *p, till);
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->last_find_char = *p;
+                ctx->last_find_till = till;
+                ctx->last_find_forward = true;
+                motion_find(ctx, *p, till, true, count);
                 ctx->pending_find = 0;
                 ctx->count_accumulator = 0;
                 p++;
@@ -1862,6 +1908,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->mode = VIM_MODE_VISUAL;
                 ctx->visual_anchor = ctx->cursor;
                 ctx->visual_is_linewise = false;
+                ctx->is_empty_visual_selection = false;
                 ctx->pending_text_object = 0;
                 ctx->count_accumulator = 0;
                 p++;
@@ -1869,6 +1916,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 ctx->mode = VIM_MODE_VISUAL;
                 ctx->visual_anchor = ctx->cursor;
                 ctx->visual_is_linewise = true;
+                ctx->is_empty_visual_selection = false;
                 ctx->pending_text_object = 0;
                 ctx->count_accumulator = 0;
                 p++;
@@ -1961,6 +2009,20 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                 p++;
             } else if (*p == 'f' || *p == 't') {
                 ctx->pending_find = *p;
+                p++;
+            } else if (*p == ';') {
+                if (ctx->last_find_char != 0) {
+                    int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                    motion_find(ctx, ctx->last_find_char, ctx->last_find_till, ctx->last_find_forward, count);
+                }
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == ',') {
+                if (ctx->last_find_char != 0) {
+                    int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                    motion_find(ctx, ctx->last_find_char, ctx->last_find_till, !ctx->last_find_forward, count);
+                }
+                ctx->count_accumulator = 0;
                 p++;
             } else if (*p == 'r') {
                 ctx->pending_replace = 'r';
@@ -2174,11 +2236,59 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             }
         } else if (ctx->mode == VIM_MODE_VISUAL) {
             if (*p == '\x1b') {
-                ctx->mode = VIM_MODE_NORMAL;
-                ctx->pending_text_object = 0;
+                if (ctx->pending_find != 0 || ctx->pending_leader != 0 || ctx->pending_text_object != 0) {
+                    ctx->pending_find = 0;
+                    ctx->pending_leader = 0;
+                    ctx->pending_text_object = 0;
+                    ctx->count_accumulator = 0;
+                } else {
+                    ctx->mode = VIM_MODE_NORMAL;
+                    ctx->count_accumulator = 0;
+                    ctx->is_empty_visual_selection = false;
+                }
+                p++;
+                continue;
+            }
+
+            if (ctx->pending_find != 0) {
+                bool till = (ctx->pending_find == 't');
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->last_find_char = *p;
+                ctx->last_find_till = till;
+                ctx->last_find_forward = true;
+                ctx->is_empty_visual_selection = false;
+                motion_find(ctx, *p, till, true, count);
+                ctx->pending_find = 0;
                 ctx->count_accumulator = 0;
                 p++;
-            } else if (ctx->pending_text_object == 'i') {
+                continue;
+            }
+
+            if (ctx->pending_leader != 0) {
+                char leader = ctx->pending_leader;
+                ctx->pending_leader = 0;
+                if (leader == 'g') {
+                    if (*p == 'g') {
+                        int target = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                        ctx->cursor.line = target;
+                        ctx->cursor.byteCol = 1;
+                        ctx->count_accumulator = 0;
+                        ctx->is_empty_visual_selection = false;
+                        clamp_cursor(ctx);
+                        p++;
+                        continue;
+                    } else if (*p == 'e') {
+                        int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                        ctx->is_empty_visual_selection = false;
+                        motion_ge(ctx, count);
+                        ctx->count_accumulator = 0;
+                        p++;
+                        continue;
+                    }
+                }
+            }
+
+            if (ctx->pending_text_object == 'i') {
                 handle_visual_text_object(ctx, *p);
                 ctx->pending_text_object = 0;
                 ctx->count_accumulator = 0;
@@ -2193,12 +2303,23 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             } else if (*p == 'd' || *p == 'c') { // Visual delete or change
                 ctx->count_accumulator = 0;
                 bool is_change = (*p == 'c');
+                if (ctx->is_empty_visual_selection) {
+                    ctx->is_empty_visual_selection = false;
+                    ctx->in_insert_undo_group = is_change;
+                    ctx->mode = is_change ? VIM_MODE_INSERT : VIM_MODE_NORMAL;
+                    clamp_cursor(ctx);
+                    p++;
+                    continue;
+                }
                 if (ctx->visual_is_linewise) {
                     snapshot_for_undo(ctx);
                     int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     size_t start_idx = (size_t)(start_l - 1);
                     size_t del_count = (size_t)(end_l - start_l + 1);
+                    if (start_idx + del_count > ctx->line_count) {
+                        del_count = ctx->line_count - start_idx;
+                    }
 
                     yank_linewise_range(ctx, start_l, end_l);
                     for (size_t i = 0; i < del_count; i++) free(ctx->lines[start_idx + i]);
@@ -2214,6 +2335,9 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                     }
                     ctx->cursor.line = start_l;
                     ctx->cursor.byteCol = 1;
+                    if (del_count > 0) {
+                        ctx->is_dirty = true;
+                    }
                 } else {
                     if (ctx->visual_anchor.line == ctx->cursor.line) {
                         size_t l_idx = (size_t)(ctx->cursor.line - 1);
@@ -2236,17 +2360,26 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                             }
                             memmove(line + start, line + end, len - end + 1);
                             ctx->cursor.byteCol = (int32_t)(start + 1);
+                            ctx->is_dirty = true;
                             emit_line_delta(ctx, ctx->cursor.line, 1, 1);
                         }
                     }
                 }
-                ctx->is_dirty = true;
+                ctx->is_empty_visual_selection = false;
                 ctx->in_insert_undo_group = is_change;
                 ctx->mode = is_change ? VIM_MODE_INSERT : VIM_MODE_NORMAL;
                 clamp_cursor(ctx);
                 p++;
             } else if (*p == 'y') { // Visual yank
                 ctx->count_accumulator = 0;
+                if (ctx->is_empty_visual_selection) {
+                    set_yank_buffer(ctx, "", false);
+                    ctx->is_empty_visual_selection = false;
+                    ctx->mode = VIM_MODE_NORMAL;
+                    clamp_cursor(ctx);
+                    p++;
+                    continue;
+                }
                 if (ctx->visual_is_linewise) {
                     int32_t start_l = ctx->visual_anchor.line < ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
                     int32_t end_l = ctx->visual_anchor.line > ctx->cursor.line ? ctx->visual_anchor.line : ctx->cursor.line;
@@ -2269,6 +2402,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
                         }
                     }
                 }
+                ctx->is_empty_visual_selection = false;
                 ctx->mode = VIM_MODE_NORMAL;
                 p++;
             } else if (*p == ':') {
@@ -2281,11 +2415,13 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             } else if (*p == 'h') {
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 ctx->cursor.byteCol = (ctx->cursor.byteCol > count) ? (ctx->cursor.byteCol - count) : 1;
                 p++;
             } else if (*p == 'l') {
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 size_t line_len = strlen(ctx->lines[ctx->cursor.line - 1]);
                 ctx->cursor.byteCol += count;
                 if ((size_t)ctx->cursor.byteCol > line_len) {
@@ -2296,6 +2432,7 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             } else if (*p == 'j') {
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 ctx->cursor.line += count;
                 if ((size_t)ctx->cursor.line > ctx->line_count) {
                     ctx->cursor.line = (int32_t)ctx->line_count;
@@ -2305,16 +2442,70 @@ void vim_context_feed_keys(VimContextRef ctx, const char *keys) {
             } else if (*p == 'k') {
                 int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 ctx->cursor.line = (ctx->cursor.line > count) ? (ctx->cursor.line - count) : 1;
                 clamp_cursor(ctx);
                 p++;
             } else if (*p == '0') {
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 ctx->cursor.byteCol = 1;
                 p++;
             } else if (*p == '$') {
                 ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
                 motion_dollar(ctx);
+                p++;
+            } else if (*p == '^') {
+                ctx->count_accumulator = 0;
+                ctx->is_empty_visual_selection = false;
+                motion_caret(ctx);
+                p++;
+            } else if (*p == 'w') {
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->is_empty_visual_selection = false;
+                motion_w(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'b') {
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->is_empty_visual_selection = false;
+                motion_b(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'e') {
+                int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                ctx->is_empty_visual_selection = false;
+                motion_e(ctx, count);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'g') {
+                ctx->pending_leader = 'g';
+                p++;
+            } else if (*p == 'G') {
+                int target = (ctx->count_accumulator > 0) ? ctx->count_accumulator : (int)ctx->line_count;
+                ctx->is_empty_visual_selection = false;
+                motion_G(ctx, target);
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == 'f' || *p == 't') {
+                ctx->pending_find = *p;
+                p++;
+            } else if (*p == ';') {
+                ctx->is_empty_visual_selection = false;
+                if (ctx->last_find_char != 0) {
+                    int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                    motion_find(ctx, ctx->last_find_char, ctx->last_find_till, ctx->last_find_forward, count);
+                }
+                ctx->count_accumulator = 0;
+                p++;
+            } else if (*p == ',') {
+                ctx->is_empty_visual_selection = false;
+                if (ctx->last_find_char != 0) {
+                    int count = (ctx->count_accumulator > 0) ? ctx->count_accumulator : 1;
+                    motion_find(ctx, ctx->last_find_char, ctx->last_find_till, !ctx->last_find_forward, count);
+                }
+                ctx->count_accumulator = 0;
                 p++;
             } else {
                 ctx->count_accumulator = 0;

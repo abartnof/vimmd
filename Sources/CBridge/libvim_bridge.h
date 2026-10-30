@@ -69,6 +69,7 @@ void vim_context_set_cursor(VimContextRef ctx, int32_t line, int32_t byteCol);
 VimBytePos vim_context_get_visual_anchor(VimContextRef ctx);
 void vim_context_set_visual_anchor(VimContextRef ctx, int32_t line, int32_t byteCol);
 bool vim_context_is_visual_linewise(VimContextRef ctx);
+bool vim_context_is_empty_visual_selection(VimContextRef ctx);
 bool vim_context_is_dirty(VimContextRef ctx);
 void vim_context_clear_dirty(VimContextRef ctx);
 bool vim_context_should_quit(VimContextRef ctx);

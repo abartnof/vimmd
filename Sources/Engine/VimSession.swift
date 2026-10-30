@@ -188,6 +188,11 @@ public final class VimSession {
         return vim_context_is_visual_linewise(ctx)
     }
 
+    public var isEmptyVisualSelection: Bool {
+        guard let ctx = context else { return false }
+        return vim_context_is_empty_visual_selection(ctx)
+    }
+
     public var visualSelectionRange: NSRange? {
         guard mode == VIM_MODE_VISUAL else { return nil }
         let aPos = visualAnchorPosition
@@ -203,8 +208,7 @@ public final class VimSession {
         let cOffset = lineIndexTable.documentUtf16Offset(line: cPos.line, vimByteCol: cPos.byteCol)
 
         let docLength = lineIndexTable.totalUtf16Length
-        if aPos.line == cPos.line && aPos.byteCol > cPos.byteCol {
-            // Empty inner text object (e.g. "")
+        if isEmptyVisualSelection {
             let clampedLoc = min(max(0, aOffset), docLength)
             return NSRange(location: clampedLoc, length: 0)
         }
