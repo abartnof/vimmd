@@ -180,6 +180,16 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] When opening a wide document (wide Markdown, tables, code), guarantee the cursor is at Line 1, Col 1 (top-left) and the viewport's visible scroll rect is anchored at `(0, 0)` so the top-left area is guaranteed visible.
   - [x] Address AppKit asynchronous post-layout runloop passes (`viewDidMoveToWindow`, initial layout pass, `DispatchQueue.main.async`) that previously caused wide unwrapped lines to shift the clip view horizontally to the right.
 
+- [ ] **Milestone W: Ruler-Aware Viewport Alignment & Word End Operators (`de`, `ce`, `ye`)**
+  - [ ] **Ruler-Aware Viewport Alignment**:
+    - Fix `resetScrollToTopLeft()` and `pinViewportToTopLeft()` in `VimMDTextView`: account for `LineNumberRulerView` thickness and use AppKit's native `scrollToBeginningOfDocument(nil)` / `scrollRangeToVisible(NSRange(location: 0, length: 0))` rather than hardcoding `clipView.scroll(to: .zero)`.
+    - Ensure navigating up to row 1 from row 2 never clips or hides the 1st character behind the ruler or viewport edge.
+  - [ ] **Word End Operators (`de`, `ce`, `ye`)**:
+    - In `libvim_bridge.c`, add `*p == 'e'` handling to `op == 'd'` (`de`: delete to end of word inclusive).
+    - Add `*p == 'e'` handling to `op == 'c'` (`ce`: change to end of word inclusive, enter Insert mode).
+    - Add `*p == 'e'` handling to `op == 'y'` (`ye`: yank to end of word inclusive).
+    - Support count multipliers (e.g. `2de`, `3ce`).
+
 - [x] **Milestone Q: Comprehensive Vim Replace Subsystem (`R`, `r`, Visual `r`, `s`, `S`, and Ex Substitutions)**
   - [x] **Full Overwrite Replace Mode (`R`)**:
     - [x] Add `VIM_MODE_REPLACE` mode (`-- REPLACE --` displayed in status bar).
