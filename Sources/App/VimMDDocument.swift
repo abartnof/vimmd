@@ -286,6 +286,7 @@ open class VimMDDocument: NSDocument {
         if currentMode == VIM_MODE_COMMAND {
             modeLabel?.isHidden = true
             modeLabel?.stringValue = ""
+            modeLabel?.textColor = VimModeTheme.color(for: VIM_MODE_COMMAND)
 
             let promptWidth = max(60, rightBound - 16)
             messageLabel?.frame = NSRect(x: 8, y: 3, width: promptWidth, height: 16)
@@ -296,6 +297,7 @@ open class VimMDDocument: NSDocument {
         } else {
             modeLabel?.isHidden = false
             modeLabel?.stringValue = "-- \(mode) --"
+            modeLabel?.textColor = VimModeTheme.color(for: currentMode)
 
             let normalMsgWidth = max(60, rightBound - 165)
             messageLabel?.frame = NSRect(x: 155, y: 3, width: normalMsgWidth, height: 16)
@@ -599,7 +601,7 @@ open class VimMDDocument: NSDocument {
         modeLbl.isBordered = false
         modeLbl.backgroundColor = .clear
         modeLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        modeLbl.textColor = NSColor.secondaryLabelColor
+        modeLbl.textColor = VimModeTheme.color(for: VIM_MODE_NORMAL)
         modeLbl.stringValue = "-- NORMAL --"
         statusBar.addSubview(modeLbl)
         self.modeLabel = modeLbl
