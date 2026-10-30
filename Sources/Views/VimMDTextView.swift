@@ -67,9 +67,15 @@ open class VimMDTextView: NSTextView {
     public var activeColDragRange: ClosedRange<Int>?
     public var transientFlashRect: NSRect?
 
+    public var customColumnWidths: [Int: CGFloat] = [:]
+    public var isResizingColumn: Bool = false
+    public var resizingColumnIndex: Int?
+    public var resizeStartX: CGFloat = 0.0
+    public var initialColumnWidth: CGFloat = 0.0
+
     private var tabularTrackingArea: NSTrackingArea?
-    private var isDraggingRow: Bool = false
-    private var isDraggingCol: Bool = false
+    public var isDraggingRow: Bool = false
+    public var isDraggingCol: Bool = false
     private var dragStartRowIndex: Int?
     private var dragStartColIndex: Int?
 
@@ -358,9 +364,9 @@ open class VimMDTextView: NSTextView {
         storage.beginEditing()
         switch documentSyntaxType {
         case .csv:
-            tabularResolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: wrapTableCells)
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
         case .tsv:
-            tabularResolver.renderTabularSyntax(in: storage, isTSV: true, wrapTableCells: wrapTableCells)
+            tabularResolver.renderTabularSyntax(in: storage, isTSV: true, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
         case .plainText:
             let fullRange = NSRange(location: 0, length: storage.length)
             let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -682,7 +688,38 @@ open class VimMDTextView: NSTextView {
 
     public func columnWidths() -> [CGFloat] {
         guard let storage = self.textStorage else { return [] }
-        return tabularResolver.calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells)
+        return tabularResolver.calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
+    }
+
+    public func isPointInHeaderRow(_ point: NSPoint) -> Bool {
+        guard isTabularDocument else { return false }
+        let r0 = rowRect(for: 0)
+        let r0Height = r0?.height ?? 18.0
+        let inNormalHeader = (rowIndex(at: point) == 0) || (point.y >= 0 && point.y <= (r0?.maxY ?? r0Height))
+        if inNormalHeader {
+            return true
+        }
+        let vRect = self.visibleRect
+        if freezeFirstRow && vRect.origin.y > 0 {
+            if point.y >= vRect.origin.y && point.y <= vRect.origin.y + r0Height {
+                return true
+            }
+        }
+        return false
+    }
+
+    public func dividerColumnIndex(at point: NSPoint, hitTolerance: CGFloat = 4.0) -> Int? {
+        guard isPointInHeaderRow(point) else { return nil }
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return nil }
+        var currentX = textContainerInset.width
+        for (i, w) in widths.enumerated() {
+            currentX += w
+            if abs(point.x - currentX) <= hitTolerance {
+                return i
+            }
+        }
+        return nil
     }
 
     public func rowRect(for rowIndex: Int) -> NSRect? {
@@ -999,14 +1036,20 @@ open class VimMDTextView: NSTextView {
 
     public func cursorForPoint(_ point: NSPoint) -> NSCursor? {
         guard isTabularDocument else { return nil }
-        let rIdx = rowIndex(at: point)
+        if isResizingColumn {
+            return NSCursor.resizeLeftRight
+        }
         let cIdx = columnIndex(at: point)
 
-        // Row 0 is Row 1 (header row)
-        if rIdx == 0 {
+        // Row 0 is Row 1 (header row, including pinned header when scrolled)
+        if isPointInHeaderRow(point) {
+            if dividerColumnIndex(at: point) != nil {
+                return NSCursor.resizeLeftRight
+            }
             return VimMDTextView.downwardArrowCursor
         }
         // Column 0 is Column A on data rows (rIdx > 0)
+        let rIdx = rowIndex(at: point)
         if cIdx == 0 && (rIdx ?? -1) > 0 {
             return VimMDTextView.rightwardArrowCursor
         }
@@ -1039,13 +1082,37 @@ open class VimMDTextView: NSTextView {
 
     // MARK: - Spreadsheet Click & Drag Selection
 
-    public func handleTabularMouseDown(at point: NSPoint) -> Bool {
+    public func handleTabularMouseDown(at point: NSPoint, clickCount: Int = 1) -> Bool {
         guard isTabularDocument else { return false }
         self.window?.makeFirstResponder(self)
-        let rIdx = rowIndex(at: point)
         let cIdx = columnIndex(at: point)
 
-        if rIdx == 0 {
+        if isPointInHeaderRow(point) {
+            if let divCol = dividerColumnIndex(at: point) {
+                if clickCount == 2 {
+                    customColumnWidths.removeValue(forKey: divCol)
+                    isResizingColumn = false
+                    resizingColumnIndex = nil
+                    isDraggingCol = false
+                    updateSyntaxStyling(force: true)
+                    if !wrapTableCells {
+                        updateFrameForUnwrappedLines()
+                    }
+                    needsDisplay = true
+                    return true
+                } else {
+                    let widths = columnWidths()
+                    let initialW = divCol < widths.count ? widths[divCol] : 60.0
+                    isResizingColumn = true
+                    resizingColumnIndex = divCol
+                    resizeStartX = point.x
+                    initialColumnWidth = initialW
+                    isDraggingCol = false
+                    needsDisplay = true
+                    return true
+                }
+            }
+
             let c = columnIndex(at: point, clamped: true) ?? 0
             // Dragging / clicking header row (columns)
             isDraggingCol = true
@@ -1075,6 +1142,19 @@ open class VimMDTextView: NSTextView {
 
     public func handleTabularMouseDragged(to point: NSPoint) {
         guard isTabularDocument else { return }
+        if isResizingColumn, let i = resizingColumnIndex {
+            let deltaX = point.x - resizeStartX
+            let newWidth = max(30.0, initialColumnWidth + deltaX)
+            if newWidth.isFinite && !newWidth.isNaN {
+                customColumnWidths[i] = newWidth
+                updateSyntaxStyling(force: true)
+                if !wrapTableCells {
+                    updateFrameForUnwrappedLines()
+                }
+                needsDisplay = true
+            }
+            return
+        }
         if isDraggingCol, let start = dragStartColIndex {
             if let current = columnIndex(at: point) {
                 let minC = min(start, current)
@@ -1094,6 +1174,12 @@ open class VimMDTextView: NSTextView {
 
     public func handleTabularMouseUp(at point: NSPoint) {
         guard isTabularDocument else { return }
+        if isResizingColumn {
+            isResizingColumn = false
+            resizingColumnIndex = nil
+            needsDisplay = true
+            return
+        }
         if isDraggingCol, let range = activeColDragRange {
             _ = copyColumnRange(from: range.lowerBound, to: range.upperBound)
             isDraggingCol = false
@@ -1280,6 +1366,7 @@ open class VimMDTextView: NSTextView {
             drawGridlines(in: dirtyRect)
             drawSelectionAndFlash(in: dirtyRect)
             drawFrozenPanes(in: dirtyRect)
+            drawResizeGuide(in: dirtyRect)
         }
     }
 
@@ -1349,6 +1436,25 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    public func drawResizeGuide(in dirtyRect: NSRect) {
+        guard isResizingColumn, let resizingCol = resizingColumnIndex else { return }
+        let widths = columnWidths()
+        guard resizingCol >= 0 && resizingCol < widths.count else { return }
+        var x = textContainerInset.width
+        for k in 0...resizingCol {
+            x += widths[k]
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSColor.controlAccentColor.setStroke()
+        let guidePath = NSBezierPath()
+        guidePath.lineWidth = 2.0
+        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        guidePath.move(to: NSPoint(x: floor(x), y: 0))
+        guidePath.line(to: NSPoint(x: floor(x), y: totalHeight))
+        guidePath.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
     public func drawFrozenPanes(in dirtyRect: NSRect) {
         let vRect = self.visibleRect
 
@@ -1396,7 +1502,7 @@ open class VimMDTextView: NSTextView {
         self.window?.makeFirstResponder(self)
         if isTabularDocument {
             let pt = convert(event.locationInWindow, from: nil)
-            if handleTabularMouseDown(at: pt) {
+            if handleTabularMouseDown(at: pt, clickCount: event.clickCount) {
                 return
             }
             let r = rowIndex(at: pt, clamped: true) ?? 0
@@ -1417,7 +1523,7 @@ open class VimMDTextView: NSTextView {
     }
 
     override open func mouseDragged(with event: NSEvent) {
-        if isTabularDocument && (isDraggingCol || isDraggingRow) {
+        if isTabularDocument && (isDraggingCol || isDraggingRow || isResizingColumn) {
             let pt = convert(event.locationInWindow, from: nil)
             handleTabularMouseDragged(to: pt)
             return
@@ -1426,7 +1532,7 @@ open class VimMDTextView: NSTextView {
     }
 
     override open func mouseUp(with event: NSEvent) {
-        if isTabularDocument && (isDraggingCol || isDraggingRow) {
+        if isTabularDocument && (isDraggingCol || isDraggingRow || isResizingColumn) {
             let pt = convert(event.locationInWindow, from: nil)
             handleTabularMouseUp(at: pt)
             return
