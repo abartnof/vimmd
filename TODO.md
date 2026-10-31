@@ -237,6 +237,16 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] **Synchronous Mode State Propagation**:
     - [ ] Synchronize gutter redraws (`rulerView.needsDisplay = true`) on every mode transition so the row badge and status pill update in perfect lockstep.
 
+- [ ] **Milestone AA: Full-UI Accessibility Scaling on Zoom & Display Size Change (Rulers, Status Bar & Badges)**
+  - [ ] **Proportional UI Scaling Across All On-Screen Chrome**:
+    - [ ] When the user changes zoom / magnification (`⌘+`, `⌘-`, `⌘0`, pinch-to-zoom) or system display accessibility scale, scale *all* on-screen interface text and chrome proportionally:
+      - Line number gutter text, badges, and ruler thickness in `LineNumberRulerView`.
+      - Column letter ruler text and header dimensions in `ColumnLetterRulerView`.
+      - Status bar height, mode pill badge, cursor position indicator (`posLabel`), and status feedback messages (`messageLabel`, `savedChipView`).
+  - [ ] **Accessibility Parity**:
+    - [ ] Ensure low-vision and accessibility users experience uniform, readable scaling across both buffer content and surrounding GUI accessories without truncation, clipping, or fixed-point layout overlap.
+    - [ ] Respect magnification boundaries (0.5x to 3.0x) with seamless layout geometry recalculation on zoom change notifications.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
