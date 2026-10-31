@@ -1,4 +1,5 @@
 import AppKit
+import Views
 
 public enum AppearanceMode: String, CaseIterable {
     case matchSystem = "Match System"
@@ -24,6 +25,7 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     public var zoomInMenuItem: NSMenuItem?
     public var zoomOutMenuItem: NSMenuItem?
     public var actualSizeMenuItem: NSMenuItem?
+    public var delimiterColorMenuItem: NSMenuItem?
     public var viewMenuItem: NSMenuItem?
 
     public var currentAppearanceMode: AppearanceMode {
@@ -119,7 +121,28 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
+    @IBAction public func showDelimiterColorPicker(_ sender: Any?) {
+        let panel = NSColorPanel.shared
+        panel.color = DelimiterColorManager.shared.delimiterColor
+        panel.setTarget(self)
+        panel.setAction(#selector(delimiterColorDidChange(_:)))
+        panel.isContinuous = true
+        panel.orderFront(sender)
+    }
+
+    @objc public func delimiterColorDidChange(_ sender: Any?) {
+        guard let panel = (sender as? NSColorPanel) ?? (NSColorPanel.sharedColorPanelExists ? NSColorPanel.shared : nil) else { return }
+        DelimiterColorManager.shared.delimiterColor = panel.color
+    }
+
+    @IBAction public func orderFrontColorPanel(_ sender: Any?) {
+        showDelimiterColorPicker(sender)
+    }
+
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem == delimiterColorMenuItem || menuItem.action == #selector(showDelimiterColorPicker(_:)) || menuItem.action == #selector(orderFrontColorPanel(_:)) {
+            return true
+        }
         if menuItem == wrapLinesMenuItem || menuItem.action == #selector(toggleWrapLines(_:)) {
             updateWrapLinesMenuItemState()
             return true
@@ -298,6 +321,11 @@ open class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         appearanceMenuItem.submenu = appearanceMenu
         viewMenu.addItem(appearanceMenuItem)
+
+        let delimiterColorItem = NSMenuItem(title: "Delimiter Color…", action: #selector(showDelimiterColorPicker(_:)), keyEquivalent: "")
+        delimiterColorItem.target = self
+        viewMenu.addItem(delimiterColorItem)
+        self.delimiterColorMenuItem = delimiterColorItem
 
         viewMenu.addItem(NSMenuItem.separator())
 

@@ -34,6 +34,12 @@ public struct VimModeTheme {
     /// Soft teal accent for Replace mode (-- REPLACE --): distinct reminder that typing overwrites characters.
     public static let replaceColor = NSColor(calibratedRed: 0.12, green: 0.68, blue: 0.65, alpha: 1.0)
 
+    /// Current theme color for non-printing and syntax delimiter characters.
+    public static var delimiterColor: NSColor {
+        get { DelimiterColorManager.shared.delimiterColor }
+        set { DelimiterColorManager.shared.delimiterColor = newValue }
+    }
+
     /// Returns the coordinated theme color for the specified Vim mode.
     public static func color(for mode: VimEngineMode) -> NSColor {
         switch mode {

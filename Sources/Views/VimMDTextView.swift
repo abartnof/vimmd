@@ -172,6 +172,26 @@ open class VimMDTextView: NSTextView {
         self.textContainer?.widthTracksTextView = true
         self.textContainer?.containerSize = NSSize(width: self.frame.width, height: CGFloat.greatestFiniteMagnitude)
         self.insertionPointColor = VimModeTheme.color(for: VIM_MODE_NORMAL)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(delimiterColorDidChangeNotification(_:)),
+            name: DelimiterColorManager.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func delimiterColorDidChangeNotification(_ notification: Notification) {
+        if Thread.isMainThread {
+            self.updateSyntaxStyling(force: true)
+            self.needsDisplay = true
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.updateSyntaxStyling(force: true)
+                self.needsDisplay = true
+            }
+        }
     }
 
     override open func viewDidMoveToSuperview() {

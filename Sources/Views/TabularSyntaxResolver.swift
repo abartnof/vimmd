@@ -13,7 +13,10 @@ public struct TabularSyntaxResolver {
 
     public static let neutralTextColor = NSColor.labelColor
     public static let headerBackgroundColor = NSColor.quaternaryLabelColor
-    public static let delimiterColor = NSColor.tertiaryLabelColor
+    public static var delimiterColor: NSColor {
+        get { DelimiterColorManager.shared.delimiterColor }
+        set { DelimiterColorManager.shared.delimiterColor = newValue }
+    }
 
     public init() {}
 
@@ -134,6 +137,7 @@ public struct TabularSyntaxResolver {
 
         let regularFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let boldFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
+        let delimiterColor = DelimiterColorManager.shared.delimiterColor
 
         let colWidths = calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
 
@@ -202,7 +206,7 @@ public struct TabularSyntaxResolver {
             // Apply delimiter attributes and CSV kern alignment
             for (dIdx, delimRange) in delimiters.enumerated() {
                 guard delimRange.length > 0 else { continue }
-                storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: delimRange)
+                storage.addAttribute(.foregroundColor, value: delimiterColor, range: delimRange)
 
                 if !isTSV && dIdx < fields.count && dIdx < colWidths.count {
                     // For CSV, align next column by kerning delimiter comma

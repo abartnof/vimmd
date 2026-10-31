@@ -85,6 +85,25 @@ for test_file in "${ROOT_DIR}"/Tests/AppTests/*Tests.swift; do
     echo ""
 done
 
+# 4b. Delimiter Color Unit Tests (Milestone Y)
+echo "[TEST] Building & running Delimiter Color unit tests..."
+test_file="${ROOT_DIR}/Tests/DelimiterColorTests.swift"
+test_name="$(basename "${test_file}" .swift)"
+bin_name="${BUILD_DIR}/${test_name}"
+echo "[TEST] Compiling ${test_name}..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${test_file}" \
+    -o "${bin_name}"
+
+echo "[TEST] Executing ${test_name}..."
+"${bin_name}"
+echo "[TEST] ${test_name} passed."
+echo ""
+
 # 5. Integration / End-to-End User Trial
 echo "[TEST] Building & running End-to-End Demo Trial..."
 echo "[TEST] Compiling demo_trial..."

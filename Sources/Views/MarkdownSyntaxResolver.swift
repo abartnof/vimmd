@@ -187,6 +187,7 @@ public struct MarkdownSyntaxResolver {
         let defaultFont = NSFont.systemFont(ofSize: 14)
         let defaultTextColor = NSColor.labelColor
         let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let delimiterColor = DelimiterColorManager.shared.delimiterColor
 
         var inFrontmatter = false
         var inCodeBlock = false
@@ -242,7 +243,7 @@ public struct MarkdownSyntaxResolver {
                 for i in 0..<nsLine.length {
                     if nsLine.character(at: i) == 124 { // ASCII for '|'
                         let pipeRange = NSRange(location: lineRange.location + i, length: 1)
-                        textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: pipeRange)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: pipeRange)
                     }
                 }
                 continue
@@ -279,7 +280,7 @@ public struct MarkdownSyntaxResolver {
 
                 // Header delimiter styling (muted/concealed)
                 let delimRange = NSRange(location: lineRange.location + hMatch.range(at: 1).location, length: hMatch.range(at: 1).length)
-                textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: delimRange)
+                textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: delimRange)
 
                 // Paragraph style for header spacing
                 let pStyle = NSMutableParagraphStyle()
@@ -297,8 +298,8 @@ public struct MarkdownSyntaxResolver {
                 if m.range.length >= 4 {
                     let openDelim = NSRange(location: fullMatchRange.location, length: 2)
                     let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: closeDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
                 }
             }
 
@@ -311,8 +312,8 @@ public struct MarkdownSyntaxResolver {
                 if m.range.length >= 2 {
                     let openDelim = NSRange(location: fullMatchRange.location, length: 1)
                     let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: closeDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
                 }
             }
 
@@ -327,8 +328,8 @@ public struct MarkdownSyntaxResolver {
                 if m.range.length >= 2 {
                     let openDelim = NSRange(location: fullMatchRange.location, length: 1)
                     let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: closeDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
                 }
             }
 
@@ -344,8 +345,8 @@ public struct MarkdownSyntaxResolver {
                 // Conceal / subtle style delimiters '[' and '](url)'
                 let openBracket = NSRange(location: fullMatchRange.location, length: 1)
                 let closeAndUrl = NSRange(location: titleMatchRange.location + titleMatchRange.length, length: fullMatchRange.length - (1 + titleLocalRange.length))
-                textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: openBracket)
-                textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: closeAndUrl)
+                textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openBracket)
+                textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeAndUrl)
             }
 
             // 6. Strikethrough: ~~...~~
@@ -356,8 +357,8 @@ public struct MarkdownSyntaxResolver {
                 if m.range.length >= 4 {
                     let openDelim = NSRange(location: fullMatchRange.location, length: 2)
                     let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: closeDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
                 }
             }
         }
