@@ -260,6 +260,15 @@ This document tracks all active milestones, user requirements, and architectural
     - [ ] Cohesive single-step undo (`u`) and redo (`Ctrl-R`) for all multi-line indentation actions.
     - [ ] Differential line index re-indexing without desynchronizing Unicode offsets or syntax concealment caches.
 
+- [ ] **Milestone AC: Wide CSV (100+ Columns) Performance & Column Ruler $O(N^2)$ Hang Fix**
+  - [ ] **Root Cause Resolution for Hang on Wide CSVs (e.g. `sample_public_data.csv` with 115 columns)**:
+    - [ ] In `ColumnLetterRulerView.drawHashMarksAndLabels`: eliminate inner loop calling `tv.columnRect(for: colIndex)`. Previously re-calculated all 115 column widths from scratch and forced full CoreText TextKit layout via `layoutManager.usedRect` 115 times per frame ($O(N^2)$), causing a 16+ second main-thread freeze and beachball spinny icon.
+    - [ ] Streamline `ColumnLetterRulerView`: compute `tv.columnWidths()` once and derive column boundaries sequentially via incremental running `startX` in a single $O(N)$ pass (~0.0001s).
+  - [ ] **Column Widths Caching in `VimMDTextView`**:
+    - [ ] Add `cachedColumnWidths: [CGFloat]?` in `VimMDTextView`, invalidated on text changes or syntax styling passes and reused across mouse tracking, caret alignment, and ruler draw passes.
+  - [ ] **Multiline Quoted Field CSV Resilience**:
+    - [ ] Enhance tabular line parser to handle multiline quoted records gracefully without column count skew or kerning distortions.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
