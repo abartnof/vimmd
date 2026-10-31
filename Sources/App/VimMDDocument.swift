@@ -184,7 +184,7 @@ open class VimMDDocument: NSDocument {
 
     public func configureWrapLinesPolicy() {
         if isTabularDocument {
-            self.wrapLines = false
+            self.wrapLines = true
             self.wrapTableCells = true
         } else {
             self.wrapLines = UserDefaults.standard.object(forKey: VimMDDocument.wrapLinesPreferenceKey) as? Bool ?? true
@@ -520,7 +520,8 @@ open class VimMDDocument: NSDocument {
         let scrollView = NSScrollView(frame: scrollFrame)
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = !self.wrapLines
+        let allowHorizontal = isTabularDocument || !self.wrapLines
+        scrollView.hasHorizontalScroller = allowHorizontal
         scrollView.allowsMagnification = true
         scrollView.minMagnification = 0.5
         scrollView.maxMagnification = 3.0
@@ -530,10 +531,10 @@ open class VimMDDocument: NSDocument {
         tv.minSize = NSSize(width: 0.0, height: contentSize.height)
         tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         tv.isVerticallyResizable = true
-        tv.isHorizontallyResizable = !self.wrapLines
-        tv.autoresizingMask = self.wrapLines ? [.width] : []
-        tv.textContainer?.containerSize = NSSize(width: self.wrapLines ? contentSize.width : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        tv.textContainer?.widthTracksTextView = self.wrapLines
+        tv.isHorizontallyResizable = allowHorizontal
+        tv.autoresizingMask = (self.wrapLines && !isTabularDocument) ? [.width] : []
+        tv.textContainer?.containerSize = NSSize(width: (self.wrapLines && !isTabularDocument) ? contentSize.width : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.textContainer?.widthTracksTextView = (self.wrapLines && !isTabularDocument)
 
         if self.session == nil {
             let s = VimSession(initialText: "")
@@ -572,6 +573,7 @@ open class VimMDDocument: NSDocument {
         }
 
         scrollView.documentView = tv
+        tv.usesRuler = false
         tv.wrapLines = self.wrapLines
         tv.freezeFirstRow = self.freezeFirstRow
         tv.freezeFirstColumn = self.freezeFirstColumn
@@ -597,6 +599,7 @@ open class VimMDDocument: NSDocument {
         colRuler.clientView = tv
         scrollView.horizontalRulerView = colRuler
         scrollView.hasHorizontalRuler = self.isTabularDocument
+        tv.usesRuler = false
 
         // 2. Status bar at bottom
         let statusFrame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)

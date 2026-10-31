@@ -818,8 +818,12 @@ do {
         assert(doc.wrapTableCells && tv.wrapTableCells, "Initial wrapTableCells should default to true")
         let widthsWrapped = tv.columnWidths()
         assert(!widthsWrapped.isEmpty, "Column widths should be computed")
-        for w in widthsWrapped {
-            assert(abs(w - 240.0) < 0.1, "Wrapped column width should be 240.0, got \(w)")
+        for (idx, w) in widthsWrapped.enumerated() {
+            if idx == 5 {
+                assert(w > 300.0, "Long column should expand to fit content without spilling, got \(w)")
+            } else {
+                assert(abs(w - 240.0) < 0.1, "Wrapped column width should be 240.0, got \(w)")
+            }
         }
         
         // Toggle Wrap Table Cells OFF -> Auto-fit width calculation
@@ -834,8 +838,12 @@ do {
         doc.toggleWrapTableCells(nil)
         assert(doc.wrapTableCells && tv.wrapTableCells, "wrapTableCells should be true after toggle")
         let widthsRestored = tv.columnWidths()
-        for w in widthsRestored {
-            assert(abs(w - 240.0) < 0.1, "Restored wrapped column width should be 240.0, got \(w)")
+        for (idx, w) in widthsRestored.enumerated() {
+            if idx == 5 {
+                assert(w > 300.0, "Long column should expand to fit content without spilling, got \(w)")
+            } else {
+                assert(abs(w - 240.0) < 0.1, "Restored wrapped column width should be 240.0, got \(w)")
+            }
         }
     }
     

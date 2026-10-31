@@ -10,6 +10,51 @@ open class ColumnLetterRulerView: NSRulerView {
     public var dragStartColIndex: Int?
     private var rulerTrackingArea: NSTrackingArea?
 
+    // MARK: - Disable Ruler Accessories and Markers
+
+    override open var accessoryView: NSView? {
+        get { return nil }
+        set {}
+    }
+
+    override open var markers: [NSRulerMarker]? {
+        get { return nil }
+        set {}
+    }
+
+    override open func addMarker(_ marker: NSRulerMarker) {
+        // Safe no-op: ColumnLetterRulerView does not support text markers
+    }
+
+    override open func removeMarker(_ marker: NSRulerMarker) {
+        // Safe no-op
+    }
+
+    override open func trackMarker(_ marker: NSRulerMarker, withMouseEvent event: NSEvent) -> Bool {
+        return false
+    }
+
+    public func trackMarker(_ marker: NSRulerMarker, with event: NSEvent) -> Bool {
+        return false
+    }
+
+    override open func addSubview(_ view: NSView) {
+        // Discard all subviews to prevent AppKit text formatting ruler controls from attaching
+    }
+
+    override open func addSubview(_ view: NSView, positioned place: NSWindow.OrderingMode, relativeTo otherView: NSView?) {
+        // Discard all subviews to prevent AppKit text formatting ruler controls from attaching
+    }
+
+    override open func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        subview.removeFromSuperview()
+    }
+
+    override open func willRemoveSubview(_ subview: NSView) {
+        super.willRemoveSubview(subview)
+    }
+
     public static func columnLetter(for columnIndex: Int) -> String {
         var index = columnIndex
         var result = ""
@@ -34,6 +79,11 @@ open class ColumnLetterRulerView: NSRulerView {
 
     private func setupRuler() {
         self.ruleThickness = 22.0
+        super.accessoryView = nil
+        super.markers = nil
+        for sub in self.subviews {
+            sub.removeFromSuperview()
+        }
         guard let scrollView = self.scrollView else { return }
         let clipView = scrollView.contentView
         clipView.postsBoundsChangedNotifications = true

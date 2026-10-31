@@ -250,7 +250,7 @@ for tc in testCases {
     assert(!doc.isDocumentEdited, "Initial document should not be dirty for \(tc.ext)")
     if tc.ext == "csv" || tc.ext == "tsv" {
         assert(textView.isTabularDocument, "Expected isTabularDocument for \(tc.ext)")
-        assert(!textView.wrapLines, "Expected wrapLines == false for tabular \(tc.ext)")
+        assert(textView.wrapLines, "Expected wrapLines == true for tabular \(tc.ext)")
         if tc.ext == "tsv" {
             assert(textView.isTSV, "Expected isTSV == true for TSV")
         } else {

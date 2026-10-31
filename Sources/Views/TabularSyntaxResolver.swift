@@ -67,6 +67,21 @@ public struct TabularSyntaxResolver {
 
         if wrapTableCells {
             var widths = Array(repeating: defaultWrapWidth, count: maxCols)
+            for (lineIdx, fields) in parsedLines.enumerated() {
+                let isHeader = (lineIdx == 0)
+                let font = isHeader ? boldFont : regularFont
+                for field in fields {
+                    let col = field.columnIndex
+                    guard col < maxCols else { continue }
+                    guard field.range.location + field.range.length <= fullString.length else { continue }
+                    let cellText = fullString.substring(with: field.range)
+                    let cellWidth = (cellText as NSString).size(withAttributes: [.font: font]).width
+                    let requiredWidth = ceil(cellWidth + padding)
+                    if requiredWidth > widths[col] {
+                        widths[col] = requiredWidth
+                    }
+                }
+            }
             for (col, w) in customColumnWidths {
                 if col < maxCols {
                     let clampedW = max(30.0, (w.isFinite && !w.isNaN) ? w : 30.0)

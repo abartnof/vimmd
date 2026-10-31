@@ -214,6 +214,14 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] Added `ColumnLetterRulerView` horizontal ruler for spreadsheets displaying column letters (A, B, C...); clicking a column letter copies the entire column to the clipboard.
   - [x] Full drag selection support in both rulers and visual feedback.
 
+- [ ] **Milestone Y: View Menu Color Picker for Non-Printing / Delimiter Characters**
+  - [ ] Add `View -> Delimiter Color...` (or `View -> Appearance -> Delimiter Color...`) menu item to present native macOS `NSColorPanel`.
+  - [ ] Support custom color selection for non-printing / syntax delimiter characters:
+    - Markdown delimiters: `#`, `##`, `###`, `**`, `*`, `~~`, `` ` ``, `[]()`.
+    - Tabular / Spreadsheet separators: `,` (CSV) and `\t` (TSV).
+  - [ ] Persist selected color across app launches via `UserDefaults` (e.g. `VimMDDelimiterColorKey`).
+  - [ ] Live-update all open documents and syntax modes dynamically without requiring file reload or app restart.
+
 ---
 
 ## 3. Function & Schema Verification Matrix

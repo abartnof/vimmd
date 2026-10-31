@@ -624,8 +624,8 @@ func testDocumentTabularSyntaxIntegration() throws {
     guard !csvTv.isTSV else {
         throw NSError(domain: "AppTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Expected isTSV == false for CSV"])
     }
-    guard !csvTv.wrapLines else {
-        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected wrapLines == false for CSV"])
+    guard csvTv.wrapLines else {
+        throw NSError(domain: "AppTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Expected wrapLines == true for CSV"])
     }
 
     // Check header styling in textStorage

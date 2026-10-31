@@ -153,7 +153,13 @@ open class VimMDTextView: NSTextView {
         setupDefaults()
     }
 
+    override open var usesRuler: Bool {
+        get { return false }
+        set {}
+    }
+
     private func setupDefaults() {
+        super.usesRuler = false
         self.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         self.textColor = NSColor.textColor
         self.typingAttributes = [
@@ -186,6 +192,7 @@ open class VimMDTextView: NSTextView {
     }
 
     public func updateHorizontalRulerVisibility() {
+        self.usesRuler = false
         guard let sv = enclosingScrollView else { return }
         if isTabularDocument {
             if sv.horizontalRulerView == nil {
@@ -273,7 +280,7 @@ open class VimMDTextView: NSTextView {
 
     public func applyWrapLinesSetting() {
         guard let textContainer = self.textContainer else { return }
-        if wrapLines {
+        if wrapLines && !isTabularDocument {
             let contentWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
             textContainer.widthTracksTextView = true
             textContainer.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
@@ -347,7 +354,7 @@ open class VimMDTextView: NSTextView {
 
     public func updateFrameHeightToFitText() {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
-        if !wrapLines {
+        if !wrapLines || isTabularDocument {
             updateFrameForUnwrappedLines()
             return
         }
@@ -366,7 +373,7 @@ open class VimMDTextView: NSTextView {
     override open func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(newSize.width - self.frame.size.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged && wrapLines {
+        if widthChanged && wrapLines && !isTabularDocument {
             updateFrameHeightToFitText()
         }
     }

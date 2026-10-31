@@ -193,6 +193,50 @@ func testColumnLetterAlignmentAndDrawing() throws {
     image.unlockFocus()
 }
 
+func testRulerAccessoriesAndMarkersDisabled() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let tv = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    guard tv.usesRuler == false else {
+        throw NSError(domain: "ViewsTests", code: 60, userInfo: [NSLocalizedDescriptionKey: "tv.usesRuler should default to false"])
+    }
+
+    scrollView.documentView = tv
+    let colRuler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
+    colRuler.clientView = tv
+    scrollView.horizontalRulerView = colRuler
+
+    tv.documentSyntaxType = .csv
+    guard tv.usesRuler == false else {
+        throw NSError(domain: "ViewsTests", code: 61, userInfo: [NSLocalizedDescriptionKey: "tv.usesRuler should remain false after setting csv syntax"])
+    }
+
+    // Verify accessoryView is nil and setter is a no-op
+    guard colRuler.accessoryView == nil else {
+        throw NSError(domain: "ViewsTests", code: 62, userInfo: [NSLocalizedDescriptionKey: "colRuler.accessoryView should be nil"])
+    }
+    colRuler.accessoryView = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+    guard colRuler.accessoryView == nil else {
+        throw NSError(domain: "ViewsTests", code: 63, userInfo: [NSLocalizedDescriptionKey: "colRuler.accessoryView setter should be a no-op"])
+    }
+
+    // Verify markers is nil or empty, and addMarker is a no-op
+    guard colRuler.markers == nil || colRuler.markers?.isEmpty == true else {
+        throw NSError(domain: "ViewsTests", code: 64, userInfo: [NSLocalizedDescriptionKey: "colRuler.markers should be nil or empty"])
+    }
+    let marker = NSRulerMarker(rulerView: colRuler, markerLocation: 50.0, image: NSImage(), imageOrigin: .zero)
+    colRuler.addMarker(marker)
+    guard colRuler.markers == nil || colRuler.markers?.isEmpty == true else {
+        throw NSError(domain: "ViewsTests", code: 65, userInfo: [NSLocalizedDescriptionKey: "colRuler.addMarker should be ignored"])
+    }
+
+    // Verify subviews cannot be added and remain empty
+    let dummyView = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 20))
+    colRuler.addSubview(dummyView)
+    guard colRuler.subviews.isEmpty else {
+        throw NSError(domain: "ViewsTests", code: 66, userInfo: [NSLocalizedDescriptionKey: "colRuler.subviews should remain empty"])
+    }
+}
+
 print("=== ColumnLetterRulerView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -203,7 +247,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testRulerVisibilityForTabularDocuments", testRulerVisibilityForTabularDocuments),
     ("testColumnLetterHoverCursor", testColumnLetterHoverCursor),
     ("testColumnLetterClickCopiesColumn", testColumnLetterClickCopiesColumn),
-    ("testColumnLetterAlignmentAndDrawing", testColumnLetterAlignmentAndDrawing)
+    ("testColumnLetterAlignmentAndDrawing", testColumnLetterAlignmentAndDrawing),
+    ("testRulerAccessoriesAndMarkersDisabled", testRulerAccessoriesAndMarkersDisabled)
 ]
 
 for (name, test) in tests {

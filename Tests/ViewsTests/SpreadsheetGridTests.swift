@@ -75,15 +75,64 @@ func testColumnWidthCalculationWrapOnVsOff() throws {
         throw NSError(domain: "SpreadsheetGridTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Wrap OFF should expand column 1 width to fit longest cell: \(widthsWrapOff[1])"])
     }
 
-    // Wrap ON: column width should cap/wrap to default width (e.g. 240.0)
+    // Wrap ON: column width starts at defaultWrapWidth (240.0) and expands to fit longer cells
     let widthsWrapOn = resolver.calculateColumnWidths(in: storage, isTSV: true, wrapTableCells: true, defaultWrapWidth: 240.0)
     guard widthsWrapOn.count == 3 else {
         throw NSError(domain: "SpreadsheetGridTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected 3 columns for wrap on"])
     }
-    for w in widthsWrapOn {
-        guard abs(w - 240.0) < 0.01 else {
-            throw NSError(domain: "SpreadsheetGridTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected wrapped column width 240.0, got \(w)"])
-        }
+    // Short columns stay at defaultWrapWidth
+    guard abs(widthsWrapOn[0] - 240.0) < 0.01 && abs(widthsWrapOn[2] - 240.0) < 0.01 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Short columns should remain defaultWrapWidth 240.0, got \(widthsWrapOn)"])
+    }
+    // Long column expands to accommodate content to prevent spilling across column boundaries
+    guard widthsWrapOn[1] >= 320.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected long column 1 to expand to at least 320.0, got \(widthsWrapOn[1])"])
+    }
+}
+
+// 2b. Long Cell Text Accommodation and Column Boundary Alignment (e.g. flight_comparison.csv line 15)
+func testLongCellDoesNotSpillAndPreservesColumnAlignment() throws {
+    let csv = "ColA,ColB,ColC\n\"Avoids as much CO2e as 2,192 trees absorb in a day\",$357,$420\nShort,ValB,ValC\n"
+    let storage = NSTextStorage(string: csv)
+    let resolver = TabularSyntaxResolver()
+
+    let widths = resolver.calculateColumnWidths(in: storage, isTSV: false, wrapTableCells: true, defaultWrapWidth: 240.0)
+    guard widths.count == 3 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 25, userInfo: [NSLocalizedDescriptionKey: "Expected 3 columns, got \(widths.count)"])
+    }
+
+    // Column 0 must expand beyond 240.0 to fit the 335.5pt text + 20pt padding (~356pt)
+    guard widths[0] >= 350.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 26, userInfo: [NSLocalizedDescriptionKey: "Column 0 must expand to accommodate long cell: got \(widths[0])"])
+    }
+    // Short columns (ColB, ColC) remain at defaultWrapWidth 240.0
+    guard abs(widths[1] - 240.0) < 0.01 && abs(widths[2] - 240.0) < 0.01 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 27, userInfo: [NSLocalizedDescriptionKey: "Short columns should remain defaultWrapWidth 240.0, got \(widths)"])
+    }
+
+    // Render tabular syntax and verify comma delimiter has positive kern to preserve ColB alignment
+    resolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: true)
+
+    let fullStr = storage.string as NSString
+    let line1Range = fullStr.lineRange(for: fullStr.range(of: "Avoids as much CO2e"))
+    let (_, delims1) = resolver.parseLine(in: fullStr, range: line1Range, isTSV: false)
+    guard !delims1.isEmpty else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 28, userInfo: [NSLocalizedDescriptionKey: "Line 1 should have delimiters"])
+    }
+    let comma1Kern = storage.attribute(.kern, at: delims1[0].location, effectiveRange: nil) as? CGFloat ?? 0.0
+    guard comma1Kern > 0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 29, userInfo: [NSLocalizedDescriptionKey: "Line 1 comma after long cell must have positive kern to align ColB: got \(comma1Kern)"])
+    }
+
+    // Line 2 (short cell "Short") comma delimiter must also have positive kern aligning to the same ColB start
+    let line2Range = fullStr.lineRange(for: fullStr.range(of: "Short,ValB"))
+    let (_, delims2) = resolver.parseLine(in: fullStr, range: line2Range, isTSV: false)
+    guard !delims2.isEmpty else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 30, userInfo: [NSLocalizedDescriptionKey: "Line 2 should have delimiters"])
+    }
+    let comma2Kern = storage.attribute(.kern, at: delims2[0].location, effectiveRange: nil) as? CGFloat ?? 0.0
+    guard comma2Kern > comma1Kern else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 31, userInfo: [NSLocalizedDescriptionKey: "Line 2 comma kern (\(comma2Kern)) should be larger than line 1 kern (\(comma1Kern)) to align ColB"])
     }
 }
 
@@ -438,6 +487,7 @@ var passed = 0
 let tests: [(String, () throws -> Void)] = [
     ("testNeutralColorStylingAndDelimiters", testNeutralColorStylingAndDelimiters),
     ("testColumnWidthCalculationWrapOnVsOff", testColumnWidthCalculationWrapOnVsOff),
+    ("testLongCellDoesNotSpillAndPreservesColumnAlignment", testLongCellDoesNotSpillAndPreservesColumnAlignment),
     ("testGridlinesConfiguration", testGridlinesConfiguration),
     ("testDynamicRowAndColumnAddition", testDynamicRowAndColumnAddition),
     ("testHoverCursors", testHoverCursors),

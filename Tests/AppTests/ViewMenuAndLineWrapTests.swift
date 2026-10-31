@@ -160,38 +160,38 @@ func testWrapLinesMenuItemConfiguration() throws {
 func testDocumentWrapLinesPolicyPerFormat() throws {
     let tempDir = FileManager.default.temporaryDirectory
 
-    // 1. CSV Document defaults to wrapLines == false
+    // 1. CSV Document defaults to wrapLines == true (with horizontal scroller enabled)
     let csvURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).csv")
     try "col1,col2,col3\nval1,val2,val3".write(to: csvURL, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: csvURL) }
 
     let csvDoc = try VimMDDocument(contentsOf: csvURL, ofType: "public.comma-separated-values-text")
-    guard csvDoc.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected CSV document wrapLines == false"])
+    guard csvDoc.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected CSV document wrapLines == true"])
     }
     csvDoc.makeWindowControllers()
     guard let csvTextView = csvDoc.textView else {
         throw NSError(domain: "ViewMenuTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "CSV textView nil"])
     }
-    guard csvTextView.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "CSV textView.wrapLines expected false"])
+    guard csvTextView.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "CSV textView.wrapLines expected true"])
     }
     guard csvTextView.enclosingScrollView?.hasHorizontalScroller == true else {
         throw NSError(domain: "ViewMenuTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "CSV scrollView.hasHorizontalScroller expected true"])
     }
 
-    // 2. TSV Document defaults to wrapLines == false
+    // 2. TSV Document defaults to wrapLines == true (with horizontal scroller enabled)
     let tsvURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).tsv")
     try "col1\tcol2\tcol3\nval1\tval2\tval3".write(to: tsvURL, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: tsvURL) }
 
     let tsvDoc = try VimMDDocument(contentsOf: tsvURL, ofType: "public.tab-separated-values-text")
-    guard tsvDoc.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected TSV document wrapLines == false"])
+    guard tsvDoc.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Expected TSV document wrapLines == true"])
     }
     tsvDoc.makeWindowControllers()
-    guard tsvDoc.textView?.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "TSV textView.wrapLines expected false"])
+    guard tsvDoc.textView?.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "TSV textView.wrapLines expected true"])
     }
     guard tsvDoc.textView?.enclosingScrollView?.hasHorizontalScroller == true else {
         throw NSError(domain: "ViewMenuTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "TSV scrollView.hasHorizontalScroller expected true"])
@@ -277,23 +277,23 @@ func testWrapLinesToggleAndPersistence() throws {
 
     let csvDoc = try VimMDDocument(contentsOf: csvURL, ofType: "public.comma-separated-values-text")
     csvDoc.makeWindowControllers()
-    guard csvDoc.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "CSV should start with wrapLines == false"])
+    guard csvDoc.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "CSV should start with wrapLines == true"])
     }
 
     csvDoc.toggleWrapLines(nil)
-    guard csvDoc.wrapLines == true && csvDoc.textView?.wrapLines == true else {
-        throw NSError(domain: "ViewMenuTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "CSV wrapLines should now be true"])
+    guard csvDoc.wrapLines == false && csvDoc.textView?.wrapLines == false else {
+        throw NSError(domain: "ViewMenuTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "CSV wrapLines should now be false"])
     }
-    // Check that UserDefaults was NOT changed to true by CSV or overwritten
+    // Check that UserDefaults was NOT changed to false by CSV or overwritten
     guard (UserDefaults.standard.object(forKey: VimMDDocument.wrapLinesPreferenceKey) as? Bool) == true else {
         throw NSError(domain: "ViewMenuTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "CSV toggle must not corrupt global preference"])
     }
 
-    // Toggle back to false on CSV
+    // Toggle back to true on CSV
     csvDoc.toggleWrapLines(nil)
-    guard csvDoc.wrapLines == false else {
-        throw NSError(domain: "ViewMenuTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "CSV wrapLines should be false again"])
+    guard csvDoc.wrapLines == true else {
+        throw NSError(domain: "ViewMenuTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "CSV wrapLines should be true again"])
     }
     // Global preference should STILL be true
     guard (UserDefaults.standard.object(forKey: VimMDDocument.wrapLinesPreferenceKey) as? Bool) == true else {
