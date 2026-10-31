@@ -265,19 +265,42 @@ open class LineNumberRulerView: NSRulerView {
         }
     }
 
-    public func activeRowBadgeRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0) -> NSRect {
-        let badgeHeight: CGFloat = 14.0
-        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
+    private static let activeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+    private static let inactiveFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    private static let activeAttrs: [NSAttributedString.Key: Any] = [
+        .font: activeFont,
+        .foregroundColor: NSColor.white
+    ]
+    private static let inactiveAttrs: [NSAttributedString.Key: Any] = [
+        .font: inactiveFont,
+        .foregroundColor: NSColor.secondaryLabelColor
+    ]
+    private static let badgeHeight: CGFloat = 16.0
+    private static let horizontalPadding: CGFloat = 6.0
+    private static let textRightMargin: CGFloat = 8.0
 
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+    public func lineNumberTextRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0, isActive: Bool = true) -> NSRect {
+        let font = isActive ? Self.activeFont : Self.inactiveFont
         let numStr = "\(number)" as NSString
-        let textWidth = numStr.size(withAttributes: [.font: font]).width
+        let textSize = numStr.size(withAttributes: [.font: font])
 
-        // Sleek pill extends leftward with generous padding
-        let badgeWidth = max(badgeHeight, ceil(textWidth + 14.0))
-        let effectiveWidth = max(self.bounds.width, max(self.ruleThickness, badgeWidth + 4.0))
-        let badgeRight = effectiveWidth - 3.0
-        let badgeLeft = badgeRight - badgeWidth
+        let badgeHeight = Self.badgeHeight
+        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
+        let textY = badgeY + (badgeHeight - textSize.height) / 2.0
+
+        let effectiveWidth = max(self.bounds.width, self.ruleThickness)
+        let textRightX = effectiveWidth - Self.textRightMargin
+        let textLeftX = textRightX - textSize.width
+
+        return NSRect(x: textLeftX, y: textY, width: textSize.width, height: textSize.height)
+    }
+
+    public func activeRowBadgeRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0) -> NSRect {
+        let textRect = lineNumberTextRect(for: number, y: y, rowHeight: rowHeight, isActive: true)
+        let badgeHeight = Self.badgeHeight
+        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
+        let badgeLeft = textRect.minX - Self.horizontalPadding
+        let badgeWidth = textRect.width + 2.0 * Self.horizontalPadding
         return NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: badgeHeight)
     }
 
@@ -288,8 +311,7 @@ open class LineNumberRulerView: NSRulerView {
             highlightRect.fill()
         }
 
-        let rightMargin: CGFloat = 8.0
-        let drawWidth = max(0, self.bounds.width - rightMargin - 4.0)
+        let textRect = lineNumberTextRect(for: number, y: y, rowHeight: 18.0, isActive: isActive)
         let numStr = "\(number)" as NSString
 
         if isActive {
@@ -301,39 +323,19 @@ open class LineNumberRulerView: NSRulerView {
                 currentMode = VIM_MODE_NORMAL
             }
             let badgeColor = VimModeTheme.color(for: currentMode)
-            let badgeRect = activeRowBadgeRect(for: number, y: y, rowHeight: 18.0)
+            let badgeLeft = textRect.minX - Self.horizontalPadding
+            let badgeRight = textRect.maxX + Self.horizontalPadding
+            let badgeWidth = badgeRight - badgeLeft
+            let badgeY = y + max(0, (18.0 - Self.badgeHeight) / 2.0)
+            let badgeRect = NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: Self.badgeHeight)
             let r = badgeRect.height / 2.0
             let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: r, yRadius: r)
             badgeColor.setFill()
             badgePath.fill()
 
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .right
-
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: NSColor.white,
-                .paragraphStyle: paragraphStyle
-            ]
-
-            let drawRect = NSRect(x: 4.0, y: y, width: drawWidth, height: font.pointSize + 4.0)
-            numStr.draw(in: drawRect, withAttributes: attrs)
+            numStr.draw(in: textRect, withAttributes: Self.activeAttrs)
         } else {
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-            let color = NSColor.secondaryLabelColor
-
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .right
-
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: color,
-                .paragraphStyle: paragraphStyle
-            ]
-
-            let drawRect = NSRect(x: 4.0, y: y, width: drawWidth, height: font.pointSize + 4.0)
-            numStr.draw(in: drawRect, withAttributes: attrs)
+            numStr.draw(in: textRect, withAttributes: Self.inactiveAttrs)
         }
     }
 }

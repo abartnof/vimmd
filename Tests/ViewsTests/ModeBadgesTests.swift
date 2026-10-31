@@ -147,23 +147,23 @@ func testLineNumberRulerBadgeGeometry() throws {
     scrollView.rulersVisible = true
     ruler.ruleThickness = 40.0
 
-    // 1-digit line number: sleek pill by default (height: 14.0, width > height)
+    // 1-digit line number: sleek pill by default (height: 16.0, width > height)
     let rect1 = ruler.activeRowBadgeRect(for: 1, y: 0.0, rowHeight: 18.0)
-    guard rect1.height == 14.0 else {
-        throw NSError(domain: "ModeBadgesTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "Expected height 14.0, got \(rect1.height)"])
+    guard rect1.height == 16.0 else {
+        throw NSError(domain: "ModeBadgesTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "Expected height 16.0, got \(rect1.height)"])
     }
     guard rect1.width > rect1.height else {
         throw NSError(domain: "ModeBadgesTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "1-digit line number must be a sleek pill (width > height): width=\(rect1.width), height=\(rect1.height)"])
     }
-    // Vertical buffer: 2.0pt top and bottom within 18pt frame
-    guard rect1.origin.y == 2.0 else {
-        throw NSError(domain: "ModeBadgesTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected badge y == 2.0 within 18pt row, got \(rect1.origin.y)"])
+    // Vertical buffer: 1.0pt top and bottom within 18pt frame
+    guard rect1.origin.y == 1.0 else {
+        throw NSError(domain: "ModeBadgesTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected badge y == 1.0 within 18pt row, got \(rect1.origin.y)"])
     }
 
     // 2-digit line number: expands leftward
     let rect99 = ruler.activeRowBadgeRect(for: 99, y: 0.0, rowHeight: 18.0)
-    guard rect99.height == 14.0 else {
-        throw NSError(domain: "ModeBadgesTests", code: 43, userInfo: [NSLocalizedDescriptionKey: "Expected height 14.0, got \(rect99.height)"])
+    guard rect99.height == 16.0 else {
+        throw NSError(domain: "ModeBadgesTests", code: 43, userInfo: [NSLocalizedDescriptionKey: "Expected height 16.0, got \(rect99.height)"])
     }
     guard rect99.width > rect1.width else {
         throw NSError(domain: "ModeBadgesTests", code: 44, userInfo: [NSLocalizedDescriptionKey: "2-digit pill width (\(rect99.width)) should exceed 1-digit pill width (\(rect1.width))"])
@@ -171,8 +171,8 @@ func testLineNumberRulerBadgeGeometry() throws {
 
     // 3-digit line number: expands further leftward without clipping
     let rect100 = ruler.activeRowBadgeRect(for: 100, y: 0.0, rowHeight: 18.0)
-    guard rect100.height == 14.0 else {
-        throw NSError(domain: "ModeBadgesTests", code: 45, userInfo: [NSLocalizedDescriptionKey: "Expected height 14.0, got \(rect100.height)"])
+    guard rect100.height == 16.0 else {
+        throw NSError(domain: "ModeBadgesTests", code: 45, userInfo: [NSLocalizedDescriptionKey: "Expected height 16.0, got \(rect100.height)"])
     }
     guard rect100.width > rect99.width else {
         throw NSError(domain: "ModeBadgesTests", code: 46, userInfo: [NSLocalizedDescriptionKey: "3-digit pill width (\(rect100.width)) must exceed 2-digit pill width (\(rect99.width))"])
@@ -182,6 +182,31 @@ func testLineNumberRulerBadgeGeometry() throws {
     let rect1000 = ruler.activeRowBadgeRect(for: 1000, y: 0.0, rowHeight: 18.0)
     guard rect1000.width > rect100.width else {
         throw NSError(domain: "ModeBadgesTests", code: 47, userInfo: [NSLocalizedDescriptionKey: "4-digit line number capsule (\(rect1000.width)) must be wider than 3-digit capsule (\(rect100.width))"])
+    }
+
+    // Exact mathematical symmetry (top == bottom, left == right, and baseline parity with inactive text)
+    for num in [1, 9, 42, 99, 100, 999, 1000] {
+        let badgeRect = ruler.activeRowBadgeRect(for: num, y: 0.0, rowHeight: 18.0)
+        let textRect = ruler.lineNumberTextRect(for: num, y: 0.0, rowHeight: 18.0, isActive: true)
+        let topMargin = textRect.minY - badgeRect.minY
+        let bottomMargin = badgeRect.maxY - textRect.maxY
+        let leftMargin = textRect.minX - badgeRect.minX
+        let rightMargin = badgeRect.maxX - textRect.maxX
+
+        guard abs(topMargin - bottomMargin) < 0.1 else {
+            throw NSError(domain: "ModeBadgesTests", code: 48, userInfo: [NSLocalizedDescriptionKey: "Vertical margin asymmetry for line \(num): top=\(topMargin), bottom=\(bottomMargin)"])
+        }
+        guard abs(leftMargin - rightMargin) < 0.1 else {
+            throw NSError(domain: "ModeBadgesTests", code: 49, userInfo: [NSLocalizedDescriptionKey: "Horizontal margin asymmetry for line \(num): left=\(leftMargin), right=\(rightMargin)"])
+        }
+
+        let inactiveTextRect = ruler.lineNumberTextRect(for: num, y: 0.0, rowHeight: 18.0, isActive: false)
+        guard abs(textRect.origin.y - inactiveTextRect.origin.y) < 0.01 else {
+            throw NSError(domain: "ModeBadgesTests", code: 50, userInfo: [NSLocalizedDescriptionKey: "Active and inactive textY must match for baseline parity: active=\(textRect.origin.y), inactive=\(inactiveTextRect.origin.y)"])
+        }
+        guard abs(textRect.maxX - inactiveTextRect.maxX) < 0.01 else {
+            throw NSError(domain: "ModeBadgesTests", code: 51, userInfo: [NSLocalizedDescriptionKey: "Active and inactive right edge must align at same column: active=\(textRect.maxX), inactive=\(inactiveTextRect.maxX)"])
+        }
     }
 }
 

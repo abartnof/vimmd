@@ -247,6 +247,19 @@ This document tracks all active milestones, user requirements, and architectural
     - [ ] Ensure low-vision and accessibility users experience uniform, readable scaling across both buffer content and surrounding GUI accessories without truncation, clipping, or fixed-point layout overlap.
     - [ ] Respect magnification boundaries (0.5x to 3.0x) with seamless layout geometry recalculation on zoom change notifications.
 
+- [ ] **Milestone AB: Vim Indentation Operators (`>>`, `<<`, Visual `>` / `<`)**
+  - [ ] **Normal Mode Line Indent / Outdent (`>>`, `<<`)**:
+    - [ ] `>>`: Indent current line by one `shiftwidth` (default 4 spaces or tab stop).
+    - [ ] `<<`: Outdent / de-indent current line by one `shiftwidth`, clamping cleanly at column 0.
+    - [ ] Multi-line count multipliers: e.g. `3>>` indents 3 consecutive lines starting from cursor row; `2<<` outdents 2 consecutive lines.
+  - [ ] **Visual Mode Block Indent / Outdent (Visual `>` / `<`)**:
+    - [ ] In Visual Character (`v`) or Visual Line (`V`) mode, pressing `>` indents all lines spanned by the selection.
+    - [ ] In Visual Character (`v`) or Visual Line (`V`) mode, pressing `<` outdents all lines spanned by the selection.
+    - [ ] Exits visual mode to Normal mode upon execution, positioning cursor on the first non-blank character of the first indented line.
+  - [ ] **History & Syntax Integration**:
+    - [ ] Cohesive single-step undo (`u`) and redo (`Ctrl-R`) for all multi-line indentation actions.
+    - [ ] Differential line index re-indexing without desynchronizing Unicode offsets or syntax concealment caches.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
