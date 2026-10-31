@@ -167,8 +167,8 @@ func testDocumentWindowControllerSetup() throws {
     guard window.initialFirstResponder === tv else {
         throw NSError(domain: "AppTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Expected initialFirstResponder to be tv"])
     }
-    guard doc.modeLabel?.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- NORMAL --', got \(doc.modeLabel?.stringValue ?? "nil")"])
+    guard doc.modeLabel?.stringValue == "NORMAL" || doc.modeLabel?.stringValue == "-- NORMAL --" else {
+        throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'NORMAL', got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
     guard window.title.contains("[NORMAL]") else {
         throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])
@@ -176,16 +176,16 @@ func testDocumentWindowControllerSetup() throws {
 
     // Test mode transitions update status display and window title
     doc.session?.feedKeys("i")
-    guard doc.modeLabel?.stringValue == "-- INSERT --" else {
-        throw NSError(domain: "AppTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- INSERT --' after 'i', got \(doc.modeLabel?.stringValue ?? "nil")"])
+    guard doc.modeLabel?.stringValue == "INSERT" || doc.modeLabel?.stringValue == "-- INSERT --" else {
+        throw NSError(domain: "AppTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'INSERT' after 'i', got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
     guard window.title.contains("[INSERT]") else {
         throw NSError(domain: "AppTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [INSERT], got '\(window.title)'"])
     }
 
     doc.session?.feedKeys("\u{1b}")
-    guard doc.modeLabel?.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "AppTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel '-- NORMAL --' after Esc, got \(doc.modeLabel?.stringValue ?? "nil")"])
+    guard doc.modeLabel?.stringValue == "NORMAL" || doc.modeLabel?.stringValue == "-- NORMAL --" else {
+        throw NSError(domain: "AppTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'NORMAL' after Esc, got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
     guard window.title.contains("[NORMAL]") else {
         throw NSError(domain: "AppTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])

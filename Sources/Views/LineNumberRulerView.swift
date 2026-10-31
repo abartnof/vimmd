@@ -1,5 +1,6 @@
 import AppKit
 import Engine
+import CBridge
 
 open class LineNumberRulerView: NSRulerView {
     override open var isFlipped: Bool {
@@ -264,6 +265,22 @@ open class LineNumberRulerView: NSRulerView {
         }
     }
 
+    public func activeRowBadgeRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0) -> NSRect {
+        let badgeHeight: CGFloat = 14.0
+        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+        let numStr = "\(number)" as NSString
+        let textWidth = numStr.size(withAttributes: [.font: font]).width
+
+        // Sleek pill extends leftward with generous padding
+        let badgeWidth = max(badgeHeight, ceil(textWidth + 14.0))
+        let effectiveWidth = max(self.bounds.width, max(self.ruleThickness, badgeWidth + 4.0))
+        let badgeRight = effectiveWidth - 3.0
+        let badgeLeft = badgeRight - badgeWidth
+        return NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: badgeHeight)
+    }
+
     private func drawLineNumber(_ number: Int, y: CGFloat, isActive: Bool) {
         if let range = activeRowDragRange, range.contains(number - 1) {
             let highlightRect = NSRect(x: 0, y: y, width: bounds.width, height: 18.0)
@@ -271,24 +288,52 @@ open class LineNumberRulerView: NSRulerView {
             highlightRect.fill()
         }
 
-        let font = isActive
-            ? NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-            : NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        let color = isActive ? NSColor.controlAccentColor : NSColor.secondaryLabelColor
-
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .right
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        let numStr = "\(number)" as NSString
         let rightMargin: CGFloat = 8.0
         let drawWidth = max(0, self.bounds.width - rightMargin - 4.0)
-        let drawRect = NSRect(x: 4.0, y: y, width: drawWidth, height: font.pointSize + 4.0)
-        numStr.draw(in: drawRect, withAttributes: attrs)
+        let numStr = "\(number)" as NSString
+
+        if isActive {
+            let currentMode: VimEngineMode
+            if let tv = (self.clientView as? VimMDTextView) ?? (self.scrollView?.documentView as? VimMDTextView),
+               let session = tv.session {
+                currentMode = session.mode
+            } else {
+                currentMode = VIM_MODE_NORMAL
+            }
+            let badgeColor = VimModeTheme.color(for: currentMode)
+            let badgeRect = activeRowBadgeRect(for: number, y: y, rowHeight: 18.0)
+            let r = badgeRect.height / 2.0
+            let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: r, yRadius: r)
+            badgeColor.setFill()
+            badgePath.fill()
+
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .right
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.white,
+                .paragraphStyle: paragraphStyle
+            ]
+
+            let drawRect = NSRect(x: 4.0, y: y, width: drawWidth, height: font.pointSize + 4.0)
+            numStr.draw(in: drawRect, withAttributes: attrs)
+        } else {
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            let color = NSColor.secondaryLabelColor
+
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .right
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraphStyle
+            ]
+
+            let drawRect = NSRect(x: 4.0, y: y, width: drawWidth, height: font.pointSize + 4.0)
+            numStr.draw(in: drawRect, withAttributes: attrs)
+        }
     }
 }

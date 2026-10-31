@@ -194,7 +194,11 @@ open class VimMDDocument: NSDocument {
     public var session: VimSession?
     public var textView: VimMDTextView?
     public var isClosed: Bool = false
-    public var modeLabel: NSTextField?
+    public var modeBadgeView: ModeBadgeView?
+    public var modeLabel: ModeBadgeView? {
+        get { modeBadgeView }
+        set { modeBadgeView = newValue }
+    }
     public var posLabel: NSTextField?
     public var messageLabel: NSTextField?
     public var savedChipView: SavedChipView?
@@ -261,6 +265,30 @@ open class VimMDDocument: NSDocument {
         chip.alphaValue = 0.0
     }
 
+    public func textBodyLeftMargin() -> CGFloat {
+        guard let tv = self.textView else {
+            return 41.0
+        }
+        let rulerThickness = (tv.enclosingScrollView?.hasVerticalRuler == true && tv.enclosingScrollView?.rulersVisible == true)
+            ? (tv.enclosingScrollView?.verticalRulerView?.ruleThickness ?? 36.0)
+            : 36.0
+        let inset = tv.textContainerInset.width
+        let padding = tv.textContainer?.lineFragmentPadding ?? 5.0
+        return rulerThickness + inset + padding
+    }
+
+    public func updateModeBadgePosition() {
+        guard let badge = modeBadgeView else { return }
+        let targetTextLeft = textBodyLeftMargin()
+        let sampleFont = badge.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        let textSize = (badge.stringValue as NSString).size(withAttributes: [.font: sampleFont])
+        let internalPadding = max(0, (badge.frame.width - textSize.width) / 2.0)
+        let badgeX = targetTextLeft - internalPadding
+        let badgeY: CGFloat = 3.0
+        let badgeHeight = badge.frame.height > 0 ? badge.frame.height : 16.0
+        badge.frame = NSRect(x: badgeX, y: badgeY, width: badge.frame.width, height: badgeHeight)
+    }
+
     public func showStatusMessage(_ text: String, isWarning: Bool = false) {
         self.currentStatusMessage = text
         self.isCurrentStatusMessageWarning = isWarning
@@ -285,9 +313,8 @@ open class VimMDDocument: NSDocument {
         let rightBound = savedChipView?.frame.origin.x ?? (posLabel?.frame.origin.x ?? 300)
 
         if currentMode == VIM_MODE_COMMAND {
-            modeLabel?.isHidden = true
-            modeLabel?.stringValue = ""
-            modeLabel?.textColor = VimModeTheme.color(for: VIM_MODE_COMMAND)
+            modeBadgeView?.isHidden = true
+            modeBadgeView?.stringValue = ""
 
             let promptWidth = max(60, rightBound - 16)
             messageLabel?.frame = NSRect(x: 8, y: 3, width: promptWidth, height: 16)
@@ -296,12 +323,15 @@ open class VimMDDocument: NSDocument {
             let cmd = session.commandLineBuffer
             messageLabel?.stringValue = cmd
         } else {
-            modeLabel?.isHidden = false
-            modeLabel?.stringValue = "-- \(mode) --"
-            modeLabel?.textColor = VimModeTheme.color(for: currentMode)
+            modeBadgeView?.isHidden = false
+            modeBadgeView?.mode = currentMode
+            modeBadgeView?.updateBadge()
+            updateModeBadgePosition()
 
-            let normalMsgWidth = max(60, rightBound - 165)
-            messageLabel?.frame = NSRect(x: 155, y: 3, width: normalMsgWidth, height: 16)
+            let badgeRight = modeBadgeView?.frame.maxX ?? 120.0
+            let normalMsgX = max(155, badgeRight + 12.0)
+            let normalMsgWidth = max(60, rightBound - normalMsgX - 10)
+            messageLabel?.frame = NSRect(x: normalMsgX, y: 3, width: normalMsgWidth, height: 16)
             messageLabel?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
 
             if let err = session.lastError, !err.isEmpty {
@@ -318,6 +348,7 @@ open class VimMDDocument: NSDocument {
                 messageLabel?.textColor = isCurrentStatusMessageWarning ? NSColor.systemOrange : NSColor.secondaryLabelColor
             }
         }
+        self.textView?.enclosingScrollView?.verticalRulerView?.needsDisplay = true
         previousMode = currentMode
     }
 
@@ -606,15 +637,11 @@ open class VimMDDocument: NSDocument {
         let statusBar = NSView(frame: statusFrame)
         statusBar.autoresizingMask = [.width, .maxYMargin]
 
-        let modeLbl = NSTextField(frame: NSRect(x: 8, y: 3, width: 140, height: 16))
-        modeLbl.isEditable = false
-        modeLbl.isBordered = false
-        modeLbl.backgroundColor = .clear
-        modeLbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        modeLbl.textColor = VimModeTheme.color(for: VIM_MODE_NORMAL)
-        modeLbl.stringValue = "-- NORMAL --"
-        statusBar.addSubview(modeLbl)
-        self.modeLabel = modeLbl
+        let badge = ModeBadgeView(frame: NSRect(x: 33, y: 3, width: 68, height: 16))
+        badge.mode = VIM_MODE_NORMAL
+        statusBar.addSubview(badge)
+        self.modeBadgeView = badge
+        updateModeBadgePosition()
 
         let chipWidth: CGFloat = 78.0
         let chipHeight: CGFloat = 18.0

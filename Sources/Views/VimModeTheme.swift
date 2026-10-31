@@ -94,6 +94,24 @@ public struct VimModeTheme {
         }
     }
 
+    /// Returns the clean uppercase mode badge text without enclosing dashes for the mode pill badge.
+    public static func modeBadgeText(for mode: VimEngineMode) -> String {
+        switch mode {
+        case VIM_MODE_NORMAL:
+            return "NORMAL"
+        case VIM_MODE_INSERT:
+            return "INSERT"
+        case VIM_MODE_VISUAL:
+            return "VISUAL"
+        case VIM_MODE_REPLACE:
+            return "REPLACE"
+        case VIM_MODE_COMMAND:
+            return ""
+        default:
+            return "\(mode)".uppercased()
+        }
+    }
+
     /// Calculates the precise cursor rect based on morphology, proposed insertion point rect, and cell width.
     public static func calculateCursorRect(for morphology: CursorMorphology, proposedRect: NSRect, cellWidth: CGFloat) -> NSRect {
         let width = cellWidth > 0 ? cellWidth : proposedRect.width

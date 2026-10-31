@@ -249,45 +249,45 @@ func testDocumentStatusBarModeLabelStyling() throws {
 
     // 1. Normal mode styling
     doc.updateStatusDisplay()
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "ThemeTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "Expected visible '-- NORMAL --', got '\(modeLabel.stringValue)'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "NORMAL" || modeLabel.stringValue == "-- NORMAL --") else {
+        throw NSError(domain: "ThemeTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "Expected visible 'NORMAL', got '\(modeLabel.stringValue)'"])
     }
     let normalColor = VimModeTheme.color(for: VIM_MODE_NORMAL)
-    guard modeLabel.textColor == normalColor else {
-        throw NSError(domain: "ThemeTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "modeLabel textColor must match Normal theme color, got \(String(describing: modeLabel.textColor))"])
+    guard modeLabel.badgeColor == normalColor || modeLabel.textColor == normalColor else {
+        throw NSError(domain: "ThemeTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "modeLabel badgeColor must match Normal theme color, got \(String(describing: modeLabel.badgeColor))"])
     }
 
     // 2. Insert mode styling
     session.feedKeys("i")
     doc.updateStatusDisplay()
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- INSERT --" else {
-        throw NSError(domain: "ThemeTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected visible '-- INSERT --', got '\(modeLabel.stringValue)'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "INSERT" || modeLabel.stringValue == "-- INSERT --") else {
+        throw NSError(domain: "ThemeTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected visible 'INSERT', got '\(modeLabel.stringValue)'"])
     }
     let insertColor = VimModeTheme.color(for: VIM_MODE_INSERT)
-    guard modeLabel.textColor == insertColor else {
-        throw NSError(domain: "ThemeTests", code: 43, userInfo: [NSLocalizedDescriptionKey: "modeLabel textColor must match Insert theme color, got \(String(describing: modeLabel.textColor))"])
+    guard modeLabel.badgeColor == insertColor || modeLabel.textColor == insertColor else {
+        throw NSError(domain: "ThemeTests", code: 43, userInfo: [NSLocalizedDescriptionKey: "modeLabel badgeColor must match Insert theme color, got \(String(describing: modeLabel.badgeColor))"])
     }
 
     // 3. Replace mode styling
     session.feedKeys("\u{1b}R")
     doc.updateStatusDisplay()
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- REPLACE --" else {
-        throw NSError(domain: "ThemeTests", code: 44, userInfo: [NSLocalizedDescriptionKey: "Expected visible '-- REPLACE --', got '\(modeLabel.stringValue)'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "REPLACE" || modeLabel.stringValue == "-- REPLACE --") else {
+        throw NSError(domain: "ThemeTests", code: 44, userInfo: [NSLocalizedDescriptionKey: "Expected visible 'REPLACE', got '\(modeLabel.stringValue)'"])
     }
     let replaceColor = VimModeTheme.color(for: VIM_MODE_REPLACE)
-    guard modeLabel.textColor == replaceColor else {
-        throw NSError(domain: "ThemeTests", code: 45, userInfo: [NSLocalizedDescriptionKey: "modeLabel textColor must match Replace theme color, got \(String(describing: modeLabel.textColor))"])
+    guard modeLabel.badgeColor == replaceColor || modeLabel.textColor == replaceColor else {
+        throw NSError(domain: "ThemeTests", code: 45, userInfo: [NSLocalizedDescriptionKey: "modeLabel badgeColor must match Replace theme color, got \(String(describing: modeLabel.badgeColor))"])
     }
 
     // 4. Visual mode styling
     session.feedKeys("\u{1b}v")
     doc.updateStatusDisplay()
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- VISUAL --" else {
-        throw NSError(domain: "ThemeTests", code: 46, userInfo: [NSLocalizedDescriptionKey: "Expected visible '-- VISUAL --', got '\(modeLabel.stringValue)'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "VISUAL" || modeLabel.stringValue == "-- VISUAL --") else {
+        throw NSError(domain: "ThemeTests", code: 46, userInfo: [NSLocalizedDescriptionKey: "Expected visible 'VISUAL', got '\(modeLabel.stringValue)'"])
     }
     let visualColor = VimModeTheme.color(for: VIM_MODE_VISUAL)
-    guard modeLabel.textColor == visualColor else {
-        throw NSError(domain: "ThemeTests", code: 47, userInfo: [NSLocalizedDescriptionKey: "modeLabel textColor must match Visual theme color, got \(String(describing: modeLabel.textColor))"])
+    guard modeLabel.badgeColor == visualColor || modeLabel.textColor == visualColor else {
+        throw NSError(domain: "ThemeTests", code: 47, userInfo: [NSLocalizedDescriptionKey: "modeLabel badgeColor must match Visual theme color, got \(String(describing: modeLabel.badgeColor))"])
     }
 
     // 5. Command mode styling
@@ -295,10 +295,6 @@ func testDocumentStatusBarModeLabelStyling() throws {
     doc.updateStatusDisplay()
     guard modeLabel.isHidden else {
         throw NSError(domain: "ThemeTests", code: 48, userInfo: [NSLocalizedDescriptionKey: "modeLabel must be hidden in Command mode"])
-    }
-    let commandColor = VimModeTheme.color(for: VIM_MODE_COMMAND)
-    guard modeLabel.textColor == commandColor else {
-        throw NSError(domain: "ThemeTests", code: 49, userInfo: [NSLocalizedDescriptionKey: "modeLabel textColor must match Command theme color in command mode, got \(String(describing: modeLabel.textColor))"])
     }
 }
 

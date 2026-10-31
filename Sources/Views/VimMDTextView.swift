@@ -463,6 +463,7 @@ open class VimMDTextView: NSTextView {
         session.onModeChanged = { [weak self] mode in
             self?.updateSyntaxStyling()
             self?.updateCaretAppearance()
+            self?.enclosingScrollView?.verticalRulerView?.needsDisplay = true
             self?.onModeChanged?(mode)
         }
         session.onStatusChanged = { [weak self] in

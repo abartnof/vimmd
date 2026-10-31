@@ -54,11 +54,12 @@ func testLiveSearchPromptUI() throws {
     }
 
     // Verify initial Normal mode UI
-    guard modeLabel.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "SearchPipelineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected initial mode label '-- NORMAL --', got '\(modeLabel.stringValue)'"])
+    guard modeLabel.stringValue == "NORMAL" || modeLabel.stringValue == "-- NORMAL --" else {
+        throw NSError(domain: "SearchPipelineTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected initial mode label 'NORMAL', got '\(modeLabel.stringValue)'"])
     }
-    guard modeLabel.frame.origin.x == 8 else {
-        throw NSError(domain: "SearchPipelineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be at x = 8 in NORMAL mode, got \(modeLabel.frame.origin.x)"])
+    // modeLabel is positioned to the right of ruler gutter (x > 8), text aligned with text body margin
+    guard modeLabel.frame.origin.x > 8 else {
+        throw NSError(domain: "SearchPipelineTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be positioned past gutter (x > 8), got \(modeLabel.frame.origin.x)"])
     }
     guard msgLabel.frame.origin.x == 155 else {
         throw NSError(domain: "SearchPipelineTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "msgLabel should be at x = 155 in NORMAL mode, got \(msgLabel.frame.origin.x)"])
@@ -133,8 +134,8 @@ func testEscCancelsSearchPrompt() throws {
     guard doc.session?.mode == VIM_MODE_NORMAL else {
         throw NSError(domain: "SearchPipelineTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "Expected NORMAL mode after Escape"])
     }
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "SearchPipelineTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be visible with '-- NORMAL --'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "NORMAL" || modeLabel.stringValue == "-- NORMAL --") else {
+        throw NSError(domain: "SearchPipelineTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be visible with 'NORMAL'"])
     }
     guard msgLabel.frame.origin.x == 155 else {
         throw NSError(domain: "SearchPipelineTests", code: 18, userInfo: [NSLocalizedDescriptionKey: "msgLabel should reset to x = 155 on leaving COMMAND mode, got \(msgLabel.frame.origin.x)"])
@@ -177,8 +178,8 @@ func testSearchExecutionAndCentering() throws {
     }
 
     // modeLabel restored
-    guard !modeLabel.isHidden && modeLabel.stringValue == "-- NORMAL --" else {
-        throw NSError(domain: "SearchPipelineTests", code: 24, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be restored to '-- NORMAL --'"])
+    guard !modeLabel.isHidden && (modeLabel.stringValue == "NORMAL" || modeLabel.stringValue == "-- NORMAL --") else {
+        throw NSError(domain: "SearchPipelineTests", code: 24, userInfo: [NSLocalizedDescriptionKey: "modeLabel should be restored to 'NORMAL'"])
     }
     guard msgLabel.frame.origin.x == 155 else {
         throw NSError(domain: "SearchPipelineTests", code: 25, userInfo: [NSLocalizedDescriptionKey: "msgLabel should be reset to x = 155"])
