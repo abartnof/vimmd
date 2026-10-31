@@ -48,13 +48,27 @@ open class SavedChipView: NSView {
     }
 
     public func updatePillColors() {
-        self.layer?.cornerRadius = 9.0
+        self.layer?.cornerRadius = self.bounds.height > 0 ? (self.bounds.height / 2.0) : 9.0
         self.layer?.borderWidth = 0.5
         self.layer?.masksToBounds = true
         effectiveAppearance.performAsCurrentDrawingAppearance {
             self.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.16).cgColor
             self.layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.35).cgColor
         }
+    }
+
+    public func applyScale(_ scale: CGFloat) {
+        let chipHeight = ceil(18.0 * scale)
+        let chipWidth = ceil(78.0 * scale)
+        self.layer?.cornerRadius = chipHeight / 2.0
+        label.font = NSFont.systemFont(ofSize: 10.5 * scale, weight: .semibold)
+        if #available(macOS 11.0, *), let baseImg = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Saved") {
+            let config = NSImage.SymbolConfiguration(pointSize: 10.0 * scale, weight: .semibold)
+            let symbol = baseImg.withSymbolConfiguration(config) ?? baseImg
+            self.symbolImage = symbol
+            self.imageView?.image = symbol
+        }
+        self.setFrameSize(NSSize(width: chipWidth, height: chipHeight))
     }
 
     private func setup() {
@@ -193,6 +207,10 @@ open class VimMDDocument: NSDocument {
 
     public var session: VimSession?
     public var textView: VimMDTextView?
+    public var statusBar: NSView?
+    public var scrollView: NSScrollView?
+    public var currentMagnificationScale: CGFloat = 1.0
+    private var isApplyingMagnification: Bool = false
     public var isClosed: Bool = false
     public var modeBadgeView: ModeBadgeView?
     public var modeLabel: ModeBadgeView? {
@@ -279,13 +297,15 @@ open class VimMDDocument: NSDocument {
 
     public func updateModeBadgePosition() {
         guard let badge = modeBadgeView else { return }
+        let scale = self.currentMagnificationScale
         let targetTextLeft = textBodyLeftMargin()
-        let sampleFont = badge.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        let sampleFont = badge.font ?? NSFont.monospacedSystemFont(ofSize: 11.0 * scale, weight: .bold)
         let textSize = (badge.stringValue as NSString).size(withAttributes: [.font: sampleFont])
         let internalPadding = max(0, (badge.frame.width - textSize.width) / 2.0)
         let badgeX = targetTextLeft - internalPadding
-        let badgeY: CGFloat = 3.0
-        let badgeHeight = badge.frame.height > 0 ? badge.frame.height : 16.0
+        let statusHeight = statusBar?.frame.height ?? ceil(22.0 * scale)
+        let badgeHeight = badge.frame.height > 0 ? badge.frame.height : ceil(16.0 * scale)
+        let badgeY = max(0, (statusHeight - badgeHeight) / 2.0)
         badge.frame = NSRect(x: badgeX, y: badgeY, width: badge.frame.width, height: badgeHeight)
     }
 
@@ -304,21 +324,29 @@ open class VimMDDocument: NSDocument {
         let currentMode = session.mode
         let mode = session.modeString
         let pos = session.cursorPosition
+        let scale = self.currentMagnificationScale
+        let statusHeight = statusBar?.frame.height ?? ceil(22.0 * scale)
+        let subviewHeight = ceil(16.0 * scale)
+        let subviewY = max(0, (statusHeight - subviewHeight) / 2.0)
+        let fontSize = 11.0 * scale
+
         posLabel?.stringValue = "Ln \(pos.line), Col \(pos.byteCol)"
+        posLabel?.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         if let win = self.windowControllers.first?.window {
             let baseTitle = self.displayName ?? "Untitled"
             win.title = "\(baseTitle) — [\(mode)]"
         }
 
-        let rightBound = savedChipView?.frame.origin.x ?? (posLabel?.frame.origin.x ?? 300)
+        let rightBound = savedChipView?.frame.origin.x ?? (posLabel?.frame.origin.x ?? (300.0 * scale))
 
         if currentMode == VIM_MODE_COMMAND {
             modeBadgeView?.isHidden = true
             modeBadgeView?.stringValue = ""
 
-            let promptWidth = max(60, rightBound - 16)
-            messageLabel?.frame = NSRect(x: 8, y: 3, width: promptWidth, height: 16)
-            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+            let promptWidth = max(ceil(60.0 * scale), rightBound - ceil(16.0 * scale))
+            let promptX = ceil(8.0 * scale)
+            messageLabel?.frame = NSRect(x: promptX, y: subviewY, width: promptWidth, height: subviewHeight)
+            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
             messageLabel?.textColor = NSColor.labelColor
             let cmd = session.commandLineBuffer
             messageLabel?.stringValue = cmd
@@ -328,11 +356,11 @@ open class VimMDDocument: NSDocument {
             modeBadgeView?.updateBadge()
             updateModeBadgePosition()
 
-            let badgeRight = modeBadgeView?.frame.maxX ?? 120.0
-            let normalMsgX = max(155, badgeRight + 12.0)
-            let normalMsgWidth = max(60, rightBound - normalMsgX - 10)
-            messageLabel?.frame = NSRect(x: normalMsgX, y: 3, width: normalMsgWidth, height: 16)
-            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+            let badgeRight = modeBadgeView?.frame.maxX ?? ceil(120.0 * scale)
+            let normalMsgX = max(ceil(155.0 * scale), badgeRight + ceil(12.0 * scale))
+            let normalMsgWidth = max(ceil(60.0 * scale), rightBound - normalMsgX - ceil(10.0 * scale))
+            messageLabel?.frame = NSRect(x: normalMsgX, y: subviewY, width: normalMsgWidth, height: subviewHeight)
+            messageLabel?.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
 
             if let err = session.lastError, !err.isEmpty {
                 let warningText = err.hasPrefix("[Warning]") ? err : "[Warning] \(err)"
@@ -350,6 +378,105 @@ open class VimMDDocument: NSDocument {
         }
         self.textView?.enclosingScrollView?.verticalRulerView?.needsDisplay = true
         previousMode = currentMode
+    }
+
+    open func applyMagnificationScale(_ scale: CGFloat) {
+        guard !isApplyingMagnification else { return }
+        isApplyingMagnification = true
+        defer { isApplyingMagnification = false }
+
+        let clamped = max(0.5, min(3.0, scale))
+        self.currentMagnificationScale = clamped
+
+        let sv = self.scrollView ?? self.textView?.enclosingScrollView
+        if let sv = sv, abs(sv.magnification - clamped) > 0.001 {
+            sv.magnification = clamped
+        }
+
+        // 1. Scale Rulers
+        if let ruler = sv?.verticalRulerView as? LineNumberRulerView {
+            ruler.uiScale = clamped
+            if let tv = self.textView {
+                ruler.updateThickness(for: tv)
+            }
+            ruler.needsDisplay = true
+        }
+        if let colRuler = sv?.horizontalRulerView as? ColumnLetterRulerView {
+            colRuler.uiScale = clamped
+            colRuler.needsDisplay = true
+        }
+
+        // 2. Status bar and Scroll view geometry
+        let contentBounds: NSRect
+        if let containerView = (self.windowControllers.first?.window?.contentView) {
+            contentBounds = containerView.bounds
+        } else if let sb = self.statusBar?.superview {
+            contentBounds = sb.bounds
+        } else if let win = self.textView?.window, let cv = win.contentView {
+            contentBounds = cv.bounds
+        } else {
+            contentBounds = NSRect(x: 0, y: 0, width: 800, height: 600)
+        }
+
+        let statusHeight = ceil(22.0 * clamped)
+        if let bar = self.statusBar {
+            bar.frame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)
+        }
+        if let scrollView = self.scrollView ?? self.textView?.enclosingScrollView {
+            scrollView.frame = NSRect(x: 0, y: statusHeight, width: contentBounds.width, height: max(0, contentBounds.height - statusHeight))
+        }
+
+        // 3. Status bar accessories scaling
+        let chipHeight = ceil(18.0 * clamped)
+        let chipWidth = ceil(78.0 * clamped)
+        let posWidth = ceil(110.0 * clamped)
+        let posRightMargin = ceil(8.0 * clamped)
+        let subviewHeight = ceil(16.0 * clamped)
+        let subviewY = max(0, (statusHeight - subviewHeight) / 2.0)
+        let chipY = max(0, (statusHeight - chipHeight) / 2.0)
+
+        let chipX = max(ceil(160.0 * clamped), contentBounds.width - posRightMargin - posWidth - chipWidth - ceil(10.0 * clamped))
+        if let chip = self.savedChipView {
+            chip.frame = NSRect(x: chipX, y: chipY, width: chipWidth, height: chipHeight)
+            chip.applyScale(clamped)
+        }
+
+        if let posLbl = self.posLabel {
+            let posX = contentBounds.width - posRightMargin - posWidth
+            posLbl.frame = NSRect(x: posX, y: subviewY, width: posWidth, height: subviewHeight)
+            posLbl.font = NSFont.monospacedSystemFont(ofSize: 11.0 * clamped, weight: .regular)
+        }
+
+        if let badge = self.modeBadgeView {
+            badge.applyScale(clamped)
+            updateModeBadgePosition()
+        }
+
+        if let msgLbl = self.messageLabel {
+            msgLbl.font = NSFont.monospacedSystemFont(ofSize: 11.0 * clamped, weight: .bold)
+        }
+
+        updateStatusDisplay()
+    }
+
+    @objc @IBAction open func zoomIn(_ sender: Any?) {
+        guard let sv = self.scrollView ?? self.textView?.enclosingScrollView else { return }
+        let target = min(3.0, sv.magnification + 0.1)
+        sv.magnification = target
+        applyMagnificationScale(target)
+    }
+
+    @objc @IBAction open func zoomOut(_ sender: Any?) {
+        guard let sv = self.scrollView ?? self.textView?.enclosingScrollView else { return }
+        let target = max(0.5, sv.magnification - 0.1)
+        sv.magnification = target
+        applyMagnificationScale(target)
+    }
+
+    @objc @IBAction open func actualSize(_ sender: Any?) {
+        guard let sv = self.scrollView ?? self.textView?.enclosingScrollView else { return }
+        sv.magnification = 1.0
+        applyMagnificationScale(1.0)
     }
 
     override public init() {
@@ -615,6 +742,9 @@ open class VimMDDocument: NSDocument {
         tv.onFlashFeedback = { [weak self] msg in
             self?.showStatusMessage(msg, isWarning: false)
         }
+        tv.onMagnificationChanged = { [weak self] scale in
+            self?.applyMagnificationScale(scale)
+        }
         tv.updateFrameHeightToFitText()
 
         // Configure LineNumberRulerView gutter
@@ -686,6 +816,21 @@ open class VimMDDocument: NSDocument {
         window.contentView = containerView
 
         self.textView = tv
+        self.scrollView = scrollView
+        self.statusBar = statusBar
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewDidMagnify(_:)),
+            name: NSScrollView.didEndLiveMagnifyNotification,
+            object: scrollView
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewDidMagnify(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
 
         window.isReleasedWhenClosed = false
         (NSApplication.shared.delegate as? AppDelegate)?.hasOpenedDocument = true
@@ -703,6 +848,14 @@ open class VimMDDocument: NSDocument {
         updateStatusDisplay()
     }
 
+    @objc private func scrollViewDidMagnify(_ notification: Notification) {
+        guard !isApplyingMagnification else { return }
+        guard let sv = self.scrollView ?? self.textView?.enclosingScrollView else { return }
+        if abs(sv.magnification - currentMagnificationScale) > 0.001 {
+            applyMagnificationScale(sv.magnification)
+        }
+    }
+
     public func pinViewportToTopLeft() {
         self.textView?.pinViewportToTopLeft()
     }
@@ -710,6 +863,7 @@ open class VimMDDocument: NSDocument {
     override open func close() {
         guard !self.isClosed else { return }
         self.isClosed = true
+        NotificationCenter.default.removeObserver(self)
         super.close()
     }
 

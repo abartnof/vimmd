@@ -27,6 +27,9 @@ open class VimMDTextView: NSTextView {
     /// Callback invoked when search execution or navigation updates the search status line.
     public var onSearchNavigated: ((String) -> Void)?
 
+    /// Callback invoked when viewport zoom / magnification changes.
+    public var onMagnificationChanged: ((CGFloat) -> Void)?
+
     /// Callback invoked when command mode is cancelled with Escape.
     public var onCommandCancelled: (() -> Void)?
 
@@ -1801,18 +1804,24 @@ open class VimMDTextView: NSTextView {
     @objc @IBAction open func zoomIn(_ sender: Any?) {
         guard let sv = enclosingScrollView else { return }
         let current = sv.magnification
-        sv.magnification = min(3.0, current + 0.1)
+        let target = min(3.0, current + 0.1)
+        sv.magnification = target
+        onMagnificationChanged?(target)
     }
 
     @objc @IBAction open func zoomOut(_ sender: Any?) {
         guard let sv = enclosingScrollView else { return }
         let current = sv.magnification
-        sv.magnification = max(0.5, current - 0.1)
+        let target = max(0.5, current - 0.1)
+        sv.magnification = target
+        onMagnificationChanged?(target)
     }
 
     @objc @IBAction open func actualSize(_ sender: Any?) {
         guard let sv = enclosingScrollView else { return }
-        sv.magnification = 1.0
+        let target: CGFloat = 1.0
+        sv.magnification = target
+        onMagnificationChanged?(target)
     }
 
     // MARK: - Undo & Redo Integration

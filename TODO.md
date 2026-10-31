@@ -269,6 +269,11 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] **Multiline Quoted Field CSV Resilience**:
     - [ ] Enhance tabular line parser to handle multiline quoted records gracefully without column count skew or kerning distortions.
 
+- [ ] **Milestone AD: Top-Left Viewport Origin Anchoring on Wide Spreadsheets (Eliminate (3,1) Initial Viewport Shift)**
+  - [ ] When opening wide spreadsheets (such as `twitter_sample_data.csv` with 6,800pt+ layout width), guarantee the initial viewport anchors strictly at top-left `(0, 0)` so cell (1, 1) is immediately visible.
+  - [ ] Prevent post-layout asynchronous runloop passes (`viewDidMoveToWindow`, initial layout pass, clip view bounds adjustment) from shifting the scroll view's visible origin horizontally or vertically to cell (3, 1).
+  - [ ] Force clip view and horizontal/vertical ruler bounds to remain pinned at line 1, column 1 during document presentation.
+
 ---
 
 ## 3. Function & Schema Verification Matrix

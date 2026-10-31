@@ -10,6 +10,23 @@ open class ColumnLetterRulerView: NSRulerView {
     public var dragStartColIndex: Int?
     private var rulerTrackingArea: NSTrackingArea?
 
+    private var _customUiScale: CGFloat?
+
+    public var uiScale: CGFloat {
+        get {
+            return _customUiScale ?? (scrollView?.magnification ?? 1.0)
+        }
+        set {
+            _customUiScale = newValue
+            self.ruleThickness = 20.0 * newValue
+            self.needsDisplay = true
+        }
+    }
+
+    public var font: NSFont {
+        return NSFont.monospacedSystemFont(ofSize: 11.0 * uiScale, weight: .bold)
+    }
+
     // MARK: - Disable Ruler Accessories and Markers
 
     override open var accessoryView: NSView? {
@@ -78,7 +95,7 @@ open class ColumnLetterRulerView: NSRulerView {
     }
 
     private func setupRuler() {
-        self.ruleThickness = 22.0
+        self.ruleThickness = 20.0 * self.uiScale
         super.accessoryView = nil
         super.markers = nil
         for sub in self.subviews {
@@ -106,6 +123,12 @@ open class ColumnLetterRulerView: NSRulerView {
             name: NSText.didChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(rulerNeedsRedraw(_:)),
+            name: NSScrollView.didEndLiveMagnifyNotification,
+            object: scrollView
+        )
     }
 
     deinit {
@@ -113,6 +136,9 @@ open class ColumnLetterRulerView: NSRulerView {
     }
 
     @objc private func rulerNeedsRedraw(_ notification: Notification) {
+        if let sv = self.scrollView, _customUiScale == nil, abs(self.uiScale - sv.magnification) > 0.001 {
+            self.ruleThickness = 20.0 * sv.magnification
+        }
         self.needsDisplay = true
     }
 
@@ -251,7 +277,8 @@ open class ColumnLetterRulerView: NSRulerView {
         let widths = tv.columnWidths()
         guard !widths.isEmpty else { return }
 
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        let effectiveScale = self.uiScale
+        let font = self.font
         let labelColor = NSColor.secondaryLabelColor
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
@@ -262,8 +289,10 @@ open class ColumnLetterRulerView: NSRulerView {
             .paragraphStyle: paragraphStyle
         ]
 
-        for colIndex in 0..<widths.count {
-            guard let colRectInTV = tv.columnRect(for: colIndex) else { continue }
+        var runningStartX = tv.textContainerInset.width
+        for (colIndex, colWidth) in widths.enumerated() {
+            let colRectInTV = NSRect(x: runningStartX, y: 0, width: colWidth, height: 20)
+            runningStartX += colWidth
             let rectInRuler = self.convert(colRectInTV, from: tv)
             let colBoundsInRuler = NSRect(x: rectInRuler.minX, y: 0, width: rectInRuler.width, height: bounds.height)
 
@@ -277,16 +306,16 @@ open class ColumnLetterRulerView: NSRulerView {
 
             // Draw column letter label centered
             let letter = ColumnLetterRulerView.columnLetter(for: colIndex) as NSString
-            let textY = max(0, (bounds.height - font.pointSize - 4.0) / 2.0)
-            let textRect = NSRect(x: colBoundsInRuler.minX, y: textY, width: colBoundsInRuler.width, height: font.pointSize + 4.0)
+            let textY = max(0, (bounds.height - font.pointSize - 4.0 * effectiveScale) / 2.0)
+            let textRect = NSRect(x: colBoundsInRuler.minX, y: textY, width: colBoundsInRuler.width, height: font.pointSize + 4.0 * effectiveScale)
             letter.draw(in: textRect, withAttributes: textAttrs)
 
             // Right vertical divider line
             let divX = colBoundsInRuler.maxX - 0.5
             NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
             let divPath = NSBezierPath()
-            divPath.move(to: NSPoint(x: divX, y: 2.0))
-            divPath.line(to: NSPoint(x: divX, y: bounds.height - 2.0))
+            divPath.move(to: NSPoint(x: divX, y: 2.0 * effectiveScale))
+            divPath.line(to: NSPoint(x: divX, y: bounds.height - 2.0 * effectiveScale))
             divPath.lineWidth = 1.0
             divPath.stroke()
         }

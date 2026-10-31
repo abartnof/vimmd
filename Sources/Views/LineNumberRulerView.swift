@@ -11,6 +11,21 @@ open class LineNumberRulerView: NSRulerView {
     public var dragStartRowIndex: Int?
     private var rulerTrackingArea: NSTrackingArea?
 
+    private var _customUiScale: CGFloat?
+
+    public var uiScale: CGFloat {
+        get {
+            return _customUiScale ?? (scrollView?.magnification ?? 1.0)
+        }
+        set {
+            _customUiScale = newValue
+            if let tv = (self.clientView as? NSTextView) ?? (self.scrollView?.documentView as? NSTextView) {
+                updateThickness(for: tv)
+            }
+            self.needsDisplay = true
+        }
+    }
+
     private var targetTextView: VimMDTextView? {
         return (self.clientView as? VimMDTextView) ?? (self.scrollView?.documentView as? VimMDTextView)
     }
@@ -119,7 +134,7 @@ open class LineNumberRulerView: NSRulerView {
     }
 
     private func setupRuler() {
-        self.ruleThickness = 36.0
+        self.ruleThickness = 36.0 * uiScale
         guard let scrollView = self.scrollView else { return }
         let clipView = scrollView.contentView
         clipView.postsBoundsChangedNotifications = true
@@ -142,6 +157,12 @@ open class LineNumberRulerView: NSRulerView {
             name: NSView.frameDidChangeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(rulerNeedsRedraw(_:)),
+            name: NSScrollView.didEndLiveMagnifyNotification,
+            object: scrollView
+        )
     }
 
     deinit {
@@ -149,6 +170,11 @@ open class LineNumberRulerView: NSRulerView {
     }
 
     @objc private func rulerNeedsRedraw(_ notification: Notification) {
+        if let sv = self.scrollView, _customUiScale == nil, abs(self.uiScale - sv.magnification) > 0.001 {
+            if let tv = (self.clientView as? NSTextView) ?? (self.scrollView?.documentView as? NSTextView) {
+                updateThickness(for: tv)
+            }
+        }
         self.needsDisplay = true
     }
 
@@ -170,9 +196,10 @@ open class LineNumberRulerView: NSRulerView {
         }
 
         let digits = max(3, String(lineCount).count)
-        let sampleFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let scale = self.uiScale
+        let sampleFont = NSFont.monospacedDigitSystemFont(ofSize: 11.0 * scale, weight: .regular)
         let digitWidth = ("8" as NSString).size(withAttributes: [.font: sampleFont]).width
-        let targetThickness = ceil(CGFloat(digits) * digitWidth + 18.0)
+        let targetThickness = ceil(CGFloat(digits) * digitWidth + 18.0 * scale)
 
         if abs(self.ruleThickness - targetThickness) > 0.5 {
             self.ruleThickness = targetThickness
@@ -212,7 +239,7 @@ open class LineNumberRulerView: NSRulerView {
 
         if docLength == 0 {
             // Draw line 1 for empty document
-            drawLineNumber(1, y: textView.textContainerInset.height, isActive: (activeLine == 1))
+            drawLineNumber(1, y: textView.textContainerInset.height * uiScale, rowHeight: 18.0 * uiScale, isActive: (activeLine == 1))
             return
         }
 
@@ -220,7 +247,7 @@ open class LineNumberRulerView: NSRulerView {
         let visibleRect = textView.visibleRect
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
         guard glyphRange.length > 0 else {
-            drawLineNumber(1, y: textView.textContainerInset.height, isActive: (activeLine == 1))
+            drawLineNumber(1, y: textView.textContainerInset.height * uiScale, rowHeight: 18.0 * uiScale, isActive: (activeLine == 1))
             return
         }
 
@@ -251,7 +278,7 @@ open class LineNumberRulerView: NSRulerView {
                 lastDrawnLine = lineNumber
                 let rectInRuler = self.convert(lineRect, from: textView)
                 let isActive = (lineNumber == activeLine)
-                self.drawLineNumber(lineNumber, y: rectInRuler.minY, isActive: isActive)
+                self.drawLineNumber(lineNumber, y: rectInRuler.minY, rowHeight: rectInRuler.height, isActive: isActive)
             }
         }
 
@@ -261,35 +288,49 @@ open class LineNumberRulerView: NSRulerView {
             let extraRectInRuler = self.convert(extraRect, from: textView)
             let extraLineNumber = lastDrawnLine > 0 ? (lastDrawnLine + 1) : 2
             let isActive = (extraLineNumber == activeLine)
-            drawLineNumber(extraLineNumber, y: extraRectInRuler.minY, isActive: isActive)
+            drawLineNumber(extraLineNumber, y: extraRectInRuler.minY, rowHeight: extraRectInRuler.height, isActive: isActive)
         }
     }
 
-    private static let activeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
-    private static let inactiveFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-    private static let activeAttrs: [NSAttributedString.Key: Any] = [
-        .font: activeFont,
-        .foregroundColor: NSColor.white
-    ]
-    private static let inactiveAttrs: [NSAttributedString.Key: Any] = [
-        .font: inactiveFont,
-        .foregroundColor: NSColor.secondaryLabelColor
-    ]
-    private static let badgeHeight: CGFloat = 16.0
-    private static let horizontalPadding: CGFloat = 6.0
-    private static let textRightMargin: CGFloat = 8.0
+    public var activeFont: NSFont {
+        return NSFont.monospacedDigitSystemFont(ofSize: 11.0 * uiScale, weight: .bold)
+    }
+    public var inactiveFont: NSFont {
+        return NSFont.monospacedDigitSystemFont(ofSize: 11.0 * uiScale, weight: .regular)
+    }
+    public var activeAttrs: [NSAttributedString.Key: Any] {
+        return [
+            .font: activeFont,
+            .foregroundColor: NSColor.white
+        ]
+    }
+    public var inactiveAttrs: [NSAttributedString.Key: Any] {
+        return [
+            .font: inactiveFont,
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+    }
+    public var badgeHeight: CGFloat {
+        return 16.0 * uiScale
+    }
+    public var horizontalPadding: CGFloat {
+        return 6.0 * uiScale
+    }
+    public var textRightMargin: CGFloat {
+        return 8.0 * uiScale
+    }
 
     public func lineNumberTextRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0, isActive: Bool = true) -> NSRect {
-        let font = isActive ? Self.activeFont : Self.inactiveFont
+        let font = isActive ? self.activeFont : self.inactiveFont
         let numStr = "\(number)" as NSString
         let textSize = numStr.size(withAttributes: [.font: font])
 
-        let badgeHeight = Self.badgeHeight
-        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
-        let textY = badgeY + (badgeHeight - textSize.height) / 2.0
+        let bHeight = self.badgeHeight
+        let badgeY = y + max(0, (rowHeight - bHeight) / 2.0)
+        let textY = badgeY + (bHeight - textSize.height) / 2.0
 
         let effectiveWidth = max(self.bounds.width, self.ruleThickness)
-        let textRightX = effectiveWidth - Self.textRightMargin
+        let textRightX = effectiveWidth - self.textRightMargin
         let textLeftX = textRightX - textSize.width
 
         return NSRect(x: textLeftX, y: textY, width: textSize.width, height: textSize.height)
@@ -297,21 +338,22 @@ open class LineNumberRulerView: NSRulerView {
 
     public func activeRowBadgeRect(for number: Int, y: CGFloat, rowHeight: CGFloat = 18.0) -> NSRect {
         let textRect = lineNumberTextRect(for: number, y: y, rowHeight: rowHeight, isActive: true)
-        let badgeHeight = Self.badgeHeight
-        let badgeY = y + max(0, (rowHeight - badgeHeight) / 2.0)
-        let badgeLeft = textRect.minX - Self.horizontalPadding
-        let badgeWidth = textRect.width + 2.0 * Self.horizontalPadding
-        return NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: badgeHeight)
+        let bHeight = self.badgeHeight
+        let badgeY = y + max(0, (rowHeight - bHeight) / 2.0)
+        let badgeLeft = textRect.minX - self.horizontalPadding
+        let badgeWidth = textRect.width + 2.0 * self.horizontalPadding
+        return NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: bHeight)
     }
 
-    private func drawLineNumber(_ number: Int, y: CGFloat, isActive: Bool) {
+    private func drawLineNumber(_ number: Int, y: CGFloat, rowHeight: CGFloat = 18.0, isActive: Bool) {
+        let effectiveRowHeight = rowHeight > 0 ? rowHeight : (18.0 * uiScale)
         if let range = activeRowDragRange, range.contains(number - 1) {
-            let highlightRect = NSRect(x: 0, y: y, width: bounds.width, height: 18.0)
+            let highlightRect = NSRect(x: 0, y: y, width: bounds.width, height: effectiveRowHeight)
             NSColor.selectedTextBackgroundColor.withAlphaComponent(0.25).setFill()
             highlightRect.fill()
         }
 
-        let textRect = lineNumberTextRect(for: number, y: y, rowHeight: 18.0, isActive: isActive)
+        let textRect = lineNumberTextRect(for: number, y: y, rowHeight: effectiveRowHeight, isActive: isActive)
         let numStr = "\(number)" as NSString
 
         if isActive {
@@ -323,19 +365,21 @@ open class LineNumberRulerView: NSRulerView {
                 currentMode = VIM_MODE_NORMAL
             }
             let badgeColor = VimModeTheme.color(for: currentMode)
-            let badgeLeft = textRect.minX - Self.horizontalPadding
-            let badgeRight = textRect.maxX + Self.horizontalPadding
+            let bHeight = self.badgeHeight
+            let hPadding = self.horizontalPadding
+            let badgeLeft = textRect.minX - hPadding
+            let badgeRight = textRect.maxX + hPadding
             let badgeWidth = badgeRight - badgeLeft
-            let badgeY = y + max(0, (18.0 - Self.badgeHeight) / 2.0)
-            let badgeRect = NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: Self.badgeHeight)
+            let badgeY = y + max(0, (effectiveRowHeight - bHeight) / 2.0)
+            let badgeRect = NSRect(x: badgeLeft, y: badgeY, width: badgeWidth, height: bHeight)
             let r = badgeRect.height / 2.0
             let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: r, yRadius: r)
             badgeColor.setFill()
             badgePath.fill()
 
-            numStr.draw(in: textRect, withAttributes: Self.activeAttrs)
+            numStr.draw(in: textRect, withAttributes: self.activeAttrs)
         } else {
-            numStr.draw(in: textRect, withAttributes: Self.inactiveAttrs)
+            numStr.draw(in: textRect, withAttributes: self.inactiveAttrs)
         }
     }
 }

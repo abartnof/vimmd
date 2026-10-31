@@ -64,13 +64,32 @@ open class ModeBadgeView: NSTextField {
         self.needsDisplay = true
     }
 
+    public var uiScale: CGFloat = 1.0 {
+        didSet {
+            applyScale(uiScale)
+        }
+    }
+
+    public func applyScale(_ scale: CGFloat) {
+        self.font = NSFont.monospacedSystemFont(ofSize: 11.0 * scale, weight: .bold)
+        self.cornerRadius = 4.5 * scale
+        self.horizontalPadding = 8.0 * scale
+        let targetHeight = ceil(16.0 * scale)
+        let sampleFont = self.font ?? NSFont.monospacedSystemFont(ofSize: 11.0 * scale, weight: .bold)
+        let textSize = (self.stringValue as NSString).size(withAttributes: [.font: sampleFont])
+        let targetWidth = max(ceil(56.0 * scale), ceil(textSize.width + horizontalPadding * 2.0))
+        self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
+        self.needsDisplay = true
+    }
+
     public func updateFrameWidth() {
         guard !self.stringValue.isEmpty else { return }
-        let sampleFont = self.font ?? NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
+        let scale = (self.font?.pointSize ?? 11.0) / 11.0
+        let sampleFont = self.font ?? NSFont.monospacedSystemFont(ofSize: 11.0 * scale, weight: .bold)
         let textSize = (self.stringValue as NSString).size(withAttributes: [.font: sampleFont])
-        let targetWidth = max(56.0, ceil(textSize.width + horizontalPadding * 2.0))
-        let targetHeight = self.frame.height > 0 ? self.frame.height : 16.0
-        if abs(self.frame.width - targetWidth) > 0.5 {
+        let targetWidth = max(ceil(56.0 * scale), ceil(textSize.width + horizontalPadding * 2.0))
+        let targetHeight = self.frame.height > 0 ? self.frame.height : ceil(16.0 * scale)
+        if abs(self.frame.width - targetWidth) > 0.5 || abs(self.frame.height - targetHeight) > 0.5 {
             self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
         }
     }
