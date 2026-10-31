@@ -222,6 +222,21 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] Persist selected color across app launches via `UserDefaults` (e.g. `VimMDDelimiterColorKey`).
   - [x] Live-update all open documents and syntax modes dynamically without requiring file reload or app restart.
 
+- [ ] **Milestone Z: Unified Mode Color Badges (Status Bar Mode Pill & Gutter Row Capsule)**
+  - [ ] **Status Bar Mode Pill Badge**:
+    - [ ] Replace plain text mode label with a filled rounded pill/badge (e.g. height 16–18pt, corner radius 4–5pt).
+    - [ ] Fill background with `VimModeTheme.color(for: currentMode)` (Normal: slate grey, Insert: blue, Visual: royal purple, Replace: teal, Command: amber).
+    - [ ] Clean text styling: display clean uppercase names without enclosing dashes (`NORMAL`, `INSERT`, `VISUAL`, `REPLACE`) in crisp bold white (`NSColor.white`).
+    - [ ] Seamless integration with Command mode (`:`, `/`) starting promptly at `x = 8`.
+  - [ ] **Active Row Number Gutter Badge**:
+    - [ ] In `LineNumberRulerView`, render the active row number inside a matching circular/capsule badge.
+    - [ ] Badge fill color dynamically synchronizes with active Vim mode color (`VimModeTheme.color(for: currentMode)`).
+    - [ ] Adaptive circular geometry: exact circle for 1–2 digit row numbers, extending into a capsule/pill with rounded ends for 3+ digits to prevent clipping.
+    - [ ] Text inside active badge rendered in bold white (`NSColor.white`) centered within the circle/capsule.
+    - [ ] Inactive line numbers retain quiet secondary styling (`NSColor.secondaryLabelColor`).
+  - [ ] **Synchronous Mode State Propagation**:
+    - [ ] Synchronize gutter redraws (`rulerView.needsDisplay = true`) on every mode transition so the row badge and status pill update in perfect lockstep.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
