@@ -237,15 +237,15 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Synchronous Mode State Propagation**:
     - [x] Synchronize gutter redraws (`rulerView.needsDisplay = true`) on every mode transition so the row badge and status pill update in perfect lockstep.
 
-- [ ] **Milestone AA: Full-UI Accessibility Scaling on Zoom & Display Size Change (Rulers, Status Bar & Badges)**
-  - [ ] **Proportional UI Scaling Across All On-Screen Chrome**:
-    - [ ] When the user changes zoom / magnification (`⌘+`, `⌘-`, `⌘0`, pinch-to-zoom) or system display accessibility scale, scale *all* on-screen interface text and chrome proportionally:
+- [x] **Milestone AA: Full-UI Accessibility Scaling on Zoom & Display Size Change (Rulers, Status Bar & Badges)**
+  - [x] **Proportional UI Scaling Across All On-Screen Chrome**:
+    - [x] When the user changes zoom / magnification (`⌘+`, `⌘-`, `⌘0`, pinch-to-zoom) or system display accessibility scale, scale *all* on-screen interface text and chrome proportionally:
       - Line number gutter text, badges, and ruler thickness in `LineNumberRulerView`.
       - Column letter ruler text and header dimensions in `ColumnLetterRulerView`.
       - Status bar height, mode pill badge, cursor position indicator (`posLabel`), and status feedback messages (`messageLabel`, `savedChipView`).
-  - [ ] **Accessibility Parity**:
-    - [ ] Ensure low-vision and accessibility users experience uniform, readable scaling across both buffer content and surrounding GUI accessories without truncation, clipping, or fixed-point layout overlap.
-    - [ ] Respect magnification boundaries (0.5x to 3.0x) with seamless layout geometry recalculation on zoom change notifications.
+  - [x] **Accessibility Parity**:
+    - [x] Ensure low-vision and accessibility users experience uniform, readable scaling across both buffer content and surrounding GUI accessories without truncation, clipping, or fixed-point layout overlap.
+    - [x] Respect magnification boundaries (0.5x to 3.0x) with seamless layout geometry recalculation on zoom change notifications.
 
 - [ ] **Milestone AB: Vim Indentation Operators (`>>`, `<<`, Visual `>` / `<`)**
   - [ ] **Normal Mode Line Indent / Outdent (`>>`, `<<`)**:
@@ -273,6 +273,15 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] When opening wide spreadsheets (such as `twitter_sample_data.csv` with 6,800pt+ layout width), guarantee the initial viewport anchors strictly at top-left `(0, 0)` so cell (1, 1) is immediately visible.
   - [ ] Prevent post-layout asynchronous runloop passes (`viewDidMoveToWindow`, initial layout pass, clip view bounds adjustment) from shifting the scroll view's visible origin horizontally or vertically to cell (3, 1).
   - [ ] Force clip view and horizontal/vertical ruler bounds to remain pinned at line 1, column 1 during document presentation.
+
+- [ ] **Milestone AE: RFC 4180 Multiline Quoted CSV Parsing, True Cell Word-Wrapping & Vertical Column Locking**
+  - [ ] **RFC 4180 Multiline Quoted Record Parsing**:
+    - [ ] Stop naively splitting on raw `\n` in `TabularSyntaxResolver`. Newlines inside double quotes (`"..."`) are part of cell content, not new rows.
+    - [ ] Prevents broken lines (e.g. Row 7, 10, 13 in `twitter_sample_data.csv`) from spilling orphaned tweet fragments into Column A and desynchronizing table column counts.
+  - [ ] **True Cell Word-Wrapping (`wrapTableCells`)**:
+    - [ ] When `wrapTableCells == true`, wrap long cell text within the column width boundary (e.g. cell 13A) instead of allowing text to stretch to infinite width or spill across adjacent columns.
+  - [ ] **Strict Vertical Column Navigation Lock (`j` / `k`)**:
+    - [ ] Fix vertical navigation regression where pressing `j` (down) drifts leftwards into column $C-1$. Maintain strict locked column index $C$ when moving between rows.
 
 ---
 
