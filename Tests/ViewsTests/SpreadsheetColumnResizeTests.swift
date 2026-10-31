@@ -108,16 +108,16 @@ func testCursorFeedback() throws {
         throw NSError(domain: "SpreadsheetColumnResizeTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected resizeLeftRight cursor on header divider"])
     }
 
-    // Away from divider on header -> downwardArrowCursor
+    // Away from divider on header -> nil (standard cell cursor in text view; downward arrow is on ColumnLetterRulerView)
     let headerBodyCursor = tv.cursorForPoint(NSPoint(x: insetX + widths[0] / 2.0, y: headerMidY))
-    guard headerBodyCursor == VimMDTextView.downwardArrowCursor else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected downwardArrowCursor inside header cell"])
+    guard headerBodyCursor == nil else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected nil cursor inside header cell in text view"])
     }
 
-    // Data row 1, col 0 -> rightwardArrowCursor
+    // Data row 1, col 0 -> nil in text view (rightward arrow is on LineNumberRulerView)
     let dataRowCol0Cursor = tv.cursorForPoint(NSPoint(x: insetX + widths[0] / 2.0, y: r1.midY))
-    guard dataRowCol0Cursor == VimMDTextView.rightwardArrowCursor else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected rightwardArrowCursor in data row col 0"])
+    guard dataRowCol0Cursor == nil else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected nil cursor in data row col 0 in text view"])
     }
 
     // When isResizingColumn is active, cursor is resizeLeftRight anywhere
@@ -421,7 +421,7 @@ func testEmptyAndSingleColumnEdgeCases() throws {
     }
 }
 
-// 13. Normal header selection preserved when not on divider
+// 13. Normal cell caret positioning preserved when not on divider
 func testHeaderSelectionPreservedWhenNotOnDivider() throws {
     let tv = createTestSpreadsheetTextView()
     let widths = tv.columnWidths()
@@ -429,30 +429,20 @@ func testHeaderSelectionPreservedWhenNotOnDivider() throws {
         throw NSError(domain: "SpreadsheetColumnResizeTests", code: 120, userInfo: [NSLocalizedDescriptionKey: "Missing row 0 rect"])
     }
 
-    // Click in middle of column 1
+    // Click in middle of column 1 (not on divider)
     let col1MidX = tv.textContainerInset.width + widths[0] + (widths[1] / 2.0)
     let handled = tv.handleTabularMouseDown(at: NSPoint(x: col1MidX, y: r0.midY))
-    guard handled else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 121, userInfo: [NSLocalizedDescriptionKey: "Should handle header selection"])
+    guard !handled else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 121, userInfo: [NSLocalizedDescriptionKey: "Should not handle as column resize or drag"])
     }
-    guard tv.isDraggingCol && !tv.isResizingColumn else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 122, userInfo: [NSLocalizedDescriptionKey: "Should enter isDraggingCol and not isResizingColumn"])
-    }
-    guard tv.activeColDragRange == 1...1 else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 123, userInfo: [NSLocalizedDescriptionKey: "Expected activeColDragRange 1...1, got \(String(describing: tv.activeColDragRange))"])
+    guard !tv.isDraggingCol && !tv.isResizingColumn else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 122, userInfo: [NSLocalizedDescriptionKey: "Should not enter isDraggingCol or isResizingColumn"])
     }
 
-    // Drag to col 2
-    let col2MidX = tv.textContainerInset.width + widths[0] + widths[1] + (widths[2] / 2.0)
-    tv.handleTabularMouseDragged(to: NSPoint(x: col2MidX, y: r0.midY))
-    guard tv.activeColDragRange == 1...2 else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 124, userInfo: [NSLocalizedDescriptionKey: "Expected activeColDragRange 1...2"])
-    }
-
-    // Mouse up ends dragging
-    tv.handleTabularMouseUp(at: NSPoint(x: col2MidX, y: r0.midY))
-    guard !tv.isDraggingCol && tv.activeColDragRange == nil else {
-        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 125, userInfo: [NSLocalizedDescriptionKey: "isDraggingCol should be false and range nil"])
+    // Caret is positioned at clicked cell
+    tv.positionCaret(atRow: 0, column: 1)
+    guard tv.selectedRange().location != NSNotFound else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 123, userInfo: [NSLocalizedDescriptionKey: "Caret should be positioned"])
     }
 }
 

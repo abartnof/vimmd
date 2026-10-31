@@ -185,6 +185,7 @@ open class VimMDDocument: NSDocument {
     public func configureWrapLinesPolicy() {
         if isTabularDocument {
             self.wrapLines = false
+            self.wrapTableCells = true
         } else {
             self.wrapLines = UserDefaults.standard.object(forKey: VimMDDocument.wrapLinesPreferenceKey) as? Bool ?? true
         }
@@ -590,6 +591,12 @@ open class VimMDDocument: NSDocument {
         scrollView.verticalRulerView = ruler
         scrollView.rulersVisible = true
         ruler.updateThickness(for: tv)
+
+        // Configure ColumnLetterRulerView for spreadsheets
+        let colRuler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
+        colRuler.clientView = tv
+        scrollView.horizontalRulerView = colRuler
+        scrollView.hasHorizontalRuler = self.isTabularDocument
 
         // 2. Status bar at bottom
         let statusFrame = NSRect(x: 0, y: 0, width: contentBounds.width, height: statusHeight)

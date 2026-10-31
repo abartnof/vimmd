@@ -102,6 +102,10 @@ open class VimMDTextView: NSTextView {
                     .foregroundColor: NSColor.textColor
                 ]
             }
+            if isTabularDocument {
+                wrapTableCells = true
+            }
+            updateHorizontalRulerVisibility()
             updateSyntaxStyling(force: true)
         }
     }
@@ -168,6 +172,7 @@ open class VimMDTextView: NSTextView {
         super.viewDidMoveToSuperview()
         if self.superview != nil {
             applyWrapLinesSetting()
+            updateHorizontalRulerVisibility()
             if let contentView = enclosingScrollView?.contentView {
                 contentView.postsBoundsChangedNotifications = true
                 NotificationCenter.default.addObserver(
@@ -177,6 +182,21 @@ open class VimMDTextView: NSTextView {
                     object: contentView
                 )
             }
+        }
+    }
+
+    public func updateHorizontalRulerVisibility() {
+        guard let sv = enclosingScrollView else { return }
+        if isTabularDocument {
+            if sv.horizontalRulerView == nil {
+                let colRuler = ColumnLetterRulerView(scrollView: sv, orientation: .horizontalRuler)
+                colRuler.clientView = self
+                sv.horizontalRulerView = colRuler
+            }
+            sv.hasHorizontalRuler = true
+            sv.rulersVisible = true
+        } else {
+            sv.hasHorizontalRuler = false
         }
     }
 
@@ -388,6 +408,9 @@ open class VimMDTextView: NSTextView {
             )
         }
         storage.endEditing()
+        if isTabularDocument {
+            enclosingScrollView?.horizontalRulerView?.needsDisplay = true
+        }
     }
 
     override open var acceptsFirstResponder: Bool {
@@ -1039,19 +1062,10 @@ open class VimMDTextView: NSTextView {
         if isResizingColumn {
             return NSCursor.resizeLeftRight
         }
-        let cIdx = columnIndex(at: point)
-
-        // Row 0 is Row 1 (header row, including pinned header when scrolled)
         if isPointInHeaderRow(point) {
             if dividerColumnIndex(at: point) != nil {
                 return NSCursor.resizeLeftRight
             }
-            return VimMDTextView.downwardArrowCursor
-        }
-        // Column 0 is Column A on data rows (rIdx > 0)
-        let rIdx = rowIndex(at: point)
-        if cIdx == 0 && (rIdx ?? -1) > 0 {
-            return VimMDTextView.rightwardArrowCursor
         }
         return nil
     }
@@ -1085,7 +1099,6 @@ open class VimMDTextView: NSTextView {
     public func handleTabularMouseDown(at point: NSPoint, clickCount: Int = 1) -> Bool {
         guard isTabularDocument else { return false }
         self.window?.makeFirstResponder(self)
-        let cIdx = columnIndex(at: point)
 
         if isPointInHeaderRow(point) {
             if let divCol = dividerColumnIndex(at: point) {
@@ -1112,30 +1125,7 @@ open class VimMDTextView: NSTextView {
                     return true
                 }
             }
-
-            let c = columnIndex(at: point, clamped: true) ?? 0
-            // Dragging / clicking header row (columns)
-            isDraggingCol = true
-            isDraggingRow = false
-            dragStartColIndex = c
-            activeColDragRange = c...c
-            activeRowDragRange = nil
-            positionCaret(atRow: 0, column: c)
-            needsDisplay = true
-            return true
-        } else if cIdx == 0 {
-            let r = rowIndex(at: point, clamped: true) ?? 0
-            if r > 0 {
-                // Dragging / clicking Column A (rows)
-                isDraggingRow = true
-                isDraggingCol = false
-                dragStartRowIndex = r
-                activeRowDragRange = r...r
-                activeColDragRange = nil
-                positionCaret(atRow: r, column: 0)
-                needsDisplay = true
-                return true
-            }
+            return false
         }
         return false
     }
@@ -1258,12 +1248,12 @@ open class VimMDTextView: NSTextView {
             if !firstColHeaderTitle.isEmpty {
                 feedback = "Column '\(firstColHeaderTitle)' copied to clipboard"
             } else {
-                let letter = Character(UnicodeScalar(65 + minCol)!)
+                let letter = ColumnLetterRulerView.columnLetter(for: minCol)
                 feedback = "Column \(letter) copied to clipboard"
             }
         } else {
-            let startLetter = Character(UnicodeScalar(65 + minCol)!)
-            let endLetter = Character(UnicodeScalar(65 + maxCol)!)
+            let startLetter = ColumnLetterRulerView.columnLetter(for: minCol)
+            let endLetter = ColumnLetterRulerView.columnLetter(for: maxCol)
             feedback = "Columns \(startLetter)–\(endLetter) copied to clipboard"
         }
         onFlashFeedback?(feedback)

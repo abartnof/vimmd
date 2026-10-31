@@ -88,11 +88,35 @@ func testRightwardArrowCursorHighContrast() throws {
 }
 
 func testCursorSelectionInSpreadsheet() throws {
-    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
     textView.string = "Col1,Col2,Col3\nVal1,Val2,Val3\nVal4,Val5,Val6"
+    textView.documentSyntaxType = .csv
     textView.isTabularDocument = true
+    scrollView.documentView = textView
     textView.layoutManager?.ensureLayout(for: textView.textContainer!)
 
+    let colRuler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
+    colRuler.clientView = textView
+    scrollView.horizontalRulerView = colRuler
+
+    let lineRuler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    lineRuler.clientView = textView
+    scrollView.verticalRulerView = lineRuler
+
+    // State 1: ColumnLetterRulerView yields downwardArrowCursor
+    let headerCursor = colRuler.cursorForPoint(NSPoint(x: 50, y: 10))
+    guard headerCursor == VimMDTextView.downwardArrowCursor else {
+        throw NSError(domain: "CursorTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Hovering column letter ruler must yield downwardArrowCursor, got \(String(describing: headerCursor))"])
+    }
+
+    // State 2: LineNumberRulerView yields rightwardArrowCursor
+    let lineCursor = lineRuler.cursorForPoint(NSPoint(x: 10, y: 50))
+    guard lineCursor == VimMDTextView.rightwardArrowCursor else {
+        throw NSError(domain: "CursorTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Hovering line number ruler must yield rightwardArrowCursor, got \(String(describing: lineCursor))"])
+    }
+
+    // State 3: Header and Body cells in text view yield nil (default I-beam / arrow)
     guard let r0 = textView.rowRect(for: 0),
           let r1 = textView.rowRect(for: 1) else {
         throw NSError(domain: "CursorTests", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to resolve row rects for test"])
@@ -106,30 +130,23 @@ func testCursorSelectionInSpreadsheet() throws {
     let ptColA = NSPoint(x: 10, y: r1.midY)
     let ptBody = NSPoint(x: 10 + widths[0] + 10, y: r1.midY)
 
-    // State 1: Header row (row 0) yields downwardArrowCursor
-    let headerCursor = textView.cursorForPoint(ptHeader)
-    guard headerCursor == VimMDTextView.downwardArrowCursor else {
-        throw NSError(domain: "CursorTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Hovering header row must yield downwardArrowCursor, got \(String(describing: headerCursor))"])
+    guard textView.cursorForPoint(ptHeader) == nil else {
+        throw NSError(domain: "CursorTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Hovering header cell in text view must yield nil"])
     }
-
-    // State 2: Column A on data rows yields rightwardArrowCursor
-    let colACursor = textView.cursorForPoint(ptColA)
-    guard colACursor == VimMDTextView.rightwardArrowCursor else {
-        throw NSError(domain: "CursorTests", code: 8, userInfo: [NSLocalizedDescriptionKey: "Hovering column A on data row must yield rightwardArrowCursor, got \(String(describing: colACursor))"])
+    guard textView.cursorForPoint(ptColA) == nil else {
+        throw NSError(domain: "CursorTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Hovering Col A cell in text view must yield nil"])
     }
-
-    // State 3: Body cells yield nil (default I-beam / arrow)
-    let bodyCursor = textView.cursorForPoint(ptBody)
-    guard bodyCursor == nil else {
-        throw NSError(domain: "CursorTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Hovering body cell must yield nil, got \(String(describing: bodyCursor))"])
+    guard textView.cursorForPoint(ptBody) == nil else {
+        throw NSError(domain: "CursorTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Hovering body cell must yield nil"])
     }
 
     // State 4: Non-tabular document yields nil everywhere
+    textView.documentSyntaxType = .plainText
     textView.isTabularDocument = false
-    let nonTabularHeaderCursor = textView.cursorForPoint(ptHeader)
-    let nonTabularColACursor = textView.cursorForPoint(ptColA)
-    guard nonTabularHeaderCursor == nil && nonTabularColACursor == nil else {
-        throw NSError(domain: "CursorTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Non-tabular document must yield nil cursor"])
+    let nonTabularColRulerCursor = colRuler.cursorForPoint(NSPoint(x: 50, y: 10))
+    let nonTabularLineRulerCursor = lineRuler.cursorForPoint(NSPoint(x: 10, y: 50))
+    guard nonTabularColRulerCursor == nil && nonTabularLineRulerCursor == nil else {
+        throw NSError(domain: "CursorTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Non-tabular document rulers must yield nil cursor"])
     }
 }
 

@@ -938,14 +938,20 @@ runCUJ(id: 36, name: "Spreadsheet Column and Row Drag Copy Gestures") {
     let colText = tv.copyColumnRange(from: 1, to: 2)
     try cujAssert(colText == "Name,Dept\nAlice,Engineering\nBob,Design\nCharlie,Product", "Column range copy mismatch")
 
-    // Simulate tabular mouse gestures
-    if let col0 = tv.columnRect(for: 0), let row1 = tv.rowRect(for: 1), let row2 = tv.rowRect(for: 2) {
-        let p1 = NSPoint(x: col0.midX, y: row1.midY)
-        let p2 = NSPoint(x: col0.midX, y: row2.midY)
-        _ = tv.handleTabularMouseDown(at: p1)
-        tv.handleTabularMouseDragged(to: p2)
-        try cujAssert(tv.activeRowDragRange == 1...2, "Active row drag range should be 1...2")
-        tv.handleTabularMouseUp(at: p2)
+    // Simulate tabular row mouse drag gestures on LineNumberRulerView
+    if let scrollView = tv.enclosingScrollView,
+       let lineRuler = scrollView.verticalRulerView as? LineNumberRulerView,
+       let row1 = tv.rowRect(for: 1),
+       let row2 = tv.rowRect(for: 2) {
+        let p1 = lineRuler.convert(NSPoint(x: 0, y: row1.midY), from: tv)
+        let p2 = lineRuler.convert(NSPoint(x: 0, y: row2.midY), from: tv)
+        let evDown = NSEvent.mouseEvent(with: .leftMouseDown, location: lineRuler.convert(p1, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        lineRuler.mouseDown(with: evDown)
+        let evDrag = NSEvent.mouseEvent(with: .leftMouseDragged, location: lineRuler.convert(p2, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        lineRuler.mouseDragged(with: evDrag)
+        try cujAssert(lineRuler.activeRowDragRange == 1...2, "Active row drag range should be 1...2")
+        let evUp = NSEvent.mouseEvent(with: .leftMouseUp, location: lineRuler.convert(p2, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 0.0)!
+        lineRuler.mouseUp(with: evUp)
         let pb = NSPasteboard.general.string(forType: .string)
         try cujAssert(pb == "1,Alice,Engineering\n2,Bob,Design", "Pasteboard content after drag mismatch")
     }

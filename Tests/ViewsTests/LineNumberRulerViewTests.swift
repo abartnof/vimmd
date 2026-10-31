@@ -149,6 +149,74 @@ func testActiveLineHighlightUpdatesOnCursorMove() throws {
     }
 }
 
+func testSpreadsheetRowHoverAndClickToCopy() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    textView.documentSyntaxType = .csv
+    textView.isTabularDocument = true
+    let csv = "Name,Department,Salary\nAlice,Engineering,150k\nBob,Design,120k\nCarol,Product,130k\n"
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    scrollView.documentView = textView
+    textView.updateSyntaxStyling(force: true)
+
+    let ruler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    ruler.clientView = textView
+    scrollView.hasVerticalRuler = true
+    scrollView.verticalRulerView = ruler
+    scrollView.rulersVisible = true
+
+    // 1. Cursor check: Hovering over LineNumberRulerView in spreadsheets returns rightwardArrowCursor
+    let cur = ruler.cursorForPoint(NSPoint(x: 10, y: 30))
+    guard cur == VimMDTextView.rightwardArrowCursor else {
+        throw NSError(domain: "ViewsTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected rightwardArrowCursor over ruler in spreadsheet, got \(String(describing: cur))"])
+    }
+
+    // When NOT tabular document, cursor should be nil (default)
+    textView.documentSyntaxType = .plainText
+    let curPlain = ruler.cursorForPoint(NSPoint(x: 10, y: 30))
+    guard curPlain == nil else {
+        throw NSError(domain: "ViewsTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected nil cursor for non-tabular document, got \(String(describing: curPlain))"])
+    }
+    textView.documentSyntaxType = .csv
+
+    // 2. Click to copy: Click row 2 (which is Bob's row, 0-indexed row 2, line 3)
+    guard let row2Rect = textView.rowRect(for: 2) else {
+        throw NSError(domain: "ViewsTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Failed to get rowRect for row 2"])
+    }
+    let rulerPt = ruler.convert(NSPoint(x: 0, y: row2Rect.midY), from: textView)
+
+    var feedbackReceived: String?
+    textView.onFlashFeedback = { msg in
+        feedbackReceived = msg
+    }
+
+    NSPasteboard.general.clearContents()
+    let event = NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: ruler.convert(rulerPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1.0
+    )!
+    ruler.mouseDown(with: event)
+
+    let copied = NSPasteboard.general.string(forType: .string)
+    guard copied == "Bob,Design,120k" else {
+        throw NSError(domain: "ViewsTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected copied 'Bob,Design,120k', got '\(String(describing: copied))'"])
+    }
+    guard let feedback = feedbackReceived, feedback.contains("Row 3") else {
+        throw NSError(domain: "ViewsTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected feedback mentioning Row 3, got \(String(describing: feedbackReceived))"])
+    }
+    guard textView.transientFlashRect != nil else {
+        throw NSError(domain: "ViewsTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "Expected transientFlashRect to be set for flash feedback"])
+    }
+}
+
 print("=== LineNumberRulerView Unit Tests ===")
 var total = 0
 var passed = 0
@@ -157,7 +225,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testRulerInitializationAndScrollAttachment", testRulerInitializationAndScrollAttachment),
     ("testRulerThicknessDynamicCalculation", testRulerThicknessDynamicCalculation),
     ("testLineNumbersDoNotPolluteTextStorageOrCopy", testLineNumbersDoNotPolluteTextStorageOrCopy),
-    ("testActiveLineHighlightUpdatesOnCursorMove", testActiveLineHighlightUpdatesOnCursorMove)
+    ("testActiveLineHighlightUpdatesOnCursorMove", testActiveLineHighlightUpdatesOnCursorMove),
+    ("testSpreadsheetRowHoverAndClickToCopy", testSpreadsheetRowHoverAndClickToCopy)
 ]
 
 for (name, test) in tests {

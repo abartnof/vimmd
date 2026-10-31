@@ -168,35 +168,51 @@ func testDynamicRowAndColumnAddition() throws {
     }
 }
 
-// 5. Hover Cursors (Downward Arrow over Row 1, Rightward Arrow over Column A)
+// 5. Hover Cursors (Downward Arrow over ColumnLetterRulerView, Rightward Arrow over LineNumberRulerView)
 func testHoverCursors() throws {
-    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    textView.documentSyntaxType = .csv
     textView.isTabularDocument = true
     textView.isTSV = false
 
     let session = VimSession(initialText: "HeaderA,HeaderB,HeaderC\nVal1,Val2,Val3\nVal4,Val5,Val6\n")
     textView.session = session
+    scrollView.documentView = textView
     textView.updateSyntaxStyling(force: true)
 
+    let colRuler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
+    colRuler.clientView = textView
+    scrollView.horizontalRulerView = colRuler
+
+    let lineRuler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    lineRuler.clientView = textView
+    scrollView.verticalRulerView = lineRuler
+
+    // Over ColumnLetterRulerView -> downward arrow cursor
+    let cursorColRuler = colRuler.cursorForPoint(NSPoint(x: 50, y: 10))
+    guard cursorColRuler == VimMDTextView.downwardArrowCursor else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "Expected downward arrow cursor over ColumnLetterRulerView"])
+    }
+
+    // Over LineNumberRulerView -> rightward arrow cursor
+    let cursorLineRuler = lineRuler.cursorForPoint(NSPoint(x: 10, y: 50))
+    guard cursorLineRuler == VimMDTextView.rightwardArrowCursor else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected rightward arrow cursor over LineNumberRulerView"])
+    }
+
+    // Inside text view cells -> nil (standard I-beam)
     guard let row0 = textView.rowRect(for: 0),
           let row1 = textView.rowRect(for: 1),
           let col0 = textView.columnRect(for: 0),
           let col1 = textView.columnRect(for: 1) else {
         throw NSError(domain: "SpreadsheetGridTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "Failed to get row/col rects"])
     }
-
-    // Point in Row 1 (Header row), Column 1 (HeaderB)
-    let headerPoint = NSPoint(x: col1.midX, y: row0.midY)
-    let cursorHeader = textView.cursorForPoint(headerPoint)
-    guard cursorHeader == VimMDTextView.downwardArrowCursor else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "Expected downward arrow cursor over header row"])
+    guard textView.cursorForPoint(NSPoint(x: col1.midX, y: row0.midY)) == nil else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 43, userInfo: [NSLocalizedDescriptionKey: "Expected nil cursor for cell in text view"])
     }
-
-    // Point in Column A (First column), Row 2 (Data row 1: Val1)
-    let colAPoint = NSPoint(x: col0.midX, y: row1.midY)
-    let cursorColA = textView.cursorForPoint(colAPoint)
-    guard cursorColA == VimMDTextView.rightwardArrowCursor else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 42, userInfo: [NSLocalizedDescriptionKey: "Expected rightward arrow cursor over Column A data row"])
+    guard textView.cursorForPoint(NSPoint(x: col0.midX, y: row1.midY)) == nil else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 44, userInfo: [NSLocalizedDescriptionKey: "Expected nil cursor for cell in text view"])
     }
 }
 
@@ -238,16 +254,24 @@ func testClickToCopyColumnAndRow() throws {
     }
 }
 
-// 7. Multi-Row Dragging over Column A
-func testMultiRowDraggingOverColumnA() throws {
-    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+// 7. Multi-Row Dragging over LineNumberRulerView
+func testMultiRowDraggingOverLineNumberRuler() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    textView.documentSyntaxType = .csv
     textView.isTabularDocument = true
     textView.isTSV = false
 
     let csv = "ID,Name\n1,Alice\n2,Bob\n3,Carol\n4,David\n"
     let session = VimSession(initialText: csv)
     textView.session = session
+    scrollView.documentView = textView
     textView.updateSyntaxStyling(force: true)
+
+    let ruler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    ruler.clientView = textView
+    scrollView.hasVerticalRuler = true
+    scrollView.verticalRulerView = ruler
 
     var feedbackMsg: String?
     textView.onFlashFeedback = { msg in
@@ -255,25 +279,57 @@ func testMultiRowDraggingOverColumnA() throws {
     }
 
     guard let row1 = textView.rowRect(for: 1),
-          let row3 = textView.rowRect(for: 3),
-          let col0 = textView.columnRect(for: 0) else {
+          let row3 = textView.rowRect(for: 3) else {
         throw NSError(domain: "SpreadsheetGridTests", code: 60, userInfo: [NSLocalizedDescriptionKey: "Missing rects"])
     }
 
-    // Start drag at Row 1 in Column A
-    let startPt = NSPoint(x: col0.midX, y: row1.midY)
-    _ = textView.handleTabularMouseDown(at: startPt)
+    // Start drag at Row 1 in ruler
+    let startPt = ruler.convert(NSPoint(x: 0, y: row1.midY), from: textView)
+    let startEvent = NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: ruler.convert(startPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1.0
+    )!
+    ruler.mouseDown(with: startEvent)
 
     // Drag to Row 3
-    let dragPt = NSPoint(x: col0.midX, y: row3.midY)
-    textView.handleTabularMouseDragged(to: dragPt)
+    let dragPt = ruler.convert(NSPoint(x: 0, y: row3.midY), from: textView)
+    let dragEvent = NSEvent.mouseEvent(
+        with: .leftMouseDragged,
+        location: ruler.convert(dragPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1.0
+    )!
+    ruler.mouseDragged(with: dragEvent)
 
-    guard textView.activeRowDragRange == 1...3 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 61, userInfo: [NSLocalizedDescriptionKey: "Expected activeRowDragRange 1...3, got \(String(describing: textView.activeRowDragRange))"])
+    guard ruler.activeRowDragRange == 1...3 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 61, userInfo: [NSLocalizedDescriptionKey: "Expected activeRowDragRange 1...3, got \(String(describing: ruler.activeRowDragRange))"])
     }
 
     // Mouse up
-    textView.handleTabularMouseUp(at: dragPt)
+    let upEvent = NSEvent.mouseEvent(
+        with: .leftMouseUp,
+        location: ruler.convert(dragPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 0.0
+    )!
+    ruler.mouseUp(with: upEvent)
 
     let pbString = NSPasteboard.general.string(forType: .string)
     guard pbString == "1,Alice\n2,Bob\n3,Carol" else {
@@ -285,42 +341,81 @@ func testMultiRowDraggingOverColumnA() throws {
     }
 }
 
-// 8. Multi-Column Dragging over Row 1
-func testMultiColumnDraggingOverRow1() throws {
-    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+// 8. Multi-Column Dragging over ColumnLetterRulerView
+func testMultiColumnDraggingOverColumnLetterRuler() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    textView.documentSyntaxType = .csv
     textView.isTabularDocument = true
     textView.isTSV = false
 
     let csv = "A,B,C,D\n1,2,3,4\n5,6,7,8\n"
     let session = VimSession(initialText: csv)
     textView.session = session
+    scrollView.documentView = textView
     textView.updateSyntaxStyling(force: true)
+
+    let ruler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
+    ruler.clientView = textView
+    scrollView.horizontalRulerView = ruler
 
     var feedbackMsg: String?
     textView.onFlashFeedback = { msg in
         feedbackMsg = msg
     }
 
-    guard let row0 = textView.rowRect(for: 0),
-          let col1 = textView.columnRect(for: 1),
+    guard let col1 = textView.columnRect(for: 1),
           let col2 = textView.columnRect(for: 2) else {
         throw NSError(domain: "SpreadsheetGridTests", code: 70, userInfo: [NSLocalizedDescriptionKey: "Missing rects"])
     }
 
-    // Start drag at Column 1 in Row 1
-    let startPt = NSPoint(x: col1.midX, y: row0.midY)
-    _ = textView.handleTabularMouseDown(at: startPt)
+    // Start drag at Column 1 in ColumnLetterRulerView
+    let startPt = ruler.convert(NSPoint(x: col1.midX, y: 0), from: textView)
+    let startEvent = NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: ruler.convert(startPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1.0
+    )!
+    ruler.mouseDown(with: startEvent)
 
     // Drag to Column 2
-    let dragPt = NSPoint(x: col2.midX, y: row0.midY)
-    textView.handleTabularMouseDragged(to: dragPt)
+    let dragPt = ruler.convert(NSPoint(x: col2.midX, y: 0), from: textView)
+    let dragEvent = NSEvent.mouseEvent(
+        with: .leftMouseDragged,
+        location: ruler.convert(dragPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1.0
+    )!
+    ruler.mouseDragged(with: dragEvent)
 
-    guard textView.activeColDragRange == 1...2 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 71, userInfo: [NSLocalizedDescriptionKey: "Expected activeColDragRange 1...2, got \(String(describing: textView.activeColDragRange))"])
+    guard ruler.activeColDragRange == 1...2 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 71, userInfo: [NSLocalizedDescriptionKey: "Expected activeColDragRange 1...2, got \(String(describing: ruler.activeColDragRange))"])
     }
 
     // Mouse up
-    textView.handleTabularMouseUp(at: dragPt)
+    let upEvent = NSEvent.mouseEvent(
+        with: .leftMouseUp,
+        location: ruler.convert(dragPt, to: nil as NSView?),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 0.0
+    )!
+    ruler.mouseUp(with: upEvent)
 
     let pbString = NSPasteboard.general.string(forType: .string)
     // Multi-column extract should be comma-delimited across rows:
@@ -347,8 +442,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testDynamicRowAndColumnAddition", testDynamicRowAndColumnAddition),
     ("testHoverCursors", testHoverCursors),
     ("testClickToCopyColumnAndRow", testClickToCopyColumnAndRow),
-    ("testMultiRowDraggingOverColumnA", testMultiRowDraggingOverColumnA),
-    ("testMultiColumnDraggingOverRow1", testMultiColumnDraggingOverRow1)
+    ("testMultiRowDraggingOverLineNumberRuler", testMultiRowDraggingOverLineNumberRuler),
+    ("testMultiColumnDraggingOverColumnLetterRuler", testMultiColumnDraggingOverColumnLetterRuler)
 ]
 
 for (name, test) in tests {

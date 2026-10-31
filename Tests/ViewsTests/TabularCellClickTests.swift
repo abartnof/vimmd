@@ -31,6 +31,18 @@ func sendMouseClick(_ tv: VimMDTextView, at point: NSPoint) {
         pressure: 1.0
     )!
     tv.mouseDown(with: event)
+    let upEvent = NSEvent.mouseEvent(
+        with: .leftMouseUp,
+        location: windowPoint,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: tv.window?.windowNumber ?? 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 0.0
+    )!
+    tv.mouseUp(with: upEvent)
 }
 
 func createTestEnvironment(text: String, isTSV: Bool = false) -> (NSWindow, NSView, VimMDTextView, VimSession) {
@@ -443,6 +455,65 @@ func testEmptyDocumentClick() throws {
     }
 }
 
+// 12. Cell clicks on Row 1 (header) and Column 1 (Col A) do not copy to clipboard and position caret
+func testHeaderAndColumnACellClicksDoNotCopyToClipboard() throws {
+    let csv = "ColA,ColB,ColC\nRow1A,Row1B,Row1C\nRow2A,Row2B,Row2C\n"
+    let (window, dummy, tv, session) = createTestEnvironment(text: csv)
+
+    guard let row0 = tv.rowRect(for: 0),
+          let row1 = tv.rowRect(for: 1),
+          let col0 = tv.columnRect(for: 0),
+          let col1 = tv.columnRect(for: 1) else {
+        throw NSError(domain: "TabularCellClickTests", code: 100, userInfo: [NSLocalizedDescriptionKey: "Failed to get rects"])
+    }
+
+    // Clear pasteboard before test
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString("SENTINEL_PASTEBOARD", forType: .string)
+
+    // Click Header Row, Col B
+    sendMouseClick(tv, at: NSPoint(x: col1.midX, y: row0.midY))
+
+    // Caret must be placed at ColB
+    guard session.cursorPosition.line == 1 && session.cursorPosition.byteCol == 6 else {
+        throw NSError(domain: "TabularCellClickTests", code: 101, userInfo: [NSLocalizedDescriptionKey: "Expected Line 1, Col 6, got Line \(session.cursorPosition.line), Col \(session.cursorPosition.byteCol)"])
+    }
+    // Pasteboard must NOT be modified by cell click!
+    let pbAfterHeader = NSPasteboard.general.string(forType: .string)
+    guard pbAfterHeader == "SENTINEL_PASTEBOARD" else {
+        throw NSError(domain: "TabularCellClickTests", code: 102, userInfo: [NSLocalizedDescriptionKey: "Pasteboard was overwritten by header cell click: \(String(describing: pbAfterHeader))"])
+    }
+    guard !tv.isDraggingCol && tv.activeColDragRange == nil else {
+        throw NSError(domain: "TabularCellClickTests", code: 103, userInfo: [NSLocalizedDescriptionKey: "isDraggingCol should be false"])
+    }
+
+    // Click Column A on data Row 1
+    sendMouseClick(tv, at: NSPoint(x: col0.midX, y: row1.midY))
+
+    // Caret must be placed at Row1A (Line 2, Col 1)
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 1 else {
+        throw NSError(domain: "TabularCellClickTests", code: 104, userInfo: [NSLocalizedDescriptionKey: "Expected Line 2, Col 1, got Line \(session.cursorPosition.line), Col \(session.cursorPosition.byteCol)"])
+    }
+    // Pasteboard must NOT be modified by cell click!
+    let pbAfterColA = NSPasteboard.general.string(forType: .string)
+    guard pbAfterColA == "SENTINEL_PASTEBOARD" else {
+        throw NSError(domain: "TabularCellClickTests", code: 105, userInfo: [NSLocalizedDescriptionKey: "Pasteboard was overwritten by column A cell click: \(String(describing: pbAfterColA))"])
+    }
+    guard !tv.isDraggingRow && tv.activeRowDragRange == nil else {
+        throw NSError(domain: "TabularCellClickTests", code: 106, userInfo: [NSLocalizedDescriptionKey: "isDraggingRow should be false"])
+    }
+
+    // Inside text view, hovering over header cells or column A should NOT return downward/rightward arrow
+    let curHeader = tv.cursorForPoint(NSPoint(x: col1.midX, y: row0.midY))
+    guard curHeader != VimMDTextView.downwardArrowCursor else {
+        throw NSError(domain: "TabularCellClickTests", code: 107, userInfo: [NSLocalizedDescriptionKey: "Header cell hover must not show downwardArrowCursor"])
+    }
+    let curColA = tv.cursorForPoint(NSPoint(x: col0.midX, y: row1.midY))
+    guard curColA != VimMDTextView.rightwardArrowCursor else {
+        throw NSError(domain: "TabularCellClickTests", code: 108, userInfo: [NSLocalizedDescriptionKey: "Col A cell hover must not show rightwardArrowCursor"])
+    }
+}
+
 // Main test runner
 let tests: [(String, () throws -> Void)] = [
     ("testClickVariousXOffsetsAcrossCellWidth", testClickVariousXOffsetsAcrossCellWidth),
@@ -455,7 +526,8 @@ let tests: [(String, () throws -> Void)] = [
     ("testPositionCaretDirectClamping", testPositionCaretDirectClamping),
     ("testTSVCellClick", testTSVCellClick),
     ("testUnicodeAndEmojiCellClick", testUnicodeAndEmojiCellClick),
-    ("testEmptyDocumentClick", testEmptyDocumentClick)
+    ("testEmptyDocumentClick", testEmptyDocumentClick),
+    ("testHeaderAndColumnACellClicksDoNotCopyToClipboard", testHeaderAndColumnACellClicksDoNotCopyToClipboard)
 ]
 
 print("=== TabularCellClickTests ===")

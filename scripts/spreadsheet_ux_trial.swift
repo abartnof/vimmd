@@ -256,68 +256,88 @@ do {
         assert(row2Text.contains("Serie A") && row2Text.contains("Italy"), "Single row copy mismatch")
         assert(flashMsg != nil && flashMsg!.contains("Row 3"), "Flash feedback missing for row")
         
-        // Multi-column drag: Columns 1 to 2 across Header Row
-        let pStartCol = NSPoint(x: c1.midX, y: r0.midY)
-        let pEndCol = NSPoint(x: c2.midX, y: r0.midY)
-        _ = tv.handleTabularMouseDown(at: pStartCol)
-        tv.handleTabularMouseDragged(to: pEndCol)
-        assert(tv.activeColDragRange == 1...2, "Active col drag range mismatch: \(String(describing: tv.activeColDragRange))")
-        tv.handleTabularMouseUp(at: pEndCol)
+        // Multi-column drag: Columns 1 to 2 across ColumnLetterRulerView
+        guard let scrollView = tv.enclosingScrollView,
+              let colRuler = scrollView.horizontalRulerView as? ColumnLetterRulerView,
+              let lineRuler = scrollView.verticalRulerView as? LineNumberRulerView else {
+            fatalError("Failed to get rulers")
+        }
+
+        let pStartCol = colRuler.convert(NSPoint(x: c1.midX, y: 0), from: tv)
+        let pEndCol = colRuler.convert(NSPoint(x: c2.midX, y: 0), from: tv)
+        let evDownCol = NSEvent.mouseEvent(with: .leftMouseDown, location: colRuler.convert(pStartCol, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        colRuler.mouseDown(with: evDownCol)
+        let evDragCol = NSEvent.mouseEvent(with: .leftMouseDragged, location: colRuler.convert(pEndCol, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        colRuler.mouseDragged(with: evDragCol)
+        assert(colRuler.activeColDragRange == 1...2, "Active col drag range mismatch: \(String(describing: colRuler.activeColDragRange))")
+        let evUpCol = NSEvent.mouseEvent(with: .leftMouseUp, location: colRuler.convert(pEndCol, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 0.0)!
+        colRuler.mouseUp(with: evUpCol)
         let colPb = NSPasteboard.general.string(forType: .string) ?? ""
         assert(colPb.contains("League / Tournament,Country") && colPb.contains("Bundesliga,Germany"), "Multi-col pasteboard mismatch: '\(colPb)'")
         
-        // Multi-row drag: Rows 1 to 3 down Column A
+        // Multi-row drag: Rows 1 to 3 down LineNumberRulerView
         guard let r1 = tv.rowRect(for: 1), let r3 = tv.rowRect(for: 3) else {
             fatalError("Failed to get row rects")
         }
-        let pStartRow = NSPoint(x: c0.midX, y: r1.midY)
-        let pEndRow = NSPoint(x: c0.midX, y: r3.midY)
-        _ = tv.handleTabularMouseDown(at: pStartRow)
-        tv.handleTabularMouseDragged(to: pEndRow)
-        assert(tv.activeRowDragRange == 1...3, "Active row drag range mismatch: \(String(describing: tv.activeRowDragRange))")
-        tv.handleTabularMouseUp(at: pEndRow)
+        let pStartRow = lineRuler.convert(NSPoint(x: 0, y: r1.midY), from: tv)
+        let pEndRow = lineRuler.convert(NSPoint(x: 0, y: r3.midY), from: tv)
+        let evDownRow = NSEvent.mouseEvent(with: .leftMouseDown, location: lineRuler.convert(pStartRow, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        lineRuler.mouseDown(with: evDownRow)
+        let evDragRow = NSEvent.mouseEvent(with: .leftMouseDragged, location: lineRuler.convert(pEndRow, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0)!
+        lineRuler.mouseDragged(with: evDragRow)
+        assert(lineRuler.activeRowDragRange == 1...3, "Active row drag range mismatch: \(String(describing: lineRuler.activeRowDragRange))")
+        let evUpRow = NSEvent.mouseEvent(with: .leftMouseUp, location: lineRuler.convert(pEndRow, to: nil as NSView?), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 0.0)!
+        lineRuler.mouseUp(with: evUpRow)
         let rowPb = NSPasteboard.general.string(forType: .string) ?? ""
         assert(rowPb.contains("Premier League") && rowPb.contains("Serie A") && rowPb.contains("La Liga"), "Multi-row pasteboard mismatch: '\(rowPb)'")
     }
     
     UXReportCollector.shared.record(
         section: "1. Tabular Layout & Mouse Interaction",
-        name: "Column A & Header Row Drag-to-Copy Gestures",
+        name: "Ruler Panels Drag-to-Copy Gestures",
         status: "PASS",
         latencyMs: latency,
         details: "Single & multi-column and row extract copy properly formatted data to system pasteboard with visual feedback"
     )
-    print("  [✓] 1.3 Column A & Header row drag-to-copy gestures: PASS (\(String(format: "%.2f", latency))ms)")
+    print("  [✓] 1.3 Ruler panels drag-to-copy gestures: PASS (\(String(format: "%.2f", latency))ms)")
 }
 
-// 1.4 High-Contrast White Arrow Cursors over Column A and Row 1
+// 1.4 High-Contrast White Arrow Cursors over Ruler Panels
 do {
-    let tv = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-    tv.documentSyntaxType = .csv
-    tv.string = realCsvString
+    let doc = try VimMDDocument(type: "public.comma-separated-values-text")
+    doc.makeWindowControllers()
+    try doc.read(from: realCsvString.data(using: .utf8)!, ofType: "public.comma-separated-values-text")
+    defer {
+        doc.windowControllers.forEach { $0.close(); $0.window?.close() }
+        doc.close()
+    }
+    let tv = doc.textView!
     tv.updateSyntaxStyling(force: true)
     
     let latency = measureMs {
         guard let r0 = tv.rowRect(for: 0),
               let r1 = tv.rowRect(for: 1),
               let c0 = tv.columnRect(for: 0),
-              let c1 = tv.columnRect(for: 1) else {
-            fatalError("Failed to get rects for cursor verification")
+              let c1 = tv.columnRect(for: 1),
+              let scrollView = tv.enclosingScrollView,
+              let colRuler = scrollView.horizontalRulerView,
+              let lineRuler = scrollView.verticalRulerView as? LineNumberRulerView else {
+            fatalError("Failed to get rects and rulers for cursor verification")
         }
         
-        // Cursor over Row 1 (Header row) -> Downward Arrow
-        let ptHeader = NSPoint(x: c1.midX, y: r0.midY)
-        let curHeader = tv.cursorForPoint(ptHeader)
-        assert(curHeader == VimMDTextView.downwardArrowCursor, "Header row must show downwardArrowCursor")
+        // Cursor over ColumnLetterRulerView -> Downward Arrow
+        let curHeader = (colRuler as? ColumnLetterRulerView)?.cursorForPoint(NSPoint(x: 50, y: 10))
+        assert(curHeader == VimMDTextView.downwardArrowCursor, "Column letter ruler must show downwardArrowCursor")
         assert(curHeader?.hotSpot == NSPoint(x: 10, y: 18), "downwardArrowCursor hotspot must be bottom tip (10, 18)")
         
-        // Cursor over Column A on data rows -> Rightward Arrow
-        let ptColA = NSPoint(x: c0.midX, y: r1.midY)
-        let curColA = tv.cursorForPoint(ptColA)
-        assert(curColA == VimMDTextView.rightwardArrowCursor, "Column A must show rightwardArrowCursor")
+        // Cursor over LineNumberRulerView -> Rightward Arrow
+        let curColA = lineRuler.cursorForPoint(NSPoint(x: 10, y: 50))
+        assert(curColA == VimMDTextView.rightwardArrowCursor, "Line number ruler must show rightwardArrowCursor")
         assert(curColA?.hotSpot == NSPoint(x: 18, y: 10), "rightwardArrowCursor hotspot must be right tip (18, 10)")
         
-        // Cursor over Body cells -> nil (standard I-beam)
+        // Cursor over Body and Header cells in text view -> nil (standard I-beam)
+        let ptHeaderCell = NSPoint(x: c1.midX, y: r0.midY)
+        assert(tv.cursorForPoint(ptHeaderCell) == nil, "Header cells must return nil for standard I-beam")
         let ptBody = NSPoint(x: c1.midX, y: r1.midY)
         let curBody = tv.cursorForPoint(ptBody)
         assert(curBody == nil, "Body cells must return nil for standard I-beam")
@@ -328,7 +348,7 @@ do {
         name: "High-Contrast Arrow Cursors & Hotspots",
         status: "PASS",
         latencyMs: latency,
-        details: "White fill + black outline cursors with pixel-accurate tip hotspots verified over Row 1 (↓) and Column A (→)"
+        details: "White fill + black outline cursors with pixel-accurate tip hotspots verified over ColumnLetterRulerView (↓) and LineNumberRulerView (→)"
     )
     print("  [✓] 1.4 High-contrast white arrow cursors: PASS (\(String(format: "%.2f", latency))ms)")
 }
@@ -794,30 +814,29 @@ do {
     tv.updateSyntaxStyling(force: true)
     
     let latency = measureMs {
-        // Initial state: wrapTableCells is false -> Auto-fit width calculation
-        assert(!doc.wrapTableCells && !tv.wrapTableCells, "Initial wrapTableCells should be false")
-        let widthsAutoFit = tv.columnWidths()
-        assert(!widthsAutoFit.isEmpty, "Column widths should be computed")
-        
-        // In real euro leagues data, Col 5 ("How to Watch in the USA") has long strings (> 40 chars)
-        // Auto-fit expands width to fit longest string
-        assert(widthsAutoFit[5] > 300.0, "Auto-fit should expand Col 5 width to fit longest entry (was \(widthsAutoFit[5]))")
-        
-        // Toggle Wrap Table Cells ON
-        doc.toggleWrapTableCells(nil)
-        assert(doc.wrapTableCells && tv.wrapTableCells, "wrapTableCells should be true after toggle")
-        
+        // Initial state: wrapTableCells defaults to true for spreadsheets -> 240.0 pt default wrap width
+        assert(doc.wrapTableCells && tv.wrapTableCells, "Initial wrapTableCells should default to true")
         let widthsWrapped = tv.columnWidths()
-        // When wrapTableCells is true, columns cap at defaultWrapWidth (240.0 pt)
+        assert(!widthsWrapped.isEmpty, "Column widths should be computed")
         for w in widthsWrapped {
             assert(abs(w - 240.0) < 0.1, "Wrapped column width should be 240.0, got \(w)")
         }
         
-        // Toggle back OFF
+        // Toggle Wrap Table Cells OFF -> Auto-fit width calculation
         doc.toggleWrapTableCells(nil)
         assert(!doc.wrapTableCells && !tv.wrapTableCells, "wrapTableCells should be false after toggle")
+        let widthsAutoFit = tv.columnWidths()
+        // In real euro leagues data, Col 5 ("How to Watch in the USA") has long strings (> 40 chars)
+        // Auto-fit expands width to fit longest string
+        assert(widthsAutoFit[5] > 300.0, "Auto-fit should expand Col 5 width to fit longest entry (was \(widthsAutoFit[5]))")
+        
+        // Toggle back ON -> Restored wrapped 240pt grid
+        doc.toggleWrapTableCells(nil)
+        assert(doc.wrapTableCells && tv.wrapTableCells, "wrapTableCells should be true after toggle")
         let widthsRestored = tv.columnWidths()
-        assert(widthsRestored[5] > 300.0, "Column widths should revert to auto-fit values")
+        for w in widthsRestored {
+            assert(abs(w - 240.0) < 0.1, "Restored wrapped column width should be 240.0, got \(w)")
+        }
     }
     
     UXReportCollector.shared.record(

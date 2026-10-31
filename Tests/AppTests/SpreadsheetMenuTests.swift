@@ -128,13 +128,17 @@ func testTogglingSpreadsheetProperties() throws {
     let freezeColItem = NSMenuItem(title: "Freeze First Column", action: #selector(VimMDDocument.toggleFreezeFirstColumn(_:)), keyEquivalent: "")
     let wrapCellsItem = NSMenuItem(title: "Wrap Table Cells", action: #selector(VimMDDocument.toggleWrapTableCells(_:)), keyEquivalent: "")
 
-    // Initial states: false (off)
-    guard doc.freezeFirstRow == false && doc.freezeFirstColumn == false && doc.wrapTableCells == false else {
-        throw NSError(domain: "SpreadsheetMenuTests", code: 30, userInfo: [NSLocalizedDescriptionKey: "Initial properties should be false"])
+    // Initial states: freeze rows/cols false, wrapTableCells defaults to true for tabular documents
+    guard doc.freezeFirstRow == false && doc.freezeFirstColumn == false && doc.wrapTableCells == true else {
+        throw NSError(domain: "SpreadsheetMenuTests", code: 30, userInfo: [NSLocalizedDescriptionKey: "Initial properties mismatch: wrapTableCells must default to true for spreadsheets"])
     }
     _ = doc.validateMenuItem(freezeRowItem)
     guard freezeRowItem.state == .off else {
         throw NSError(domain: "SpreadsheetMenuTests", code: 31, userInfo: [NSLocalizedDescriptionKey: "Initial freezeRowItem state should be off"])
+    }
+    _ = doc.validateMenuItem(wrapCellsItem)
+    guard wrapCellsItem.state == .on else {
+        throw NSError(domain: "SpreadsheetMenuTests", code: 311, userInfo: [NSLocalizedDescriptionKey: "Initial wrapCellsItem state should be on for spreadsheets"])
     }
 
     // Toggle Freeze First Row
@@ -163,17 +167,23 @@ func testTogglingSpreadsheetProperties() throws {
         throw NSError(domain: "SpreadsheetMenuTests", code: 37, userInfo: [NSLocalizedDescriptionKey: "textView.freezeFirstColumn should match doc"])
     }
 
-    // Toggle Wrap Table Cells
+    // Toggle Wrap Table Cells (starts true -> becomes false)
     doc.toggleWrapTableCells(nil)
-    guard doc.wrapTableCells == true else {
-        throw NSError(domain: "SpreadsheetMenuTests", code: 38, userInfo: [NSLocalizedDescriptionKey: "wrapTableCells should be true after toggle"])
+    guard doc.wrapTableCells == false else {
+        throw NSError(domain: "SpreadsheetMenuTests", code: 38, userInfo: [NSLocalizedDescriptionKey: "wrapTableCells should be false after toggle"])
     }
     _ = doc.validateMenuItem(wrapCellsItem)
-    guard wrapCellsItem.state == .on else {
-        throw NSError(domain: "SpreadsheetMenuTests", code: 39, userInfo: [NSLocalizedDescriptionKey: "wrapCellsItem state should be on after toggle"])
+    guard wrapCellsItem.state == .off else {
+        throw NSError(domain: "SpreadsheetMenuTests", code: 39, userInfo: [NSLocalizedDescriptionKey: "wrapCellsItem state should be off after toggle"])
     }
-    guard doc.textView?.wrapTableCells == true else {
+    guard doc.textView?.wrapTableCells == false else {
         throw NSError(domain: "SpreadsheetMenuTests", code: 40, userInfo: [NSLocalizedDescriptionKey: "textView.wrapTableCells should match doc"])
+    }
+
+    // Toggle Wrap Table Cells back to true
+    doc.toggleWrapTableCells(nil)
+    guard doc.wrapTableCells == true && doc.textView?.wrapTableCells == true else {
+        throw NSError(domain: "SpreadsheetMenuTests", code: 41, userInfo: [NSLocalizedDescriptionKey: "wrapTableCells should toggle back to true"])
     }
 }
 

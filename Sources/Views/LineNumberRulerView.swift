@@ -6,6 +6,107 @@ open class LineNumberRulerView: NSRulerView {
         return true
     }
 
+    public var activeRowDragRange: ClosedRange<Int>?
+    public var dragStartRowIndex: Int?
+    private var rulerTrackingArea: NSTrackingArea?
+
+    private var targetTextView: VimMDTextView? {
+        return (self.clientView as? VimMDTextView) ?? (self.scrollView?.documentView as? VimMDTextView)
+    }
+
+    public func cursorForPoint(_ point: NSPoint) -> NSCursor? {
+        guard let tv = targetTextView, tv.isTabularDocument else { return nil }
+        return VimMDTextView.rightwardArrowCursor
+    }
+
+    override open func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let old = rulerTrackingArea {
+            removeTrackingArea(old)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+        rulerTrackingArea = tracking
+    }
+
+    override open func resetCursorRects() {
+        super.resetCursorRects()
+        if let cursor = cursorForPoint(.zero) {
+            addCursorRect(bounds, cursor: cursor)
+        }
+    }
+
+    override open func cursorUpdate(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        if let cursor = cursorForPoint(pt) {
+            cursor.set()
+            return
+        }
+        super.cursorUpdate(with: event)
+    }
+
+    override open func mouseMoved(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        if let cursor = cursorForPoint(pt) {
+            cursor.set()
+            return
+        }
+        super.mouseMoved(with: event)
+    }
+
+    // MARK: - Click & Drag Interaction
+
+    override open func mouseDown(with event: NSEvent) {
+        guard let tv = targetTextView, tv.isTabularDocument else {
+            super.mouseDown(with: event)
+            return
+        }
+        let ptInRuler = convert(event.locationInWindow, from: nil)
+        let ptInTV = tv.convert(ptInRuler, from: self)
+        if let row = tv.rowIndex(at: ptInTV, clamped: false) {
+            dragStartRowIndex = row
+            activeRowDragRange = row...row
+            _ = tv.copyRowRange(from: row, to: row)
+            tv.flashHighlight()
+            self.needsDisplay = true
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    override open func mouseDragged(with event: NSEvent) {
+        guard let tv = targetTextView, tv.isTabularDocument, let start = dragStartRowIndex else {
+            super.mouseDragged(with: event)
+            return
+        }
+        let ptInRuler = convert(event.locationInWindow, from: nil)
+        let ptInTV = tv.convert(ptInRuler, from: self)
+        let current = tv.rowIndex(at: ptInTV, clamped: true) ?? start
+        let minR = min(start, current)
+        let maxR = max(start, current)
+        activeRowDragRange = minR...maxR
+        self.needsDisplay = true
+    }
+
+    override open func mouseUp(with event: NSEvent) {
+        guard let tv = targetTextView, tv.isTabularDocument else {
+            super.mouseUp(with: event)
+            return
+        }
+        if let range = activeRowDragRange, range.count > 1 {
+            _ = tv.copyRowRange(from: range.lowerBound, to: range.upperBound)
+            tv.flashHighlight()
+        }
+        dragStartRowIndex = nil
+        activeRowDragRange = nil
+        self.needsDisplay = true
+    }
+
     public override init(scrollView: NSScrollView?, orientation: NSRulerView.Orientation) {
         super.init(scrollView: scrollView, orientation: orientation)
         setupRuler()
@@ -164,6 +265,12 @@ open class LineNumberRulerView: NSRulerView {
     }
 
     private func drawLineNumber(_ number: Int, y: CGFloat, isActive: Bool) {
+        if let range = activeRowDragRange, range.contains(number - 1) {
+            let highlightRect = NSRect(x: 0, y: y, width: bounds.width, height: 18.0)
+            NSColor.selectedTextBackgroundColor.withAlphaComponent(0.25).setFill()
+            highlightRect.fill()
+        }
+
         let font = isActive
             ? NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
             : NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
