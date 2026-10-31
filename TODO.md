@@ -207,6 +207,13 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Ex Substituted Manifestations (`:%s`, `:s`, `:'<,'>s`)**:
     - [x] Line range replacements with flags `g` (global), `i` (case-insensitive), and `I` (case-sensitive).
 
+- [x] **Milestone X: Default Spreadsheet Cell Wrapping & Ruler-Based Row/Column Copy**
+  - [x] Default cell wrapping to ON (`wrapTableCells = true`) for spreadsheets (`.csv`, `.tsv`) with sensible default column width (240pt).
+  - [x] Cell clicks in Row 1 (headers) and Column 1 (Col A) place the caret inside the cell like any other row/column without triggering copy.
+  - [x] Row number clicks in `LineNumberRulerView` copy the entire row to the clipboard.
+  - [x] Added `ColumnLetterRulerView` horizontal ruler for spreadsheets displaying column letters (A, B, C...); clicking a column letter copies the entire column to the clipboard.
+  - [x] Full drag selection support in both rulers and visual feedback.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
@@ -232,9 +239,9 @@ Tracks live verification status of all capabilities across each supported docume
 | **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (M-P) | N/A (Disabled) | N/A (Disabled) |
-| **Table Formatting** | Neutral gridlines, text wrap | Verified (M-P) | N/A (GFM Tables) | N/A (Monospace) |
-| **Cell Caret Positioning** | Click cell -> First character offset | Verified (M-R) | N/A (Standard Caret) | N/A (Standard Caret) |
-| **Copy Gestures** | Column A / Row 1 Drag-to-Copy | Verified (M-P) | N/A | N/A |
+| **Table Formatting** | Neutral gridlines, text wrap (default ON) | Verified (M-X) | N/A (GFM Tables) | N/A (Monospace) |
+| **Cell Caret Positioning** | Click cell -> Caret inside cell (inc. Row 1 / Col A) | Verified (M-X) | N/A (Standard Caret) | N/A (Standard Caret) |
+| **Copy Gestures** | Ruler Row & Column Header Drag-to-Copy | Verified (M-X) | N/A | N/A |
 | **App Branding** | High-contrast cursor, `v.circle` | Verified (M-N) | Verified (M-N) | Verified (M-N) |
 
 ---
@@ -260,4 +267,5 @@ Tracks live verification status of all capabilities across each supported docume
 - [x] View Menu, Appearance Modes & Format-Aware Line Wrap Policy (`e51ea5d`)
 - [x] Live In-Place Tabular Syntax Rendering for CSV & TSV (Milestone C)
 - [x] Excel-Style Spreadsheet View for CSV & TSV: Gridlines, Neutral Palette, Dynamic Sizing, Wrap, Freeze Panes, and Copy Gestures (Milestone M)
+- [x] Default Spreadsheet Cell Wrapping & Ruler-Based Row/Column Copy (Milestone X)
 
