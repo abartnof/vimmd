@@ -282,6 +282,19 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Strict Vertical Column Navigation Lock (`j` / `k`)**:
     - [x] Fix vertical navigation regression where pressing `j` (down) drifts leftwards into column $C-1$. Maintain strict locked column index $C$ when moving between rows.
 
+- [ ] **Milestone AF: Critical File Malformation Warnings (High-Severity Diagnostics)**
+  - [ ] **Diagnostic Engine & Non-Intrusive Warning Surface**:
+    - [ ] Create `DocumentDiagnosticEngine` running lightweight analysis upon document load.
+    - [ ] Surface high-severity alerts directly in the status bar (`messageLabel` in `NSColor.systemOrange` with warning icon / badge), without intrusive modal dialogs that disrupt user editing.
+  - [ ] **Strict Real-Problem Warning Criteria (Zero Noise)**:
+    - [ ] **Unclosed Quote Swallowing Rows to EOF (`.csv`, `.tsv`)**: Alert when an opening quote reaches EOF without closing (`[Warning] Unclosed quote at line X; rows swallowed to EOF`).
+    - [ ] **Inconsistent Column Overflow (`.csv`, `.tsv`)**: Alert when a structured table has a header and subsequent rows have unescaped commas producing column overflow (`[Warning] Inconsistent columns (Header: 5, Line 12: 8)`).
+    - [ ] **Semicolon Delimiter Mismatch (`.csv`)**: Alert when a `.csv` file contains 0 commas on row 0 but multiple semicolons (European format), causing the table to collapse into Column A (`[Notice] Semicolon-delimited CSV detected`).
+    - [ ] **Lossy UTF-8 Decoding or Embedded Null Bytes**: Alert when file on disk was decoded with replacement characters or contained binary null bytes (`[Warning] Invalid UTF-8 bytes detected; replacement characters used`).
+    - [ ] **Runaway Unclosed Code Fence (`.md`)**: Alert when a triple-backtick code block at line $X$ remains unclosed for $> 25$ lines to EOF, swallowing the entire document into raw monospace code (`[Notice] Unclosed code block starting at line X`).
+  - [ ] **Inspection & Navigation**:
+    - [ ] Clicking the status bar warning jumps the cursor directly to the offending line/row.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
