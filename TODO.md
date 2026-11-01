@@ -295,6 +295,12 @@ This document tracks all active milestones, user requirements, and architectural
   - [ ] **Inspection & Navigation**:
     - [ ] Clicking the status bar warning jumps the cursor directly to the offending line/row.
 
+- [ ] **Milestone AG: Spreadsheet Row 1 Keyboard Up Navigation Visibility Fix (`k` / Up Arrow)**
+  - [ ] **Root Cause**: In `synchronizeCaretWithSession()`, navigating up with `k` in non-column-A cells (`byteCol > 1`) bypassed `resetScrollToTopLeft()` and executed AppKit's `scrollRangeToVisible()`. With a horizontal ruler (`ColumnLetterRulerView`) attached, `scrollRangeToVisible` scrolled the clip view into negative `y` offsets (`y = -35.0pt`), pushing Row 1 above the visible viewport behind the ruler until mouse scrolling clamped `y` back to `0.0`.
+  - [ ] **Remediation**:
+    - [ ] In `synchronizeCaretWithSession()` and `positionCaret`: clamp `scrollView.contentView.bounds.origin.y` to a minimum of `0.0` on upward navigation.
+    - [ ] When the caret lands on Line 1 / Row 0 (in ANY column, not just column A), ensure `contentView` origin `y` snaps cleanly to `0.0`, guaranteeing Row 1 is immediately and completely visible via keyboard navigation.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
