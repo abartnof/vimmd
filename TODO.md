@@ -260,28 +260,27 @@ This document tracks all active milestones, user requirements, and architectural
     - [ ] Cohesive single-step undo (`u`) and redo (`Ctrl-R`) for all multi-line indentation actions.
     - [ ] Differential line index re-indexing without desynchronizing Unicode offsets or syntax concealment caches.
 
-- [ ] **Milestone AC: Wide CSV (100+ Columns) Performance & Column Ruler $O(N^2)$ Hang Fix**
-  - [ ] **Root Cause Resolution for Hang on Wide CSVs (e.g. `sample_public_data.csv` with 115 columns)**:
-    - [ ] In `ColumnLetterRulerView.drawHashMarksAndLabels`: eliminate inner loop calling `tv.columnRect(for: colIndex)`. Previously re-calculated all 115 column widths from scratch and forced full CoreText TextKit layout via `layoutManager.usedRect` 115 times per frame ($O(N^2)$), causing a 16+ second main-thread freeze and beachball spinny icon.
-    - [ ] Streamline `ColumnLetterRulerView`: compute `tv.columnWidths()` once and derive column boundaries sequentially via incremental running `startX` in a single $O(N)$ pass (~0.0001s).
-  - [ ] **Column Widths Caching in `VimMDTextView`**:
-    - [ ] Add `cachedColumnWidths: [CGFloat]?` in `VimMDTextView`, invalidated on text changes or syntax styling passes and reused across mouse tracking, caret alignment, and ruler draw passes.
-  - [ ] **Multiline Quoted Field CSV Resilience**:
-    - [ ] Enhance tabular line parser to handle multiline quoted records gracefully without column count skew or kerning distortions.
+- [x] **Milestone AC: Wide CSV (100+ Columns) Performance & Column Ruler $O(N^2)$ Hang Fix**
+  - [x] **Root Cause Resolution for Hang on Wide CSVs (e.g. `sample_public_data.csv` with 115 columns)**:
+    - [x] In `ColumnLetterRulerView.drawHashMarksAndLabels`: eliminate inner loop calling `tv.columnRect(for: colIndex)`. Streamline `ColumnLetterRulerView`: compute `tv.columnWidths()` once and derive column boundaries sequentially via incremental running `startX` in a single $O(N)$ pass (~0.0001s).
+  - [x] **Column Widths Caching in `VimMDTextView`**:
+    - [x] Add `cachedColumnWidths: [CGFloat]?` in `VimMDTextView`, invalidated on text changes or syntax styling passes and reused across mouse tracking, caret alignment, and ruler draw passes.
+  - [x] **Multiline Quoted Field CSV Resilience**:
+    - [x] Enhance tabular line parser to handle multiline quoted records gracefully without column count skew or kerning distortions.
 
-- [ ] **Milestone AD: Top-Left Viewport Origin Anchoring on Wide Spreadsheets (Eliminate (3,1) Initial Viewport Shift)**
-  - [ ] When opening wide spreadsheets (such as `twitter_sample_data.csv` with 6,800pt+ layout width), guarantee the initial viewport anchors strictly at top-left `(0, 0)` so cell (1, 1) is immediately visible.
-  - [ ] Prevent post-layout asynchronous runloop passes (`viewDidMoveToWindow`, initial layout pass, clip view bounds adjustment) from shifting the scroll view's visible origin horizontally or vertically to cell (3, 1).
-  - [ ] Force clip view and horizontal/vertical ruler bounds to remain pinned at line 1, column 1 during document presentation.
+- [x] **Milestone AD: Top-Left Viewport Origin Anchoring on Wide Spreadsheets (Eliminate (3,1) Initial Viewport Shift)**
+  - [x] When opening wide spreadsheets (such as `twitter_sample_data.csv` with 6,800pt+ layout width), guarantee the initial viewport anchors strictly at top-left `(0, 0)` so cell (1, 1) is immediately visible.
+  - [x] Prevent post-layout asynchronous runloop passes (`viewDidMoveToWindow`, initial layout pass, clip view bounds adjustment) from shifting the scroll view's visible origin horizontally or vertically to cell (3, 1).
+  - [x] Force clip view and horizontal/vertical ruler bounds to remain pinned at line 1, column 1 during document presentation.
 
-- [ ] **Milestone AE: RFC 4180 Multiline Quoted CSV Parsing, True Cell Word-Wrapping & Vertical Column Locking**
-  - [ ] **RFC 4180 Multiline Quoted Record Parsing**:
-    - [ ] Stop naively splitting on raw `\n` in `TabularSyntaxResolver`. Newlines inside double quotes (`"..."`) are part of cell content, not new rows.
-    - [ ] Prevents broken lines (e.g. Row 7, 10, 13 in `twitter_sample_data.csv`) from spilling orphaned tweet fragments into Column A and desynchronizing table column counts.
-  - [ ] **True Cell Word-Wrapping (`wrapTableCells`)**:
-    - [ ] When `wrapTableCells == true`, wrap long cell text within the column width boundary (e.g. cell 13A) instead of allowing text to stretch to infinite width or spill across adjacent columns.
-  - [ ] **Strict Vertical Column Navigation Lock (`j` / `k`)**:
-    - [ ] Fix vertical navigation regression where pressing `j` (down) drifts leftwards into column $C-1$. Maintain strict locked column index $C$ when moving between rows.
+- [x] **Milestone AE: RFC 4180 Multiline Quoted CSV Parsing, True Cell Word-Wrapping & Vertical Column Locking**
+  - [x] **RFC 4180 Multiline Quoted Record Parsing**:
+    - [x] Stop naively splitting on raw `\n` in `TabularSyntaxResolver`. Newlines inside double quotes (`"..."`) are part of cell content, not new rows.
+    - [x] Prevents broken lines (e.g. Row 7, 10, 13 in `twitter_sample_data.csv`) from spilling orphaned tweet fragments into Column A and desynchronizing table column counts.
+  - [x] **True Cell Word-Wrapping (`wrapTableCells`)**:
+    - [x] When `wrapTableCells == true`, wrap long cell text within the column width boundary (e.g. cell 13A) instead of allowing text to stretch to infinite width or spill across adjacent columns.
+  - [x] **Strict Vertical Column Navigation Lock (`j` / `k`)**:
+    - [x] Fix vertical navigation regression where pressing `j` (down) drifts leftwards into column $C-1$. Maintain strict locked column index $C$ when moving between rows.
 
 ---
 

@@ -520,6 +520,39 @@ func testPinnedHeaderHitTestingWhenScrolled() throws {
     tv.handleTabularMouseUp(at: pinnedPt)
 }
 
+// 16. customColumnWidths didSet invalidates cachedColumnWidths
+func testCustomColumnWidthsDidSetInvalidatesCache() throws {
+    let tv = createTestSpreadsheetTextView()
+    let initialWidths = tv.columnWidths()
+    guard initialWidths.count >= 2 else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 151, userInfo: [NSLocalizedDescriptionKey: "Expected at least 2 columns"])
+    }
+
+    // Setting customColumnWidths must invalidate the cache via didSet
+    tv.customColumnWidths = [0: 275.0]
+    let updatedWidths = tv.columnWidths()
+    guard abs(updatedWidths[0] - 275.0) < 0.001 else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 152, userInfo: [NSLocalizedDescriptionKey: "Expected cached widths to be invalidated and return 275.0, got \(updatedWidths[0])"])
+    }
+}
+
+// 17. viewDidMoveToWindow preserves cursor when not at top left
+func testViewDidMoveToWindowPreservesCursorWhenNotAtTopLeft() throws {
+    let tv = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+    tv.isTabularDocument = true
+    let session = VimSession(initialText: "Product,Price,Quantity\nWidget,19.99,100\nGadget,29.99,50\n")
+    tv.session = session
+    session.setCursor(line: 2, byteCol: 3)
+
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = tv
+    tv.viewDidMoveToWindow()
+
+    guard session.cursorPosition.line == 2 && session.cursorPosition.byteCol == 3 else {
+        throw NSError(domain: "SpreadsheetColumnResizeTests", code: 162, userInfo: [NSLocalizedDescriptionKey: "Expected cursor to remain at (2, 3), got line \(session.cursorPosition.line), col \(session.cursorPosition.byteCol)"])
+    }
+}
+
 print("=== SpreadsheetColumnResize Unit Tests ===")
 var total = 0
 var passed = 0
@@ -539,7 +572,9 @@ let tests: [(String, () throws -> Void)] = [
     ("testEmptyAndSingleColumnEdgeCases", testEmptyAndSingleColumnEdgeCases),
     ("testHeaderSelectionPreservedWhenNotOnDivider", testHeaderSelectionPreservedWhenNotOnDivider),
     ("testSanitizationOfNonFiniteAndNegativeCustomWidths", testSanitizationOfNonFiniteAndNegativeCustomWidths),
-    ("testPinnedHeaderHitTestingWhenScrolled", testPinnedHeaderHitTestingWhenScrolled)
+    ("testPinnedHeaderHitTestingWhenScrolled", testPinnedHeaderHitTestingWhenScrolled),
+    ("testCustomColumnWidthsDidSetInvalidatesCache", testCustomColumnWidthsDidSetInvalidatesCache),
+    ("testViewDidMoveToWindowPreservesCursorWhenNotAtTopLeft", testViewDidMoveToWindowPreservesCursorWhenNotAtTopLeft)
 ]
 
 for (name, test) in tests {

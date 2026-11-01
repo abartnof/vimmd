@@ -24,6 +24,55 @@ public struct TabularSyntaxResolver {
         renderTabularSyntax(in: storage as NSMutableAttributedString, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
     }
 
+    public func parseRecordRanges(in fullString: NSString, isTSV: Bool) -> [NSRange] {
+        let length = fullString.length
+        guard length > 0 else { return [] }
+
+        var recordRanges: [NSRange] = []
+        var recordStart = 0
+        var inQuotes = false
+        var i = 0
+
+        while i < length {
+            let char = fullString.character(at: i)
+
+            if !isTSV && char == 34 { // '"'
+                if inQuotes {
+                    if i + 1 < length && fullString.character(at: i + 1) == 34 {
+                        // Escaped double quote ("") -> skip second quote
+                        i += 1
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    inQuotes = true
+                }
+            } else if !inQuotes && (char == 10 || char == 13) {
+                // Newline outside of quotes -> record delimiter
+                if char == 13 && i + 1 < length && fullString.character(at: i + 1) == 10 {
+                    // CRLF (\r\n)
+                    let recordLen = (i + 2) - recordStart
+                    recordRanges.append(NSRange(location: recordStart, length: recordLen))
+                    i += 1
+                    recordStart = i + 1
+                } else {
+                    // LF (\n) or lone CR (\r)
+                    let recordLen = (i + 1) - recordStart
+                    recordRanges.append(NSRange(location: recordStart, length: recordLen))
+                    recordStart = i + 1
+                }
+            }
+            i += 1
+        }
+
+        if recordStart < length {
+            let recordLen = length - recordStart
+            recordRanges.append(NSRange(location: recordStart, length: recordLen))
+        }
+
+        return recordRanges
+    }
+
     public func calculateColumnWidths(
         in storage: NSAttributedString,
         isTSV: Bool,
@@ -36,13 +85,7 @@ public struct TabularSyntaxResolver {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return [] }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
+        let recordRanges = parseRecordRanges(in: fullString, isTSV: isTSV)
 
         let regularFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let boldFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
@@ -50,17 +93,17 @@ public struct TabularSyntaxResolver {
         var maxCols = 1
         var parsedLines: [[(columnIndex: Int, range: NSRange)]] = []
 
-        for lineRange in lineRanges {
-            var contentLength = lineRange.length
+        for recordRange in recordRanges {
+            var contentLength = recordRange.length
             while contentLength > 0 {
-                let char = fullString.character(at: lineRange.location + contentLength - 1)
+                let char = fullString.character(at: recordRange.location + contentLength - 1)
                 if char == 10 || char == 13 {
                     contentLength -= 1
                 } else {
                     break
                 }
             }
-            let contentRange = NSRange(location: lineRange.location, length: contentLength)
+            let contentRange = NSRange(location: recordRange.location, length: contentLength)
             let (fields, _) = parseLine(in: fullString, range: contentRange, isTSV: isTSV)
             parsedLines.append(fields)
             if fields.count > maxCols {
@@ -126,14 +169,8 @@ public struct TabularSyntaxResolver {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return }
 
-        // Find all line ranges
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
+        // Find all RFC 4180 record ranges
+        let recordRanges = parseRecordRanges(in: fullString, isTSV: isTSV)
 
         let regularFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let boldFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
@@ -149,8 +186,8 @@ public struct TabularSyntaxResolver {
             tabStops.append(NSTextTab(textAlignment: .left, location: runningX, options: [:]))
         }
 
-        for (lineIndex, lineRange) in lineRanges.enumerated() {
-            let isHeader = (lineIndex == 0)
+        for (recordIndex, recordRange) in recordRanges.enumerated() {
+            let isHeader = (recordIndex == 0)
             let baseFont = isHeader ? boldFont : regularFont
             let baseColor = NSColor.labelColor
 
@@ -158,17 +195,17 @@ public struct TabularSyntaxResolver {
             pStyle.tabStops = tabStops
             pStyle.lineBreakMode = wrapTableCells ? .byWordWrapping : .byClipping
 
-            // Clean/reset attributes across the line range
+            // Clean/reset attributes across the record range
             storage.setAttributes([
                 .font: baseFont,
                 .foregroundColor: baseColor,
                 .paragraphStyle: pStyle
-            ], range: lineRange)
+            ], range: recordRange)
 
             // Content length excluding trailing newlines (\r, \n)
-            var contentLength = lineRange.length
+            var contentLength = recordRange.length
             while contentLength > 0 {
-                let char = fullString.character(at: lineRange.location + contentLength - 1)
+                let char = fullString.character(at: recordRange.location + contentLength - 1)
                 if char == 10 || char == 13 {
                     contentLength -= 1
                 } else {
@@ -180,12 +217,12 @@ public struct TabularSyntaxResolver {
                 continue
             }
 
-            let contentRange = NSRange(location: lineRange.location, length: contentLength)
+            let contentRange = NSRange(location: recordRange.location, length: contentLength)
             if isHeader {
                 // Neutral subtle header shading
                 storage.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: contentRange)
             } else {
-                storage.removeAttribute(.backgroundColor, range: lineRange)
+                storage.removeAttribute(.backgroundColor, range: recordRange)
             }
 
             // Parse fields and delimiters within contentRange

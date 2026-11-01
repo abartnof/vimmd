@@ -5,6 +5,7 @@ import CBridge
 open class VimMDTextView: NSTextView {
     public weak var session: VimSession? {
         didSet {
+            invalidateColumnWidthsCache()
             bindSession()
         }
     }
@@ -70,7 +71,11 @@ open class VimMDTextView: NSTextView {
     public var activeColDragRange: ClosedRange<Int>?
     public var transientFlashRect: NSRect?
 
-    public var customColumnWidths: [Int: CGFloat] = [:]
+    public var customColumnWidths: [Int: CGFloat] = [:] {
+        didSet {
+            invalidateColumnWidthsCache()
+        }
+    }
     public var isResizingColumn: Bool = false
     public var resizingColumnIndex: Int?
     public var resizeStartX: CGFloat = 0.0
@@ -87,6 +92,11 @@ open class VimMDTextView: NSTextView {
 
     public let syntaxResolver = MarkdownSyntaxResolver()
     public let tabularResolver = TabularSyntaxResolver()
+    private var cachedColumnWidths: [CGFloat]?
+
+    public func invalidateColumnWidthsCache() {
+        cachedColumnWidths = nil
+    }
 
     public enum DocumentSyntaxType: Equatable {
         case markdown
@@ -233,10 +243,11 @@ open class VimMDTextView: NSTextView {
     override open func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if self.window != nil {
-            if let session = self.session, session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1 {
+            let isAtTopLeft = session == nil || (session?.cursorPosition.line == 1 && (session?.cursorPosition.byteCol ?? 1) <= 1)
+            if isAtTopLeft {
                 pinViewportToTopLeft()
                 DispatchQueue.main.async { [weak self] in
-                    if let s = self?.session, s.cursorPosition.line == 1 && s.cursorPosition.byteCol <= 1 {
+                    if self?.session == nil || (self?.session?.cursorPosition.line == 1 && (self?.session?.cursorPosition.byteCol ?? 1) <= 1) {
                         self?.pinViewportToTopLeft()
                     }
                 }
@@ -249,17 +260,16 @@ open class VimMDTextView: NSTextView {
             self.setFrameOrigin(.zero)
         }
         self.scrollToBeginningOfDocument(nil)
-        self.scrollRangeToVisible(NSRange(location: 0, length: 0))
-        if let scrollView = self.enclosingScrollView {
-            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
-            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
         self.setSelectedRange(NSRange(location: 0, length: 0))
         if let session = self.session {
             session.setCursor(line: 1, byteCol: 1)
             synchronizeCaretWithSession()
             onCursorMoved?()
+        }
+        if let scrollView = self.enclosingScrollView {
+            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
+            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
@@ -268,7 +278,6 @@ open class VimMDTextView: NSTextView {
             self.setFrameOrigin(.zero)
         }
         self.scrollToBeginningOfDocument(nil)
-        self.scrollRangeToVisible(NSRange(location: 0, length: 0))
         if let scrollView = self.enclosingScrollView {
             let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
             scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
@@ -410,6 +419,7 @@ open class VimMDTextView: NSTextView {
     }
 
     public func updateSyntaxStyling(force: Bool = false) {
+        invalidateColumnWidthsCache()
         guard let storage = self.textStorage else { return }
         storage.beginEditing()
         switch documentSyntaxType {
@@ -741,8 +751,13 @@ open class VimMDTextView: NSTextView {
     // MARK: - Spreadsheet Geometry & Calculations
 
     public func columnWidths() -> [CGFloat] {
+        if let cached = cachedColumnWidths {
+            return cached
+        }
         guard let storage = self.textStorage else { return [] }
-        return tabularResolver.calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
+        let widths = tabularResolver.calculateColumnWidths(in: storage, isTSV: isTSV, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
+        cachedColumnWidths = widths
+        return widths
     }
 
     public func isPointInHeaderRow(_ point: NSPoint) -> Bool {
@@ -786,25 +801,23 @@ open class VimMDTextView: NSTextView {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return nil }
         layoutManager.ensureLayout(for: textContainer)
 
-        var currentLine = 0
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            if currentLine == rowIndex {
-                let glyphRange = layoutManager.glyphRange(forCharacterRange: lr, actualCharacterRange: nil)
-                var lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
-                lineRect.origin.x = textContainerInset.width
-                lineRect.origin.y += textContainerInset.height
-                lineRect.size.width = max(bounds.width, layoutManager.usedRect(for: textContainer).width)
-                if lineRect.height == 0 { lineRect.size.height = 18.0 }
-                return lineRect
-            }
-            currentLine += 1
-            idx = lr.location + lr.length
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        guard rowIndex >= 0 && rowIndex < recordRanges.count else {
+            let y = CGFloat(rowIndex) * 18.0 + textContainerInset.height
+            return NSRect(x: textContainerInset.width, y: y, width: bounds.width, height: 18.0)
         }
 
-        let y = CGFloat(rowIndex) * 18.0 + textContainerInset.height
-        return NSRect(x: textContainerInset.width, y: y, width: bounds.width, height: 18.0)
+        let recordRange = recordRanges[rowIndex]
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: recordRange, actualCharacterRange: nil)
+        var rowBoundingRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        if rowBoundingRect.height == 0 {
+            rowBoundingRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
+        }
+        rowBoundingRect.origin.x = textContainerInset.width
+        rowBoundingRect.origin.y += textContainerInset.height
+        rowBoundingRect.size.width = max(bounds.width, layoutManager.usedRect(for: textContainer).width)
+        if rowBoundingRect.height == 0 { rowBoundingRect.size.height = 18.0 }
+        return rowBoundingRect
     }
 
     public func columnRect(for colIndex: Int) -> NSRect? {
@@ -825,14 +838,8 @@ open class VimMDTextView: NSTextView {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return clamped ? 0 : nil }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
-        guard !lineRanges.isEmpty else { return clamped ? 0 : nil }
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        guard !recordRanges.isEmpty else { return clamped ? 0 : nil }
 
         if let firstRect = rowRect(for: 0) {
             if point.y < firstRect.minY {
@@ -840,21 +847,21 @@ open class VimMDTextView: NSTextView {
             }
         }
 
-        for currentLine in 0..<lineRanges.count {
-            if let rect = rowRect(for: currentLine) {
+        for currentRecord in 0..<recordRanges.count {
+            if let rect = rowRect(for: currentRecord) {
                 if point.y >= rect.minY && point.y <= rect.maxY {
-                    return currentLine
+                    return currentRecord
                 }
-                if currentLine + 1 < lineRanges.count, let nextRect = rowRect(for: currentLine + 1) {
+                if currentRecord + 1 < recordRanges.count, let nextRect = rowRect(for: currentRecord + 1) {
                     if point.y > rect.maxY && point.y < nextRect.minY {
-                        return currentLine
+                        return currentRecord
                     }
                 }
             }
         }
 
         if clamped {
-            return lineRanges.count - 1
+            return recordRanges.count - 1
         }
         return nil
     }
@@ -896,16 +903,10 @@ open class VimMDTextView: NSTextView {
             return
         }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
-        guard !lineRanges.isEmpty else { return }
-        let clampedRow = max(0, min(lineRanges.count - 1, r))
-        let lr = lineRanges[clampedRow]
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        guard !recordRanges.isEmpty else { return }
+        let clampedRow = max(0, min(recordRanges.count - 1, r))
+        let lr = recordRanges[clampedRow]
 
         var contentLength = lr.length
         while contentLength > 0 {
@@ -948,14 +949,7 @@ open class VimMDTextView: NSTextView {
         guard let storage = self.textStorage else { return 0 }
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return 0 }
-        var count = 0
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            count += 1
-            idx = lr.location + lr.length
-        }
-        return count
+        return tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV).count
     }
 
     public func currentTabularCellDetails() -> (row: Int, column: Int, intraCellOffset: Int)? {
@@ -963,32 +957,26 @@ open class VimMDTextView: NSTextView {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return (row: 0, column: 0, intraCellOffset: 0) }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
-        guard !lineRanges.isEmpty else { return (row: 0, column: 0, intraCellOffset: 0) }
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        guard !recordRanges.isEmpty else { return (row: 0, column: 0, intraCellOffset: 0) }
 
         let offset = session?.cursorUtf16Offset ?? selectedRange().location
 
         var foundRow = 0
-        for (r, lr) in lineRanges.enumerated() {
+        for (r, lr) in recordRanges.enumerated() {
             if offset >= lr.location && offset < (lr.location + lr.length) {
                 foundRow = r
                 break
-            } else if offset == (lr.location + lr.length) && r == lineRanges.count - 1 {
+            } else if offset == (lr.location + lr.length) && r == recordRanges.count - 1 {
                 foundRow = r
                 break
             }
         }
         if offset >= fullString.length {
-            foundRow = lineRanges.count - 1
+            foundRow = recordRanges.count - 1
         }
 
-        let lr = lineRanges[foundRow]
+        let lr = recordRanges[foundRow]
         var contentLength = lr.length
         while contentLength > 0 {
             let char = fullString.character(at: lr.location + contentLength - 1)
@@ -1224,19 +1212,13 @@ open class VimMDTextView: NSTextView {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return "" }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
 
         var resultLines: [String] = []
         let delimStr = isTSV ? "\t" : ","
         var firstColHeaderTitle = ""
 
-        for (lIdx, lr) in lineRanges.enumerated() {
+        for (lIdx, lr) in recordRanges.enumerated() {
             var contentLength = lr.length
             while contentLength > 0 {
                 let char = fullString.character(at: lr.location + contentLength - 1)
@@ -1300,18 +1282,12 @@ open class VimMDTextView: NSTextView {
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return "" }
 
-        var lineRanges: [NSRange] = []
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
-            lineRanges.append(lr)
-            idx = lr.location + lr.length
-        }
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
 
         var selectedLines: [String] = []
         for r in minR...maxR {
-            guard r < lineRanges.count else { continue }
-            let lr = lineRanges[r]
+            guard r < recordRanges.count else { continue }
+            let lr = recordRanges[r]
             var contentLength = lr.length
             while contentLength > 0 {
                 let char = fullString.character(at: lr.location + contentLength - 1)
@@ -1417,10 +1393,8 @@ open class VimMDTextView: NSTextView {
             return
         }
         let fullString = storage.string as NSString
-        var lineIdx = 0
-        var idx = 0
-        while idx < fullString.length {
-            let lr = fullString.lineRange(for: NSRange(location: idx, length: 0))
+        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        for (lineIdx, _) in recordRanges.enumerated() {
             if let rect = rowRect(for: lineIdx) {
                 let y = rect.maxY
                 if y >= dirtyRect.minY - 5 && y <= dirtyRect.maxY + 5 {
@@ -1428,8 +1402,6 @@ open class VimMDTextView: NSTextView {
                     path.line(to: NSPoint(x: bounds.width, y: floor(y) + 0.5))
                 }
             }
-            lineIdx += 1
-            idx = lr.location + lr.length
         }
 
         path.stroke()
