@@ -273,6 +273,36 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    /// After `scrollRangeToVisible`, repairs the clip view's vertical origin.
+    ///
+    /// NOTE: the negative-y behavior (clip `bounds.origin.y` of about -35 / -29.5 after keyboard
+    /// navigation to Row 1 in a spreadsheet with the attached `ColumnLetterRulerView`) was
+    /// established empirically, verified by the reproducing tests in
+    /// `Row1KeyboardNavigationVisibilityTests`; it is not derived from AppKit documentation.
+    ///
+    /// - Tabular documents on line 1: pin y to 0 (x preserved) so Row 1 is never hidden, but only
+    ///   when the caret remains visible at y == 0 (a tall wrapped first row must not lose the caret).
+    /// - Everything else: only clamp a negative y back to 0, so wrapped prose with a long first
+    ///   line keeps the caret on-screen.
+    private func keepTopRowVisibleIfNeeded(line: Int, caretLocation: Int) {
+        guard let scrollView = self.enclosingScrollView else { return }
+        let clip = scrollView.contentView
+        if isTabularDocument && line == 1 {
+            let caretBottom = insertionBaseRect(at: caretLocation).maxY
+            if caretBottom <= clip.bounds.height {
+                if abs(clip.bounds.origin.y) > 0.001 {
+                    clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+                }
+                scrollView.reflectScrolledClipView(clip)
+                return
+            }
+        }
+        if clip.bounds.origin.y < 0 {
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+            scrollView.reflectScrolledClipView(clip)
+        }
+    }
+
     public func resetScrollToTopLeft() {
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
@@ -545,6 +575,7 @@ open class VimMDTextView: NSTextView {
             self.currentSelectedRange = visualRange
             self.setSelectedRange(visualRange)
             self.scrollRangeToVisible(visualRange)
+            keepTopRowVisibleIfNeeded(line: session.cursorPosition.line, caretLocation: visualRange.location)
         } else {
             let offset = session.cursorUtf16Offset
             let docLength = (self.string as NSString).length
@@ -555,6 +586,7 @@ open class VimMDTextView: NSTextView {
                 resetScrollToTopLeft()
             } else {
                 self.scrollRangeToVisible(self.currentSelectedRange)
+                keepTopRowVisibleIfNeeded(line: session.cursorPosition.line, caretLocation: clamped)
             }
         }
         if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {

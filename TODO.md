@@ -282,24 +282,38 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **Strict Vertical Column Navigation Lock (`j` / `k`)**:
     - [x] Fix vertical navigation regression where pressing `j` (down) drifts leftwards into column $C-1$. Maintain strict locked column index $C$ when moving between rows.
 
-- [ ] **Milestone AF: Critical File Malformation Warnings (High-Severity Diagnostics)**
-  - [ ] **Diagnostic Engine & Non-Intrusive Warning Surface**:
-    - [ ] Create `DocumentDiagnosticEngine` running lightweight analysis upon document load.
-    - [ ] Surface high-severity alerts directly in the status bar (`messageLabel` in `NSColor.systemOrange` with warning icon / badge), without intrusive modal dialogs that disrupt user editing.
-  - [ ] **Strict Real-Problem Warning Criteria (Zero Noise)**:
-    - [ ] **Unclosed Quote Swallowing Rows to EOF (`.csv`, `.tsv`)**: Alert when an opening quote reaches EOF without closing (`[Warning] Unclosed quote at line X; rows swallowed to EOF`).
-    - [ ] **Inconsistent Column Overflow (`.csv`, `.tsv`)**: Alert when a structured table has a header and subsequent rows have unescaped commas producing column overflow (`[Warning] Inconsistent columns (Header: 5, Line 12: 8)`).
-    - [ ] **Semicolon Delimiter Mismatch (`.csv`)**: Alert when a `.csv` file contains 0 commas on row 0 but multiple semicolons (European format), causing the table to collapse into Column A (`[Notice] Semicolon-delimited CSV detected`).
-    - [ ] **Lossy UTF-8 Decoding or Embedded Null Bytes**: Alert when file on disk was decoded with replacement characters or contained binary null bytes (`[Warning] Invalid UTF-8 bytes detected; replacement characters used`).
-    - [ ] **Runaway Unclosed Code Fence (`.md`)**: Alert when a triple-backtick code block at line $X$ remains unclosed for $> 25$ lines to EOF, swallowing the entire document into raw monospace code (`[Notice] Unclosed code block starting at line X`).
-  - [ ] **Inspection & Navigation**:
-    - [ ] Clicking the status bar warning jumps the cursor directly to the offending line/row.
+- [x] **Milestone AF: Critical File Malformation Warnings (High-Severity Diagnostics)**
+  - [x] **Diagnostic Engine & Non-Intrusive Warning Surface**:
+    - [x] Create `DocumentDiagnosticEngine` running lightweight analysis upon document load.
+    - [x] Surface high-severity alerts directly in the status bar (`messageLabel` in `NSColor.systemOrange` with warning icon / badge), without intrusive modal dialogs that disrupt user editing.
+  - [x] **Strict Real-Problem Warning Criteria (Zero Noise)**:
+    - [x] **Unclosed Quote Swallowing Rows to EOF (`.csv`, `.tsv`)**: Alert when an opening quote reaches EOF without closing (`[Warning] Unclosed quote at line X; rows swallowed to EOF`).
+    - [x] **Inconsistent Column Overflow (`.csv`, `.tsv`)**: Alert when a structured table has a header and subsequent rows have unescaped commas producing column overflow (`[Warning] Inconsistent columns (Header: 5, Line 12: 8)`).
+    - [x] **Semicolon Delimiter Mismatch (`.csv`)**: Alert when a `.csv` file contains 0 commas on row 0 but multiple semicolons (European format), causing the table to collapse into Column A (`[Notice] Semicolon-delimited CSV detected`).
+    - [x] **Lossy UTF-8 Decoding or Embedded Null Bytes**: Alert when file on disk was decoded with replacement characters or contained binary null bytes (`[Warning] Invalid UTF-8 bytes detected; replacement characters used`).
+    - [x] **Runaway Unclosed Code Fence (`.md`)**: Alert when a triple-backtick code block at line $X$ remains unclosed for $> 25$ lines to EOF, swallowing the entire document into raw monospace code (`[Notice] Unclosed code block starting at line X`).
+  - [x] **Inspection & Navigation**:
+    - [x] Clicking the status bar warning jumps the cursor directly to the offending line/row.
 
-- [ ] **Milestone AG: Spreadsheet Row 1 Keyboard Up Navigation Visibility Fix (`k` / Up Arrow)**
-  - [ ] **Root Cause**: In `synchronizeCaretWithSession()`, navigating up with `k` in non-column-A cells (`byteCol > 1`) bypassed `resetScrollToTopLeft()` and executed AppKit's `scrollRangeToVisible()`. With a horizontal ruler (`ColumnLetterRulerView`) attached, `scrollRangeToVisible` scrolled the clip view into negative `y` offsets (`y = -35.0pt`), pushing Row 1 above the visible viewport behind the ruler until mouse scrolling clamped `y` back to `0.0`.
+- [x] **Milestone AG: Spreadsheet Row 1 Keyboard Up Navigation Visibility Fix (`k` / Up Arrow)**
+  - [x] **Root Cause**: In `synchronizeCaretWithSession()`, navigating up with `k` in non-column-A cells (`byteCol > 1`) bypassed `resetScrollToTopLeft()` and executed AppKit's `scrollRangeToVisible()`. With a horizontal ruler (`ColumnLetterRulerView`) attached, `scrollRangeToVisible` scrolled the clip view into negative `y` offsets (`y = -35.0pt`), pushing Row 1 above the visible viewport behind the ruler until mouse scrolling clamped `y` back to `0.0`.
+  - [x] **Remediation**:
+    - [x] In `synchronizeCaretWithSession()` and `positionCaret`: clamp `scrollView.contentView.bounds.origin.y` to a minimum of `0.0` on upward navigation.
+    - [x] When the caret lands on Line 1 / Row 0 (in ANY column, not just column A), ensure `contentView` origin `y` snaps cleanly to `0.0`, guaranteeing Row 1 is immediately and completely visible via keyboard navigation.
+
+- [ ] **Milestone AH: Markdown Text Wrapping Fix**
+  - [ ] **Bug Description**: Text wrapping in Markdown documents is failing to wrap long lines properly to the visible text container width, causing lines to extend horizontally beyond the viewport or fail soft line-break reflow.
   - [ ] **Remediation**:
-    - [ ] In `synchronizeCaretWithSession()` and `positionCaret`: clamp `scrollView.contentView.bounds.origin.y` to a minimum of `0.0` on upward navigation.
-    - [ ] When the caret lands on Line 1 / Row 0 (in ANY column, not just column A), ensure `contentView` origin `y` snaps cleanly to `0.0`, guaranteeing Row 1 is immediately and completely visible via keyboard navigation.
+    - [ ] Verify `textContainer.widthTracksTextView = true`, `containerSize.width = contentSize.width`, and `isHorizontallyResizable = false` in `VimMDTextView` when wrapping is enabled for `.md` files.
+    - [ ] Ensure `VimMDDocument.configureWrapLinesPolicy()` properly applies soft wrapping configuration across window resizing, mode changes, and initial file load.
+    - [ ] Verify caret visibility and navigation across wrapped visual sub-lines (`gj`, `gk`, caret positioning).
+
+- [ ] **Milestone AI: Large Markdown Paste Performance & Main-Thread Freeze Fix**
+  - [ ] **Bug Description**: Pasting large amounts of Markdown-formatted text/code into a new or existing document triggers a prolonged beachball / "thinking" rainbow pinwheel freeze on the macOS main thread.
+  - [ ] **Remediation**:
+    - [ ] Diagnose bottleneck: differential delta parsing in C bridge, full-buffer regex matching in `MarkdownSyntaxResolver.renderSyntax`, or quadratic layout passes in TextKit.
+    - [ ] Implement batch insertion / layout optimization for paste events, avoiding synchronous full-document regex passes over large pasted text buffers.
+    - [ ] Add hermetic regression test pasting multi-kilobyte Markdown blocks and asserting near-instantaneous execution without main-thread stalling.
 
 ---
 

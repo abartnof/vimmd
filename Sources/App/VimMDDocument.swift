@@ -309,6 +309,28 @@ open class VimMDDocument: NSDocument {
         badge.frame = NSRect(x: badgeX, y: badgeY, width: badge.frame.width, height: badgeHeight)
     }
 
+    /// Diagnostics computed on load, highest priority (warnings before notices) first.
+    public var pendingLoadDiagnostics: [DocumentDiagnostic] = []
+
+    /// Surfaces the highest-priority load diagnostic in the status bar (non-modal).
+    public func presentLoadDiagnostics() {
+        guard let top = pendingLoadDiagnostics.first else {
+            // Clean (re-)read: clear only a message that a previous load diagnostic put there.
+            if let shown = loadDiagnosticStatusMessage, currentStatusMessage == shown {
+                showStatusMessage("", isWarning: false)
+            }
+            loadDiagnosticStatusMessage = nil
+            return
+        }
+        let prefix = top.severity == .warning ? "[Warning] " : "[Notice] "
+        let text = prefix + top.message
+        loadDiagnosticStatusMessage = text
+        showStatusMessage(text, isWarning: true)
+    }
+
+    /// The status text last set by a load diagnostic (nil if none / already replaced).
+    public var loadDiagnosticStatusMessage: String?
+
     public func showStatusMessage(_ text: String, isWarning: Bool = false) {
         self.currentStatusMessage = text
         self.isCurrentStatusMessageWarning = isWarning
@@ -561,6 +583,14 @@ open class VimMDDocument: NSDocument {
         let newSession = VimSession(initialText: string)
         self.session = newSession
         bindSessionSystemAction(newSession)
+        let syntax = self.documentSyntaxType
+        pendingLoadDiagnostics = DocumentDiagnosticEngine.analyze(
+            text: string,
+            isTabular: syntax == .csv || syntax == .tsv,
+            isTSV: syntax == .tsv,
+            isMarkdown: syntax == .markdown
+        )
+        presentLoadDiagnostics()
         if let tv = self.textView {
             tv.session = newSession
             tv.documentSyntaxType = self.documentSyntaxType
