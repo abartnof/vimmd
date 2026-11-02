@@ -111,17 +111,28 @@ public struct TabularSyntaxResolver {
             }
         }
 
+        let regularAttrs: [NSAttributedString.Key: Any] = [.font: regularFont]
+        let boldAttrs: [NSAttributedString.Key: Any] = [.font: boldFont]
+        let regularCharWidth = ("M" as NSString).size(withAttributes: regularAttrs).width
+        let boldCharWidth = ("M" as NSString).size(withAttributes: boldAttrs).width
+        let maxCharWidth = max(regularCharWidth, boldCharWidth) * 1.25
+
         if wrapTableCells {
             var widths = Array(repeating: defaultWrapWidth, count: maxCols)
             for (lineIdx, fields) in parsedLines.enumerated() {
                 let isHeader = (lineIdx == 0)
-                let font = isHeader ? boldFont : regularFont
+                let attrs = isHeader ? boldAttrs : regularAttrs
                 for field in fields {
                     let col = field.columnIndex
                     guard col < maxCols else { continue }
                     guard field.range.location + field.range.length <= fullString.length else { continue }
+                    let currentMax = widths[col]
+                    let maxPossibleWidth = ceil(CGFloat(field.range.length) * maxCharWidth + padding)
+                    if maxPossibleWidth <= currentMax {
+                        continue
+                    }
                     let cellText = fullString.substring(with: field.range)
-                    let cellWidth = (cellText as NSString).size(withAttributes: [.font: font]).width
+                    let cellWidth = (cellText as NSString).size(withAttributes: attrs).width
                     let requiredWidth = ceil(cellWidth + padding)
                     if requiredWidth > widths[col] {
                         widths[col] = requiredWidth
@@ -141,13 +152,18 @@ public struct TabularSyntaxResolver {
 
         for (lineIdx, fields) in parsedLines.enumerated() {
             let isHeader = (lineIdx == 0)
-            let font = isHeader ? boldFont : regularFont
+            let attrs = isHeader ? boldAttrs : regularAttrs
             for field in fields {
                 let col = field.columnIndex
                 guard col < maxCols else { continue }
                 guard field.range.location + field.range.length <= fullString.length else { continue }
+                let currentMax = colWidths[col]
+                let maxPossibleWidth = ceil(CGFloat(field.range.length) * maxCharWidth + padding)
+                if maxPossibleWidth <= currentMax {
+                    continue
+                }
                 let cellText = fullString.substring(with: field.range)
-                let cellWidth = (cellText as NSString).size(withAttributes: [.font: font]).width
+                let cellWidth = (cellText as NSString).size(withAttributes: attrs).width
                 let requiredWidth = ceil(cellWidth + padding)
                 if requiredWidth > colWidths[col] {
                     colWidths[col] = requiredWidth

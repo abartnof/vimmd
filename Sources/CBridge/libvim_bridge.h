@@ -97,6 +97,8 @@ bool vim_context_undo(VimContextRef ctx);
 bool vim_context_redo(VimContextRef ctx);
 bool vim_context_can_undo(VimContextRef ctx);
 bool vim_context_can_redo(VimContextRef ctx);
+void vim_context_set_max_undo_levels(VimContextRef ctx, size_t max_levels);
+size_t vim_context_get_max_undo_levels(VimContextRef ctx);
 
 // Full serialization (Save operations only)
 char* vim_context_serialize_buffer(VimContextRef ctx, size_t *outLength);

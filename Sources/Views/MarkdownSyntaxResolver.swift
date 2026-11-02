@@ -72,6 +72,11 @@ public struct MarkdownSyntaxResolver {
         return delimiters
     }
 
+    /// Returns all styling ranges and delimiter types in the given line.
+    public func stylingRanges(in line: String) -> [MarkdownDelimiter] {
+        return extractDelimiters(from: line)
+    }
+
     public func concealedRanges(in line: String) -> [NSRange] {
         guard !line.isEmpty else { return [] }
         var ranges: [NSRange] = []
@@ -185,8 +190,11 @@ public struct MarkdownSyntaxResolver {
         }
 
         let defaultFont = NSFont.systemFont(ofSize: 14)
+        let defaultBoldFont = NSFontManager.shared.convert(defaultFont, toHaveTrait: .boldFontMask)
+        let defaultItalicFont = NSFontManager.shared.convert(defaultFont, toHaveTrait: .italicFontMask)
         let defaultTextColor = NSColor.labelColor
         let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let codeFont = monoFont
         let delimiterColor = DelimiterColorManager.shared.delimiterColor
 
         var inFrontmatter = false
@@ -293,10 +301,10 @@ public struct MarkdownSyntaxResolver {
             let hasAsteriskOrUnderscore = lineString.contains("*") || lineString.contains("_")
 
             // 2. Bold spans: (**...** or __...__)
-            if hasAsteriskOrUnderscore {
+            if lineString.contains("**") || lineString.contains("__") {
+                let boldFont = (lineFont === defaultFont) ? defaultBoldFont : NSFontManager.shared.convert(lineFont, toHaveTrait: .boldFontMask)
                 for m in Self.boldRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
                     let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                    let boldFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .boldFontMask)
                     textStorage.addAttribute(.font, value: boldFont, range: fullMatchRange)
 
                     if m.range.length >= 4 {
@@ -306,11 +314,13 @@ public struct MarkdownSyntaxResolver {
                         textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
                     }
                 }
+            }
 
-                // 3. Italic spans: (*...* or _..._)
+            // 3. Italic spans: (*...* or _..._)
+            if hasAsteriskOrUnderscore {
+                let italicFont = (lineFont === defaultFont) ? defaultItalicFont : NSFontManager.shared.convert(lineFont, toHaveTrait: .italicFontMask)
                 for m in Self.italicRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
                     let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                    let italicFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .italicFontMask)
                     textStorage.addAttribute(.font, value: italicFont, range: fullMatchRange)
 
                     if m.range.length >= 2 {
@@ -326,7 +336,6 @@ public struct MarkdownSyntaxResolver {
             if lineString.contains("`") {
                 for m in Self.codeRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
                     let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                    let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
                     textStorage.addAttribute(.font, value: codeFont, range: fullMatchRange)
                     textStorage.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: fullMatchRange)
                     textStorage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullMatchRange)

@@ -7,6 +7,7 @@ public struct LineCoordinateMap {
     public let graphemeClusterCount: Int
     public let utf8ByteCount: Int
     public let utf16Count: Int
+    private let isPureAscii: Bool
 
     private let byteToUtf16Table: [Int]
     private let utf16ToByteColTable: [Int]
@@ -18,13 +19,36 @@ public struct LineCoordinateMap {
             self.graphemeClusterCount = 0
             self.utf8ByteCount = 0
             self.utf16Count = 0
+            self.isPureAscii = true
             self.byteToUtf16Table = [0]
             self.utf16ToByteColTable = [1]
             return
         }
 
         let totalU8 = line.utf8.count
+
+        // Fast-path: Pure single-byte ASCII lines (vast majority of code/markdown/tables)
+        var isAscii = true
+        for b in line.utf8 {
+            if b >= 0x80 {
+                isAscii = false
+                break
+            }
+        }
+
+        if isAscii {
+            self.graphemeClusterCount = totalU8
+            self.utf8ByteCount = totalU8
+            self.utf16Count = totalU8
+            self.isPureAscii = true
+            self.byteToUtf16Table = []
+            self.utf16ToByteColTable = []
+            return
+        }
+
         let totalU16 = line.utf16.count
+
+        self.isPureAscii = false
 
         var byteTable = [Int](repeating: 0, count: totalU8 + 1)
         var utf16Table = [Int](repeating: 1, count: totalU16 + 1)
@@ -65,6 +89,11 @@ public struct LineCoordinateMap {
     /// Converts a 1-based Vim UTF-8 byte column to a 0-based Cocoa UTF-16 offset.
     /// Handles intra-grapheme-cluster clamping and boundary conditions.
     public func utf16Offset(fromVimByteColumn col: Int) -> Int {
+        if isPureAscii {
+            if col <= 1 { return 0 }
+            if col > utf8ByteCount { return utf16Count }
+            return col - 1
+        }
         if col <= 1 {
             return 0
         }
@@ -78,6 +107,11 @@ public struct LineCoordinateMap {
     /// Converts a 0-based Cocoa UTF-16 offset to a 1-based Vim UTF-8 byte column.
     /// Intra-character / surrogate-pair offsets snap to the start byte column of that cluster.
     public func vimByteColumn(fromUtf16Offset utf16Offset: Int) -> Int {
+        if isPureAscii {
+            if utf16Offset <= 0 { return 1 }
+            if utf16Offset >= utf16Count { return utf8ByteCount + 1 }
+            return utf16Offset + 1
+        }
         if utf16Offset <= 0 {
             return 1
         }
@@ -94,10 +128,15 @@ public struct DocumentCoordinateResolver {
     private var lineStartOffsets: [Int]
 
     public init(documentText: String) {
-        // Normalize CRLF (\r\n) and lone CR (\r) to standard newline (\n)
-        let normalized = documentText
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+        // Normalize CRLF (\r\n) and lone CR (\r) to standard newline (\n) if present
+        let normalized: String
+        if documentText.utf8.contains(13) {
+            normalized = documentText
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        } else {
+            normalized = documentText
+        }
         let stringLines = normalized.components(separatedBy: "\n")
         self.lines = stringLines.map { LineCoordinateMap(line: $0) }
         self.lineStartOffsets = []
@@ -200,12 +239,20 @@ public struct DocumentCoordinateResolver {
         let startIdx = max(0, min(lines.count, startLine - 1))
         let deleteCount = max(0, min(lines.count - startIdx, deleted))
 
-        let normalizedInserted = inserted.flatMap {
-            $0.replacingOccurrences(of: "\r\n", with: "\n")
-              .replacingOccurrences(of: "\r", with: "\n")
-              .components(separatedBy: "\n")
+        var newMaps: [LineCoordinateMap] = []
+        newMaps.reserveCapacity(inserted.count)
+        for s in inserted {
+            if s.utf8.contains(13) {
+                let parts = s.replacingOccurrences(of: "\r\n", with: "\n")
+                             .replacingOccurrences(of: "\r", with: "\n")
+                             .components(separatedBy: "\n")
+                for p in parts {
+                    newMaps.append(LineCoordinateMap(line: p))
+                }
+            } else {
+                newMaps.append(LineCoordinateMap(line: s))
+            }
         }
-        let newMaps = normalizedInserted.map { LineCoordinateMap(line: $0) }
         lines.replaceSubrange(startIdx..<(startIdx + deleteCount), with: newMaps)
 
         if lines.isEmpty {

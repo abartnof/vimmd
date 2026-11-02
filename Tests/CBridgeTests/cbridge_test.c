@@ -2164,6 +2164,9 @@ static void test_undo_tree_truncation_on_new_edit(void) {
 static void test_undo_cap_levels(void) {
     VimContextRef ctx = vim_context_create("Initial");
     assert(ctx != NULL);
+    assert(vim_context_get_max_undo_levels(ctx) == 1000);
+    vim_context_set_max_undo_levels(ctx, 100);
+    assert(vim_context_get_max_undo_levels(ctx) == 100);
 
     // Perform 120 sequential edits
     for (int i = 0; i < 120; i++) {

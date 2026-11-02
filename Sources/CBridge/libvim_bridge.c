@@ -53,6 +53,7 @@ struct VimDocumentContext {
     struct VimUndoNode *undo_head;
     struct VimUndoNode *undo_tail;
     size_t undo_count;
+    size_t max_undo_levels;
 
     struct VimUndoNode *redo_head;
     struct VimUndoNode *redo_tail;
@@ -74,7 +75,7 @@ typedef struct VimReplaceAction {
     char orig_bytes[4];
 } VimReplaceAction;
 
-#define MAX_UNDO_LEVELS 100
+#define MAX_UNDO_LEVELS 1000
 
 typedef struct VimUndoNode {
     char **lines;
@@ -222,7 +223,8 @@ static void push_undo_node(struct VimDocumentContext *ctx, VimUndoNode *node) {
     ctx->undo_head = node;
     ctx->undo_count++;
 
-    while (ctx->undo_count > MAX_UNDO_LEVELS && ctx->undo_tail) {
+    size_t limit = ctx->max_undo_levels > 0 ? ctx->max_undo_levels : 1000;
+    while (ctx->undo_count > limit && ctx->undo_tail) {
         VimUndoNode *old_tail = ctx->undo_tail;
         ctx->undo_tail = old_tail->prev;
         if (ctx->undo_tail) {
@@ -247,7 +249,8 @@ static void push_redo_node(struct VimDocumentContext *ctx, VimUndoNode *node) {
     ctx->redo_head = node;
     ctx->redo_count++;
 
-    while (ctx->redo_count > MAX_UNDO_LEVELS && ctx->redo_tail) {
+    size_t limit = ctx->max_undo_levels > 0 ? ctx->max_undo_levels : 1000;
+    while (ctx->redo_count > limit && ctx->redo_tail) {
         VimUndoNode *old_tail = ctx->redo_tail;
         ctx->redo_tail = old_tail->prev;
         if (ctx->redo_tail) {
@@ -364,6 +367,7 @@ VimContextRef vim_context_create(const char *initial_utf8) {
     ctx->pending_replace = 0;
     ctx->pending_text_object = 0;
     ctx->count_accumulator = 0;
+    ctx->max_undo_levels = 1000;
     ctx->yank_buffer = NULL;
     ctx->yank_is_linewise = false;
     ctx->yank_cb = NULL;
@@ -3198,18 +3202,20 @@ static char* replace_substring_ex(const char *str, const char *find, const char 
     size_t replace_len = strlen(replace);
     char *(*matcher)(const char *, const char *) = ignore_case ? strcasestr : strstr;
 
-    const char *match = matcher(str, find);
-    if (!match) return duplicate_string(str);
+    const char *first_match = matcher(str, find);
+    if (!first_match) return NULL;
 
-    size_t count = 0;
-    const char *tmp = str;
-    while ((match = matcher(tmp, find)) != NULL) {
-        count++;
-        tmp = match + find_len;
-        if (!global) break;
+    size_t count = 1;
+    if (global) {
+        const char *tmp = first_match + find_len;
+        while ((tmp = matcher(tmp, find)) != NULL) {
+            count++;
+            tmp += find_len;
+        }
     }
 
-    size_t new_len = strlen(str) + count * replace_len;
+    size_t orig_len = strlen(str);
+    size_t new_len = orig_len + count * replace_len;
     if (new_len >= count * find_len) {
         new_len -= count * find_len;
     } else {
@@ -3219,15 +3225,17 @@ static char* replace_substring_ex(const char *str, const char *find, const char 
     if (!result) return NULL;
 
     char *dst = result;
-    tmp = str;
-    while ((match = matcher(tmp, find)) != NULL) {
-        size_t seg = match - tmp;
+    const char *tmp = str;
+    const char *m = first_match;
+    while (m != NULL) {
+        size_t seg = m - tmp;
         memcpy(dst, tmp, seg);
         dst += seg;
         memcpy(dst, replace, replace_len);
         dst += replace_len;
-        tmp = match + find_len;
+        tmp = m + find_len;
         if (!global) break;
+        m = matcher(tmp, find);
     }
     strcpy(dst, tmp);
     return result;
@@ -3348,6 +3356,8 @@ static bool execute_substitute_command(VimContextRef ctx, const char *cmd) {
 
     bool did_snapshot = false;
     bool any_matched = false;
+    size_t first_changed = 0;
+    size_t last_changed = 0;
 
     for (size_t l = start_line; l <= end_line && l <= ctx->line_count; l++) {
         char *new_line = replace_substring_ex(ctx->lines[l - 1], find_buf, replace_buf, global, ignore_case);
@@ -3361,11 +3371,17 @@ static bool execute_substitute_command(VimContextRef ctx, const char *cmd) {
                 free(ctx->lines[l - 1]);
                 ctx->lines[l - 1] = new_line;
                 ctx->is_dirty = true;
-                emit_line_delta(ctx, (int32_t)l, 1, 1);
+                if (first_changed == 0) first_changed = l;
+                last_changed = l;
             } else {
                 free(new_line);
             }
         }
+    }
+
+    if (first_changed > 0) {
+        int32_t count = (int32_t)(last_changed - first_changed + 1);
+        emit_line_delta(ctx, (int32_t)first_changed, count, count);
     }
 
     if (!any_matched && find_len > 0) {
@@ -3835,4 +3851,26 @@ bool vim_context_redo(VimContextRef ctx) {
     emit_line_delta(ctx, 1, (int32_t)old_line_count, (int32_t)ctx->line_count);
     return true;
 }
+
+void vim_context_set_max_undo_levels(VimContextRef ctx, size_t max_levels) {
+    if (!ctx) return;
+    ctx->max_undo_levels = max_levels;
+    while (ctx->undo_count > ctx->max_undo_levels && ctx->undo_tail) {
+        VimUndoNode *old_tail = ctx->undo_tail;
+        ctx->undo_tail = old_tail->prev;
+        if (ctx->undo_tail) {
+            ctx->undo_tail->next = NULL;
+        } else {
+            ctx->undo_head = NULL;
+        }
+        free_undo_node(old_tail);
+        ctx->undo_count--;
+    }
+}
+
+size_t vim_context_get_max_undo_levels(VimContextRef ctx) {
+    if (!ctx) return 0;
+    return ctx->max_undo_levels;
+}
+
 

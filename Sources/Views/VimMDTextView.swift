@@ -383,19 +383,20 @@ open class VimMDTextView: NSTextView {
     }
 
     public func updateFrameForUnwrappedLines() {
-        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
-        layoutManager.ensureLayout(for: textContainer)
-        let usedRect = layoutManager.usedRect(for: textContainer)
         let viewportWidth = availableContentWidth()
         let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
 
         var tableWidth: CGFloat = 0.0
         if isTabularDocument {
             tableWidth = columnWidths().reduce(0, +)
+        } else if let used = layoutManager?.usedRect(for: textContainer ?? NSTextContainer()) {
+            tableWidth = used.size.width
         }
 
-        let targetWidth = max(viewportWidth, max(tableWidth, usedRect.size.width) + self.textContainerInset.width * 2 + 50.0)
-        let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
+        let linesCount = session?.lineCount ?? (textStorage?.string as NSString?)?.components(separatedBy: "\n").count ?? 1
+        let estimatedHeight = CGFloat(linesCount) * 18.0 + self.textContainerInset.height * 2
+        let targetWidth = max(viewportWidth, tableWidth + self.textContainerInset.width * 2 + 50.0)
+        let targetHeight = max(viewportHeight, ceil(estimatedHeight))
         self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
@@ -467,6 +468,14 @@ open class VimMDTextView: NSTextView {
         invalidateColumnWidthsCache()
         guard let storage = self.textStorage else { return }
         storage.beginEditing()
+        performSyntaxStyling(in: storage, force: force)
+        storage.endEditing()
+        if isTabularDocument {
+            enclosingScrollView?.horizontalRulerView?.needsDisplay = true
+        }
+    }
+
+    private func performSyntaxStyling(in storage: NSTextStorage, force: Bool = false) {
         switch documentSyntaxType {
         case .csv:
             tabularResolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: wrapTableCells, customColumnWidths: customColumnWidths)
@@ -491,10 +500,6 @@ open class VimMDTextView: NSTextView {
                 activeLineIndex: activeLine,
                 isInsertMode: isInsert
             )
-        }
-        storage.endEditing()
-        if isTabularDocument {
-            enclosingScrollView?.horizontalRulerView?.needsDisplay = true
         }
     }
 
@@ -534,7 +539,22 @@ open class VimMDTextView: NSTextView {
     }
 
     public func applyDelta(startLine: Int = 0, deletedCount: Int = -1, targetRange: NSRange, newLines: [String]) {
-        var replacement = newLines.joined(separator: "\n")
+        var replacement: String
+        if newLines.count > 100 {
+            var totalCount = newLines.count - 1
+            for s in newLines {
+                totalCount += s.utf8.count
+            }
+            var result = ""
+            result.reserveCapacity(totalCount)
+            for (i, s) in newLines.enumerated() {
+                if i > 0 { result.append("\n") }
+                result.append(s)
+            }
+            replacement = result
+        } else {
+            replacement = newLines.joined(separator: "\n")
+        }
         let docLength = (self.textStorage?.length ?? (self.string as NSString).length)
         if deletedCount == 0 && !newLines.isEmpty && docLength > 0 {
             if targetRange.location < docLength {
@@ -552,12 +572,34 @@ open class VimMDTextView: NSTextView {
             }
         }
 
+        invalidateColumnWidthsCache()
         if let storage = self.textStorage {
             storage.beginEditing()
             if targetRange.location <= storage.length && targetRange.location + targetRange.length <= storage.length {
-                storage.replaceCharacters(in: targetRange, with: replacement)
+                if documentSyntaxType == .plainText {
+                    let monoFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                    let attrRepl = NSAttributedString(string: replacement, attributes: [
+                        .font: monoFont,
+                        .foregroundColor: NSColor.textColor
+                    ])
+                    if targetRange.location == 0 && targetRange.length == storage.length {
+                        storage.setAttributedString(attrRepl)
+                    } else {
+                        storage.replaceCharacters(in: targetRange, with: attrRepl)
+                    }
+                } else {
+                    if targetRange.location == 0 && targetRange.length == storage.length {
+                        storage.setAttributedString(NSAttributedString(string: replacement))
+                    } else {
+                        storage.replaceCharacters(in: targetRange, with: replacement)
+                    }
+                    performSyntaxStyling(in: storage, force: true)
+                }
             }
             storage.endEditing()
+            if isTabularDocument {
+                enclosingScrollView?.horizontalRulerView?.needsDisplay = true
+            }
         } else {
             let nsString = (self.string as NSString)
             if targetRange.location <= nsString.length && targetRange.location + targetRange.length <= nsString.length {
@@ -565,11 +607,12 @@ open class VimMDTextView: NSTextView {
             }
         }
 
-        updateSyntaxStyling(force: true)
         updateFrameHeightToFitText()
-        if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
-            ruler.updateThickness(for: self)
-            ruler.needsDisplay = true
+        if deletedCount != newLines.count {
+            if let ruler = self.enclosingScrollView?.verticalRulerView as? LineNumberRulerView {
+                ruler.updateThickness(for: self)
+                ruler.needsDisplay = true
+            }
         }
         synchronizeCaretWithSession()
     }
@@ -640,15 +683,18 @@ open class VimMDTextView: NSTextView {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
             return defaultWidth
         }
-        layoutManager.ensureLayout(for: textContainer)
         let nsString = self.string as NSString
-        guard nsString.length > 0 && layoutManager.numberOfGlyphs > 0 else {
+        guard nsString.length > 0 else {
             return defaultWidth
         }
         guard charIndex >= 0 && charIndex < nsString.length else {
             return defaultWidth
         }
         let charRange = nsString.rangeOfComposedCharacterSequence(at: charIndex)
+        layoutManager.ensureLayout(forCharacterRange: charRange)
+        guard layoutManager.numberOfGlyphs > 0 else {
+            return defaultWidth
+        }
         let sub = nsString.substring(with: charRange)
         if sub.contains("\n") || sub.contains("\r") {
             return defaultWidth
@@ -668,13 +714,17 @@ open class VimMDTextView: NSTextView {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
             return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
         }
-        layoutManager.ensureLayout(for: textContainer)
         let nsString = self.string as NSString
-        guard nsString.length > 0 && layoutManager.numberOfGlyphs > 0 else {
+        guard nsString.length > 0 else {
             return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
         }
 
         let clampedIndex = max(0, min(nsString.length, charIndex))
+        let targetCharRange = NSRange(location: max(0, min(nsString.length > 0 ? nsString.length - 1 : 0, clampedIndex)), length: nsString.length > 0 ? 1 : 0)
+        layoutManager.ensureLayout(forCharacterRange: targetCharRange)
+        guard layoutManager.numberOfGlyphs > 0 else {
+            return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: 2.0, height: defaultHeight)
+        }
 
         if clampedIndex == nsString.length {
             let lastChar = nsString.character(at: nsString.length - 1)
@@ -835,7 +885,7 @@ open class VimMDTextView: NSTextView {
         return nil
     }
 
-    public func rowRect(for rowIndex: Int) -> NSRect? {
+    public func rowRect(for rowIndex: Int, recordRanges: [NSRange]? = nil) -> NSRect? {
         guard let storage = self.textStorage else { return nil }
         let fullString = storage.string as NSString
         guard fullString.length > 0 else {
@@ -845,13 +895,13 @@ open class VimMDTextView: NSTextView {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return nil }
         layoutManager.ensureLayout(for: textContainer)
 
-        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
-        guard rowIndex >= 0 && rowIndex < recordRanges.count else {
+        let records = recordRanges ?? tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        guard rowIndex >= 0 && rowIndex < records.count else {
             let y = CGFloat(rowIndex) * 18.0 + textContainerInset.height
             return NSRect(x: textContainerInset.width, y: y, width: bounds.width, height: 18.0)
         }
 
-        let recordRange = recordRanges[rowIndex]
+        let recordRange = records[rowIndex]
         let glyphRange = layoutManager.glyphRange(forCharacterRange: recordRange, actualCharacterRange: nil)
         var rowBoundingRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         if rowBoundingRect.height == 0 {
@@ -878,6 +928,7 @@ open class VimMDTextView: NSTextView {
     }
 
     public func rowIndex(at point: NSPoint, clamped: Bool = false) -> Int? {
+        guard point.y.isFinite else { return nil }
         guard let storage = self.textStorage else { return clamped ? 0 : nil }
         let fullString = storage.string as NSString
         guard fullString.length > 0 else { return clamped ? 0 : nil }
@@ -885,27 +936,41 @@ open class VimMDTextView: NSTextView {
         let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
         guard !recordRanges.isEmpty else { return clamped ? 0 : nil }
 
-        if let firstRect = rowRect(for: 0) {
+        guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
+            return clamped ? 0 : nil
+        }
+        layoutManager.ensureLayout(for: textContainer)
+
+        if let firstRect = rowRect(for: 0, recordRanges: recordRanges) {
             if point.y < firstRect.minY {
                 return clamped ? 0 : nil
             }
         }
 
-        for currentRecord in 0..<recordRanges.count {
-            if let rect = rowRect(for: currentRecord) {
-                if point.y >= rect.minY && point.y <= rect.maxY {
-                    return currentRecord
-                }
-                if currentRecord + 1 < recordRanges.count, let nextRect = rowRect(for: currentRecord + 1) {
-                    if point.y > rect.maxY && point.y < nextRect.minY {
-                        return currentRecord
-                    }
-                }
+        var low = 0
+        var high = recordRanges.count - 1
+
+        if let lastRect = rowRect(for: high, recordRanges: recordRanges) {
+            if point.y > lastRect.maxY {
+                return clamped ? high : nil
+            }
+        }
+
+        while low <= high {
+            let mid = (low + high) / 2
+            guard let rect = rowRect(for: mid, recordRanges: recordRanges) else { break }
+
+            if point.y < rect.minY {
+                high = mid - 1
+            } else if point.y > rect.maxY {
+                low = mid + 1
+            } else {
+                return mid
             }
         }
 
         if clamped {
-            return recordRanges.count - 1
+            return max(0, min(recordRanges.count - 1, low))
         }
         return nil
     }

@@ -202,6 +202,18 @@ public final class VimSession {
         return (Int(pos.line), Int(pos.byteCol))
     }
 
+    public var cursorLine: Int {
+        return cursorPosition.line
+    }
+
+    public var cursorCol: Int {
+        return cursorPosition.byteCol
+    }
+
+    public var lineCount: Int {
+        return lineIndexTable.lineCount
+    }
+
     public var cursorUtf16Offset: Int {
         let pos = cursorPosition
         return lineIndexTable.documentUtf16Offset(line: pos.line, vimByteCol: pos.byteCol)
