@@ -340,14 +340,25 @@ open class VimMDTextView: NSTextView {
         tabularTrackingArea = tracking
     }
 
+    public func availableContentWidth() -> CGFloat {
+        guard let sv = enclosingScrollView else { return self.frame.width }
+        var width = sv.contentSize.width
+        if sv.rulersVisible && sv.hasVerticalRuler, let ruler = sv.verticalRulerView {
+            width = max(0, width - ruler.ruleThickness)
+        }
+        return width
+    }
+
     public func applyWrapLinesSetting() {
         guard let textContainer = self.textContainer else { return }
         if wrapLines && !isTabularDocument {
-            let contentWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
+            let contentWidth = availableContentWidth()
+            let containerWidth = max(0, contentWidth - (self.textContainerInset.width * 2))
             textContainer.widthTracksTextView = true
-            textContainer.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+            textContainer.containerSize = NSSize(width: containerWidth, height: CGFloat.greatestFiniteMagnitude)
             self.isHorizontallyResizable = false
             self.autoresizingMask = [.width]
+            self.maxSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
             if let scrollView = self.enclosingScrollView {
                 scrollView.hasHorizontalScroller = false
                 if abs(self.frame.width - contentWidth) > 0.5 {
@@ -375,7 +386,7 @@ open class VimMDTextView: NSTextView {
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
-        let viewportWidth = enclosingScrollView?.contentSize.width ?? self.frame.width
+        let viewportWidth = availableContentWidth()
         let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
 
         var tableWidth: CGFloat = 0.0
@@ -419,6 +430,10 @@ open class VimMDTextView: NSTextView {
         if !wrapLines || isTabularDocument {
             updateFrameForUnwrappedLines()
             return
+        }
+        let contentWidth = availableContentWidth()
+        if abs(self.frame.width - contentWidth) > 0.5 {
+            self.setFrameSize(NSSize(width: contentWidth, height: self.frame.height))
         }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
@@ -588,9 +603,6 @@ open class VimMDTextView: NSTextView {
                 self.scrollRangeToVisible(self.currentSelectedRange)
                 keepTopRowVisibleIfNeeded(line: session.cursorPosition.line, caretLocation: clamped)
             }
-        }
-        if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {
-            updateSyntaxStyling()
         }
         updateCaretAppearance()
         self.enclosingScrollView?.verticalRulerView?.needsDisplay = true
@@ -1947,14 +1959,16 @@ open class VimMDTextView: NSTextView {
         }
 
         if session.mode == VIM_MODE_INSERT || session.mode == VIM_MODE_REPLACE {
-            session.feedKeys(text)
+            session.insertText(text)
             synchronizeCaretWithSession()
             onCursorMoved?()
         } else if session.mode == VIM_MODE_VISUAL {
+            session.setYankBuffer(text: text, linewise: text.hasSuffix("\n"))
             session.feedKeys("p")
             synchronizeCaretWithSession()
             onCursorMoved?()
         } else {
+            session.setYankBuffer(text: text, linewise: text.hasSuffix("\n"))
             session.feedKeys("p")
             synchronizeCaretWithSession()
             onCursorMoved?()
@@ -1974,7 +1988,11 @@ open class VimMDTextView: NSTextView {
         }
 
         if session?.mode == VIM_MODE_INSERT || session?.mode == VIM_MODE_REPLACE {
-            session?.feedKeys(text)
+            if text.count > 1 {
+                session?.insertText(text)
+            } else {
+                session?.feedKeys(text)
+            }
             synchronizeCaretWithSession()
         }
     }

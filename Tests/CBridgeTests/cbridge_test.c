@@ -3021,6 +3021,63 @@ static void test_word_end_operators_advanced_coverage(void) {
     vim_context_destroy(ctx_2ye);
 }
 
+typedef struct {
+    int32_t startLine;
+    int32_t deletedCount;
+    int32_t addedCount;
+    int callCount;
+} TestInsertTextDeltaState;
+
+static void test_insert_text_delta_cb(int32_t startLine, int32_t deletedCount, const char **newLines, int32_t addedCount, void *userInfo) {
+    (void)newLines;
+    TestInsertTextDeltaState *state = (TestInsertTextDeltaState *)userInfo;
+    state->startLine = startLine;
+    state->deletedCount = deletedCount;
+    state->addedCount = addedCount;
+    state->callCount++;
+}
+
+static void test_insert_text_batched(void) {
+    VimContextRef ctx = vim_context_create("hello world");
+    assert(ctx != NULL);
+    TestInsertTextDeltaState state = {0, 0, 0, 0};
+    vim_context_set_delta_callback(ctx, test_insert_text_delta_cb, &state);
+
+    // 1. Single line batched insert in insert mode
+    vim_context_feed_keys(ctx, "i");
+    vim_context_set_cursor(ctx, 1, 6);
+    vim_context_insert_text(ctx, " beautiful");
+    assert(state.callCount == 1);
+    assert(state.startLine == 1);
+    assert(state.deletedCount == 1);
+    assert(state.addedCount == 1);
+
+    char *ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "hello beautiful world") == 0);
+    free(ser);
+
+    // 2. Multiline batched insert
+    state.callCount = 0;
+    vim_context_insert_text(ctx, "\nnew line 2\nnew line 3\n");
+    assert(state.callCount == 1);
+    assert(state.startLine == 1);
+    assert(state.deletedCount == 1);
+    assert(state.addedCount == 4);
+
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "hello beautiful\nnew line 2\nnew line 3\n world") == 0);
+    free(ser);
+
+    // 3. Undo restores previous state
+    bool undone = vim_context_undo(ctx);
+    assert(undone == true);
+    ser = vim_context_serialize_buffer(ctx, NULL);
+    assert(strcmp(ser, "hello world") == 0);
+    free(ser);
+
+    vim_context_destroy(ctx);
+}
+
 int main(void) {
     printf("=== CBridge Unit Tests ===\n");
     RUN_TEST(test_engine_init);
@@ -3081,6 +3138,7 @@ int main(void) {
     RUN_TEST(test_visual_selection_replace);
     RUN_TEST(test_substitute_line_S);
     RUN_TEST(test_ex_substitute_case_insensitive_and_ranges);
+    RUN_TEST(test_insert_text_batched);
     printf("Result: %d/%d tests passed.\n", g_tests_passed, g_tests_run);
     return (g_tests_passed == g_tests_run) ? 0 : 1;
 }

@@ -203,6 +203,9 @@ open class LineNumberRulerView: NSRulerView {
 
         if abs(self.ruleThickness - targetThickness) > 0.5 {
             self.ruleThickness = targetThickness
+            if let vimTV = textView as? VimMDTextView, vimTV.wrapLines && !vimTV.isTabularDocument {
+                vimTV.applyWrapLinesSetting()
+            }
         }
     }
 

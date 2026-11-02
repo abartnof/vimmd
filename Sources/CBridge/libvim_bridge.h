@@ -60,6 +60,7 @@ void vim_activate_context(VimContextRef ctx);
 
 // Input & Ex Engine
 void vim_context_feed_keys(VimContextRef ctx, const char *keys);
+void vim_context_insert_text(VimContextRef ctx, const char *text);
 void vim_context_execute_ex(VimContextRef ctx, const char *command);
 
 // State Queries

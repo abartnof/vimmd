@@ -1407,7 +1407,7 @@ static char** split_lines(const char *text, size_t *out_count, bool linewise) {
         if (*p == '\n') count++;
         p++;
     }
-    if (text[len - 1] != '\n') {
+    if (!linewise || (len > 0 && text[len - 1] != '\n')) {
         count++;
     }
     if (count == 0 && linewise) {
@@ -1443,7 +1443,7 @@ static char** split_lines(const char *text, size_t *out_count, bool linewise) {
         }
         p++;
     }
-    if (p > start || text[len - 1] != '\n') {
+    if (p > start || !linewise) {
         size_t line_len = p - start;
         if (line_len > 0 && start[line_len - 1] == '\r') {
             line_len--;
@@ -1591,6 +1591,120 @@ static void paste_text(struct VimDocumentContext *ctx, bool after) {
                 emit_line_delta(ctx, (int32_t)(l_idx + 1), 1, (int32_t)num_lines);
             }
         }
+    }
+    clamp_cursor(ctx);
+}
+
+void vim_context_insert_text(VimContextRef ctx, const char *text) {
+    if (!ctx || !text || *text == '\0') return;
+    vim_activate_context(ctx);
+
+    if (ctx->mode != VIM_MODE_INSERT && ctx->mode != VIM_MODE_REPLACE) {
+        ctx->mode = VIM_MODE_INSERT;
+        ctx->mode_state = (int)VIM_MODE_INSERT;
+    }
+
+    if (!ctx->in_insert_undo_group) {
+        snapshot_for_undo(ctx);
+        ctx->in_insert_undo_group = true;
+    }
+
+    size_t num_lines = 0;
+    char **p_lines = split_lines(text, &num_lines, false);
+    if (!p_lines || num_lines == 0) {
+        if (p_lines) free(p_lines);
+        return;
+    }
+
+    if (ctx->line_count == 0) {
+        ctx->lines = (char **)calloc(1, sizeof(char *));
+        ctx->lines[0] = duplicate_string("");
+        ctx->line_count = 1;
+        ctx->line_capacity = 1;
+        ctx->cursor.line = 1;
+        ctx->cursor.byteCol = 1;
+    }
+
+    size_t l_idx = (size_t)(ctx->cursor.line - 1);
+    if (l_idx >= ctx->line_count) {
+        l_idx = ctx->line_count - 1;
+    }
+    char *line = ctx->lines[l_idx];
+    size_t line_len = line ? strlen(line) : 0;
+    size_t pos = (size_t)(ctx->cursor.byteCol - 1);
+    if (pos > line_len) pos = line_len;
+
+    if (num_lines == 1) {
+        size_t ins_len = strlen(p_lines[0]);
+        char *new_line = (char *)malloc(line_len + ins_len + 1);
+        if (new_line) {
+            if (pos > 0) memcpy(new_line, line, pos);
+            memcpy(new_line + pos, p_lines[0], ins_len);
+            if (line_len > pos) memcpy(new_line + pos + ins_len, line + pos, line_len - pos);
+            new_line[line_len + ins_len] = '\0';
+            free(line);
+            ctx->lines[l_idx] = new_line;
+            ctx->cursor.byteCol = (int32_t)(pos + ins_len + 1);
+            ctx->is_dirty = true;
+            emit_line_delta(ctx, (int32_t)(l_idx + 1), 1, 1);
+        }
+        free(p_lines[0]);
+        free(p_lines);
+    } else {
+        if (!ensure_line_capacity(ctx, ctx->line_count + num_lines - 1)) {
+            for (size_t i = 0; i < num_lines; i++) free(p_lines[i]);
+            free(p_lines);
+            return;
+        }
+
+        char *line_prefix = (char *)malloc(pos + 1);
+        if (line_prefix) {
+            if (pos > 0) memcpy(line_prefix, line, pos);
+            line_prefix[pos] = '\0';
+        }
+        char *line_suffix = duplicate_string((line && pos <= line_len) ? (line + pos) : "");
+
+        size_t len_first = pos + strlen(p_lines[0]);
+        char *first_line = (char *)malloc(len_first + 1);
+        if (first_line) {
+            if (line_prefix) memcpy(first_line, line_prefix, pos);
+            memcpy(first_line + pos, p_lines[0], strlen(p_lines[0]));
+            first_line[len_first] = '\0';
+        }
+
+        size_t suffix_len = line_suffix ? strlen(line_suffix) : 0;
+        size_t last_part_len = strlen(p_lines[num_lines - 1]);
+        size_t len_last = last_part_len + suffix_len;
+        char *last_line = (char *)malloc(len_last + 1);
+        if (last_line) {
+            memcpy(last_line, p_lines[num_lines - 1], last_part_len);
+            if (suffix_len > 0) memcpy(last_line + last_part_len, line_suffix, suffix_len);
+            last_line[len_last] = '\0';
+        }
+
+        free(line);
+        if (line_prefix) free(line_prefix);
+        free(p_lines[0]);
+        free(p_lines[num_lines - 1]);
+
+        ctx->lines[l_idx] = first_line ? first_line : duplicate_string("");
+
+        size_t insert_idx = l_idx + 1;
+        size_t extra = num_lines - 1;
+        memmove(&ctx->lines[insert_idx + extra], &ctx->lines[insert_idx], (ctx->line_count - insert_idx) * sizeof(char *));
+
+        for (size_t i = 1; i < num_lines - 1; i++) {
+            ctx->lines[l_idx + i] = p_lines[i];
+        }
+        ctx->lines[l_idx + extra] = last_line ? last_line : duplicate_string("");
+        free(p_lines);
+        ctx->line_count += extra;
+
+        ctx->cursor.line = (int32_t)(l_idx + num_lines);
+        ctx->cursor.byteCol = (int32_t)(last_part_len + 1);
+        if (line_suffix) free(line_suffix);
+        ctx->is_dirty = true;
+        emit_line_delta(ctx, (int32_t)(l_idx + 1), 1, (int32_t)num_lines);
     }
     clamp_cursor(ctx);
 }

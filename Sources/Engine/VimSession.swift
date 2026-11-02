@@ -354,6 +354,20 @@ public final class VimSession {
         onStatusChanged?()
     }
 
+    public func insertText(_ text: String) {
+        guard let ctx = context else { return }
+        let oldMode = mode
+        text.withCString { cText in
+            vim_context_insert_text(ctx, cText)
+        }
+        let newMode = mode
+        if newMode != oldMode {
+            onModeChanged?(newMode)
+        }
+        checkAndDispatchPendingAction()
+        onStatusChanged?()
+    }
+
     public func executeEx(_ command: String) {
         guard let ctx = context else { return }
         let oldMode = mode

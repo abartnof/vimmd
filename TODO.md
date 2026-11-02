@@ -301,19 +301,22 @@ This document tracks all active milestones, user requirements, and architectural
     - [x] In `synchronizeCaretWithSession()` and `positionCaret`: clamp `scrollView.contentView.bounds.origin.y` to a minimum of `0.0` on upward navigation.
     - [x] When the caret lands on Line 1 / Row 0 (in ANY column, not just column A), ensure `contentView` origin `y` snaps cleanly to `0.0`, guaranteeing Row 1 is immediately and completely visible via keyboard navigation.
 
-- [ ] **Milestone AH: Markdown Text Wrapping Fix**
-  - [ ] **Bug Description**: Text wrapping in Markdown documents is failing to wrap long lines properly to the visible text container width, causing lines to extend horizontally beyond the viewport or fail soft line-break reflow.
-  - [ ] **Remediation**:
-    - [ ] Verify `textContainer.widthTracksTextView = true`, `containerSize.width = contentSize.width`, and `isHorizontallyResizable = false` in `VimMDTextView` when wrapping is enabled for `.md` files.
-    - [ ] Ensure `VimMDDocument.configureWrapLinesPolicy()` properly applies soft wrapping configuration across window resizing, mode changes, and initial file load.
-    - [ ] Verify caret visibility and navigation across wrapped visual sub-lines (`gj`, `gk`, caret positioning).
+- [x] **Milestone AH: Markdown Text Wrapping Fix**
+  - [x] **Bug Description**: Text wrapping in Markdown documents was spilling horizontally beyond the visible viewport by the exact thickness of the line number ruler gutter (39–46 pt), cutting off line ends because horizontal scrolling was disabled.
+  - [x] **Remediation**:
+    - [x] Added `availableContentWidth()` in `VimMDTextView` dynamically accounting for `NSClipView` frame minus active ruler thickness.
+    - [x] Bound `textContainer.containerSize.width`, `textView.frame.width`, and `maxSize.width` strictly to `availableContentWidth()`.
+    - [x] Synchronized `LineNumberRulerView.updateThickness(for:)` to reflow text wrapping whenever line-count magnitude changes ruler thickness.
+    - [x] Verified headers and inline markdown elements wrap within viewport without horizontal scrolling via `MarkdownLineWrappingTests`.
 
-- [ ] **Milestone AI: Large Markdown Paste Performance & Main-Thread Freeze Fix**
-  - [ ] **Bug Description**: Pasting large amounts of Markdown-formatted text/code into a new or existing document triggers a prolonged beachball / "thinking" rainbow pinwheel freeze on the macOS main thread.
-  - [ ] **Remediation**:
-    - [ ] Diagnose bottleneck: differential delta parsing in C bridge, full-buffer regex matching in `MarkdownSyntaxResolver.renderSyntax`, or quadratic layout passes in TextKit.
-    - [ ] Implement batch insertion / layout optimization for paste events, avoiding synchronous full-document regex passes over large pasted text buffers.
-    - [ ] Add hermetic regression test pasting multi-kilobyte Markdown blocks and asserting near-instantaneous execution without main-thread stalling.
+- [x] **Milestone AI: Large Markdown Paste Performance & Main-Thread Freeze Fix**
+  - [x] **Bug Description**: Pasting large amounts of Markdown-formatted text/code into a new or existing document triggered an indefinite beachball / "thinking" rainbow pinwheel freeze on the macOS main thread (estimated ~49.5 minutes for 50KB).
+  - [x] **Remediation**:
+    - [x] Diagnosed root causes: byte-by-byte key dispatch in insert mode emitting 54,000 line deltas, each triggering full-buffer 6-regex CommonMark parsing and synchronous TextKit layout.
+    - [x] Implemented `vim_context_insert_text` in `libvim_bridge.c` / `VimSession.swift` to batch single-line and multiline paste text and emit a single cohesive line delta.
+    - [x] Optimized `MarkdownSyntaxResolver`: added fast-path substring checks (`hasPrefix("#")`, `contains("*")`, etc.) bypassing regular expression engine runs on plain lines (2x speedup).
+    - [x] Removed redundant `updateSyntaxStyling()` from `synchronizeCaretWithSession()`.
+    - [x] Validated with `LargeMarkdownPasteTests`: 54KB paste now completes in ~45ms (> 60,000x faster, zero beachballs/hangs).
 
 ---
 

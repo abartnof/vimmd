@@ -261,7 +261,7 @@ public struct MarkdownSyntaxResolver {
             var lineFont = defaultFont
 
             // 1. Headers: ^(#{1,6}\s+)
-            if let hMatch = Self.headerRegex.firstMatch(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+            if lineString.hasPrefix("#"), let hMatch = Self.headerRegex.firstMatch(in: lineString, range: NSRange(location: 0, length: lineLength)) {
                 let prefix = nsLine.substring(with: hMatch.range(at: 1))
                 let level = prefix.filter { $0 == "#" }.count
                 let size: CGFloat = {
@@ -282,83 +282,94 @@ public struct MarkdownSyntaxResolver {
                 let delimRange = NSRange(location: lineRange.location + hMatch.range(at: 1).location, length: hMatch.range(at: 1).length)
                 textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: delimRange)
 
-                // Paragraph style for header spacing
+                // Paragraph style for header spacing and word wrapping
                 let pStyle = NSMutableParagraphStyle()
                 pStyle.lineSpacing = 3
                 pStyle.paragraphSpacing = 3
+                pStyle.lineBreakMode = .byWordWrapping
                 textStorage.addAttribute(.paragraphStyle, value: pStyle, range: lineRange)
             }
 
+            let hasAsteriskOrUnderscore = lineString.contains("*") || lineString.contains("_")
+
             // 2. Bold spans: (**...** or __...__)
-            for m in Self.boldRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
-                let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                let boldFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .boldFontMask)
-                textStorage.addAttribute(.font, value: boldFont, range: fullMatchRange)
+            if hasAsteriskOrUnderscore {
+                for m in Self.boldRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+                    let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
+                    let boldFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .boldFontMask)
+                    textStorage.addAttribute(.font, value: boldFont, range: fullMatchRange)
 
-                if m.range.length >= 4 {
-                    let openDelim = NSRange(location: fullMatchRange.location, length: 2)
-                    let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    if m.range.length >= 4 {
+                        let openDelim = NSRange(location: fullMatchRange.location, length: 2)
+                        let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    }
                 }
-            }
 
-            // 3. Italic spans: (*...* or _..._)
-            for m in Self.italicRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
-                let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                let italicFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .italicFontMask)
-                textStorage.addAttribute(.font, value: italicFont, range: fullMatchRange)
+                // 3. Italic spans: (*...* or _..._)
+                for m in Self.italicRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+                    let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
+                    let italicFont = NSFontManager.shared.convert(lineFont, toHaveTrait: .italicFontMask)
+                    textStorage.addAttribute(.font, value: italicFont, range: fullMatchRange)
 
-                if m.range.length >= 2 {
-                    let openDelim = NSRange(location: fullMatchRange.location, length: 1)
-                    let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    if m.range.length >= 2 {
+                        let openDelim = NSRange(location: fullMatchRange.location, length: 1)
+                        let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    }
                 }
             }
 
             // 4. Inline code spans: `...`
-            for m in Self.codeRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
-                let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-                textStorage.addAttribute(.font, value: codeFont, range: fullMatchRange)
-                textStorage.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: fullMatchRange)
-                textStorage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullMatchRange)
+            if lineString.contains("`") {
+                for m in Self.codeRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+                    let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
+                    let codeFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                    textStorage.addAttribute(.font, value: codeFont, range: fullMatchRange)
+                    textStorage.addAttribute(.backgroundColor, value: NSColor.quaternaryLabelColor, range: fullMatchRange)
+                    textStorage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullMatchRange)
 
-                if m.range.length >= 2 {
-                    let openDelim = NSRange(location: fullMatchRange.location, length: 1)
-                    let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    if m.range.length >= 2 {
+                        let openDelim = NSRange(location: fullMatchRange.location, length: 1)
+                        let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 1, length: 1)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    }
                 }
             }
 
             // 5. Links: [title](url)
-            for m in Self.linkRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
-                let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                let titleLocalRange = m.range(at: 1)
-                let titleMatchRange = NSRange(location: lineRange.location + titleLocalRange.location, length: titleLocalRange.length)
+            if lineString.contains("[") && lineString.contains("](") {
+                for m in Self.linkRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+                    let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
+                    let titleLocalRange = m.range(at: 1)
+                    let titleMatchRange = NSRange(location: lineRange.location + titleLocalRange.location, length: titleLocalRange.length)
 
-                textStorage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: titleMatchRange)
-                textStorage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: titleMatchRange)
+                    textStorage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: titleMatchRange)
+                    textStorage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: titleMatchRange)
 
-                // Conceal / subtle style delimiters '[' and '](url)'
-                let openBracket = NSRange(location: fullMatchRange.location, length: 1)
-                let closeAndUrl = NSRange(location: titleMatchRange.location + titleMatchRange.length, length: fullMatchRange.length - (1 + titleLocalRange.length))
-                textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openBracket)
-                textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeAndUrl)
+                    // Conceal / subtle style delimiters '[' and '](url)'
+                    let openBracket = NSRange(location: fullMatchRange.location, length: 1)
+                    let closeAndUrl = NSRange(location: titleMatchRange.location + titleMatchRange.length, length: fullMatchRange.length - (1 + titleLocalRange.length))
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openBracket)
+                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeAndUrl)
+                }
             }
 
             // 6. Strikethrough: ~~...~~
-            for m in Self.strikeRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
-                let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
-                textStorage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: fullMatchRange)
+            if lineString.contains("~~") {
+                for m in Self.strikeRegex.matches(in: lineString, range: NSRange(location: 0, length: lineLength)) {
+                    let fullMatchRange = NSRange(location: lineRange.location + m.range.location, length: m.range.length)
+                    textStorage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: fullMatchRange)
 
-                if m.range.length >= 4 {
-                    let openDelim = NSRange(location: fullMatchRange.location, length: 2)
-                    let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
-                    textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    if m.range.length >= 4 {
+                        let openDelim = NSRange(location: fullMatchRange.location, length: 2)
+                        let closeDelim = NSRange(location: fullMatchRange.location + fullMatchRange.length - 2, length: 2)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: openDelim)
+                        textStorage.addAttribute(.foregroundColor, value: delimiterColor, range: closeDelim)
+                    }
                 }
             }
         }

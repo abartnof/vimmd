@@ -784,6 +784,7 @@ open class VimMDDocument: NSDocument {
         scrollView.verticalRulerView = ruler
         scrollView.rulersVisible = true
         ruler.updateThickness(for: tv)
+        tv.applyWrapLinesSetting()
 
         // Configure ColumnLetterRulerView for spreadsheets
         let colRuler = ColumnLetterRulerView(scrollView: scrollView, orientation: .horizontalRuler)
