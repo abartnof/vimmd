@@ -200,6 +200,22 @@ echo "[TEST] Executing markdown_ux_research..."
 echo "[TEST] markdown_ux_research passed."
 echo ""
 
+# 11. Automated Stress Test Suite & Performance Budget Benchmarks (Milestone AJ)
+echo "[TEST] Building & running Stress Test Suite & Performance Budget Benchmarks..."
+echo "[TEST] Compiling StressTestSuite..."
+swiftc -module-cache-path "${MODULE_CACHE}" \
+    -I "${ROOT_DIR}/Sources/CBridge" \
+    -I "${BUILD_DIR}" \
+    -L "${BUILD_DIR}" \
+    -lApp -lViews -lEngine -lCBridge \
+    "${ROOT_DIR}/Tests/StressTests/StressTestSuite.swift" \
+    -o "${BUILD_DIR}/StressTestSuite"
+
+echo "[TEST] Executing StressTestSuite..."
+"${BUILD_DIR}/StressTestSuite"
+echo "[TEST] StressTestSuite passed."
+echo ""
+
 echo "========================================="
 echo " All test suites PASSED successfully! "
 echo "========================================="

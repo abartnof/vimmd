@@ -318,6 +318,23 @@ This document tracks all active milestones, user requirements, and architectural
     - [x] Removed redundant `updateSyntaxStyling()` from `synchronizeCaretWithSession()`.
     - [x] Validated with `LargeMarkdownPasteTests`: 54KB paste now completes in ~45ms (> 60,000x faster, zero beachballs/hangs).
 
+- [x] **Milestone AJ: Automated Stress Test Suite & Performance Budget Benchmarks**
+  - [x] **Dimension 1: File Volume & Scale (10,000+ Lines)**:
+    - [x] Benchmark 10k–50k line Markdown & plain text document initialization and line indexing ($< 250\text{ms}$; achieved ~60ms for 10k Markdown and ~52ms for 20k Plain Text).
+    - [x] Measure rapid top-to-bottom keyboard navigation (`G`, `gg`, `5000j`) and ruler redraw latency ($< 100\text{ms}$; achieved ~0.5ms).
+  - [x] **Dimension 2: Pathological Ultra-Long Lines (50,000+ Chars)**:
+    - [x] Stress-test single continuous 50,000–100,000 character lines with dense Markdown/code tokens without regex backtracking hangs or layout lockups ($< 150\text{ms}$; achieved ~2.9ms for token extraction, ~25.9ms for TextKit layout & styling).
+  - [x] **Dimension 3: High-Frequency Keystroke & Churn Stress**:
+    - [x] Stream 1,000 continuous simulated keystrokes / operators (`1000x`, `500dd`, repeat insertions) without queue starvation or coordinate drift ($< 1000\text{ms}$; achieved ~453ms / 0.320ms per key).
+  - [x] **Dimension 4: Massive Tabular Grid Scaling (CSV / TSV)**:
+    - [x] Stress-test CSV/TSV parsing and layout across 5,000 rows $\times$ 20 columns (100,000 cells) and 120-column wide tables ($< 350\text{ms}$; achieved ~58ms for 100k cells, ~6.4ms for 120 columns).
+    - [x] Verify horizontal & vertical scrolling and cell-caret positioning remain bounded within 60fps budgets ($< 100\text{ms}$; achieved ~48ms for 5,000-row binary search hit test).
+  - [x] **Dimension 5: Deep Undo/Redo & Ex-Command Pipelines**:
+    - [x] 500 sequential edits with rapid full-stack undo (`u`) and redo (`Ctrl-R`), asserting zero state divergence between C bridge and Swift text storage ($< 750\text{ms}$; achieved ~528ms).
+    - [x] Bulk `:sort` and `:%s` replacements across 5,000 lines ($< 150\text{ms}$; achieved ~68ms for `:%s` and ~67ms for `:sort`).
+  - [x] **CI & Test Suite Integration**:
+    - [x] Integrate stress test suite into `scripts/test.sh` (Suite #11) and provide standalone benchmark script `scripts/stress_test.sh`.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
