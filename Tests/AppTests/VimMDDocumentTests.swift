@@ -170,8 +170,12 @@ func testDocumentWindowControllerSetup() throws {
     guard doc.modeLabel?.stringValue == "NORMAL" || doc.modeLabel?.stringValue == "-- NORMAL --" else {
         throw NSError(domain: "AppTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'NORMAL', got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
-    guard window.title.contains("[NORMAL]") else {
-        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])
+    let expectedTitle = doc.displayName ?? "Untitled"
+    guard window.title == expectedTitle else {
+        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected window title to strictly equal '\(expectedTitle)', got '\(window.title)'"])
+    }
+    guard !window.title.contains("[") && !window.title.contains("]") && !window.title.contains("NORMAL") else {
+        throw NSError(domain: "AppTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Expected window title not to contain mode string or brackets, got '\(window.title)'"])
     }
 
     // Test mode transitions update status display and window title
@@ -179,16 +183,38 @@ func testDocumentWindowControllerSetup() throws {
     guard doc.modeLabel?.stringValue == "INSERT" || doc.modeLabel?.stringValue == "-- INSERT --" else {
         throw NSError(domain: "AppTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'INSERT' after 'i', got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
-    guard window.title.contains("[INSERT]") else {
-        throw NSError(domain: "AppTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [INSERT], got '\(window.title)'"])
+    guard window.title == expectedTitle else {
+        throw NSError(domain: "AppTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected window title to strictly equal '\(expectedTitle)' in INSERT mode, got '\(window.title)'"])
+    }
+    guard !window.title.contains("[") && !window.title.contains("]") && !window.title.contains("INSERT") else {
+        throw NSError(domain: "AppTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected window title not to contain INSERT mode or brackets, got '\(window.title)'"])
     }
 
     doc.session?.feedKeys("\u{1b}")
     guard doc.modeLabel?.stringValue == "NORMAL" || doc.modeLabel?.stringValue == "-- NORMAL --" else {
         throw NSError(domain: "AppTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'NORMAL' after Esc, got \(doc.modeLabel?.stringValue ?? "nil")"])
     }
-    guard window.title.contains("[NORMAL]") else {
-        throw NSError(domain: "AppTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected window title to contain [NORMAL], got '\(window.title)'"])
+    guard window.title == expectedTitle else {
+        throw NSError(domain: "AppTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected window title to strictly equal '\(expectedTitle)' after Esc, got '\(window.title)'"])
+    }
+    guard !window.title.contains("[") && !window.title.contains("]") && !window.title.contains("NORMAL") else {
+        throw NSError(domain: "AppTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected window title not to contain NORMAL mode or brackets, got '\(window.title)'"])
+    }
+
+    doc.session?.feedKeys("v")
+    guard doc.modeLabel?.stringValue == "VISUAL" || doc.modeLabel?.stringValue == "-- VISUAL --" else {
+        throw NSError(domain: "AppTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "Expected modeLabel 'VISUAL' after 'v', got \(doc.modeLabel?.stringValue ?? "nil")"])
+    }
+    guard window.title == expectedTitle else {
+        throw NSError(domain: "AppTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "Expected window title to strictly equal '\(expectedTitle)' in VISUAL mode, got '\(window.title)'"])
+    }
+    guard !window.title.contains("[") && !window.title.contains("]") && !window.title.contains("VISUAL") else {
+        throw NSError(domain: "AppTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "Expected window title not to contain VISUAL mode or brackets, got '\(window.title)'"])
+    }
+
+    doc.session?.feedKeys("\u{1b}")
+    guard window.title == expectedTitle else {
+        throw NSError(domain: "AppTests", code: 17, userInfo: [NSLocalizedDescriptionKey: "Expected window title to strictly equal '\(expectedTitle)' after Esc from VISUAL, got '\(window.title)'"])
     }
 }
 

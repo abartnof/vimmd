@@ -344,7 +344,6 @@ open class VimMDDocument: NSDocument {
     public func updateStatusDisplay() {
         guard let session = session else { return }
         let currentMode = session.mode
-        let mode = session.modeString
         let pos = session.cursorPosition
         let scale = self.currentMagnificationScale
         let statusHeight = statusBar?.frame.height ?? ceil(22.0 * scale)
@@ -356,7 +355,7 @@ open class VimMDDocument: NSDocument {
         posLabel?.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         if let win = self.windowControllers.first?.window {
             let baseTitle = self.displayName ?? "Untitled"
-            win.title = "\(baseTitle) — [\(mode)]"
+            win.title = baseTitle
         }
 
         let rightBound = savedChipView?.frame.origin.x ?? (posLabel?.frame.origin.x ?? (300.0 * scale))
@@ -698,7 +697,7 @@ open class VimMDDocument: NSDocument {
         )
         VimMDDocument.positionWindowTopLeft(window)
         let baseTitle = self.displayName ?? "Untitled"
-        window.title = "\(baseTitle) — [NORMAL]"
+        window.title = baseTitle
 
         let contentBounds = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let statusHeight: CGFloat = 22.0
