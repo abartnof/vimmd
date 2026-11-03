@@ -8,6 +8,10 @@ open class ColumnLetterRulerView: NSRulerView {
 
     public var activeColDragRange: ClosedRange<Int>?
     public var dragStartColIndex: Int?
+    public var isResizingColumn: Bool = false
+    public var resizingColumnIndex: Int?
+    public var resizeStartX: CGFloat = 0
+    public var initialColumnWidth: CGFloat = 0
     private var rulerTrackingArea: NSTrackingArea?
 
     private var _customUiScale: CGFloat?
@@ -143,6 +147,7 @@ open class ColumnLetterRulerView: NSRulerView {
             self.ruleThickness = 20.0 * sv.magnification
         }
         self.needsDisplay = true
+        self.window?.invalidateCursorRects(for: self)
     }
 
     @objc private func textDidChangeNotification(_ notification: Notification) {
@@ -153,17 +158,81 @@ open class ColumnLetterRulerView: NSRulerView {
         return (self.clientView as? VimMDTextView) ?? (self.scrollView?.documentView as? VimMDTextView)
     }
 
+    public func convertPointToTextView(_ point: NSPoint) -> NSPoint {
+        guard let tv = targetTextView else { return point }
+        if self.window != nil && self.window == tv.window {
+            return tv.convert(point, from: self)
+        }
+        if let sv = self.scrollView, sv == tv.enclosingScrollView || (self.isDescendant(of: sv) && tv.isDescendant(of: sv)) {
+            return tv.convert(point, from: self)
+        }
+        let scrollOffset = self.scrollView?.contentView.bounds.origin.x ?? 0
+        let mag = self.scrollView?.magnification ?? 1.0
+        return NSPoint(x: (point.x / mag) + scrollOffset, y: point.y)
+    }
+
+    public func convertPointFromTextView(_ point: NSPoint) -> NSPoint {
+        guard let tv = targetTextView else { return point }
+        if self.window != nil && self.window == tv.window {
+            return self.convert(point, from: tv)
+        }
+        if let sv = self.scrollView, sv == tv.enclosingScrollView || (self.isDescendant(of: sv) && tv.isDescendant(of: sv)) {
+            return self.convert(point, from: tv)
+        }
+        let scrollOffset = self.scrollView?.contentView.bounds.origin.x ?? 0
+        let mag = self.scrollView?.magnification ?? 1.0
+        return NSPoint(x: (point.x - scrollOffset) * mag, y: point.y)
+    }
+
+    public func convertRectFromTextView(_ rect: NSRect) -> NSRect {
+        guard let tv = targetTextView else { return rect }
+        if self.window != nil && self.window == tv.window {
+            return self.convert(rect, from: tv)
+        }
+        if let sv = self.scrollView, sv == tv.enclosingScrollView || (self.isDescendant(of: sv) && tv.isDescendant(of: sv)) {
+            return self.convert(rect, from: tv)
+        }
+        let scrollOffset = self.scrollView?.contentView.bounds.origin.x ?? 0
+        let mag = self.scrollView?.magnification ?? 1.0
+        return NSRect(x: (rect.origin.x - scrollOffset) * mag, y: rect.origin.y, width: rect.width * mag, height: rect.height)
+    }
+
     public func columnIndex(at point: NSPoint) -> Int? {
         guard let tv = targetTextView else { return nil }
-        let ptInTV = tv.convert(point, from: self)
+        let ptInTV = convertPointToTextView(point)
         return tv.columnIndex(at: ptInTV, clamped: false)
+    }
+
+    public func dividerColumnIndex(at point: NSPoint, hitTolerance: CGFloat = 4.0) -> Int? {
+        guard let tv = targetTextView, tv.isTabularDocument else { return nil }
+        let widths = tv.columnWidths()
+        guard !widths.isEmpty else { return nil }
+
+        var runningStartX = tv.textContainerInset.width
+        for (i, w) in widths.enumerated() {
+            runningStartX += w
+            let divPtInRuler = convertPointFromTextView(NSPoint(x: runningStartX, y: 0))
+            if abs(point.x - divPtInRuler.x) <= hitTolerance {
+                return i
+            }
+        }
+        return nil
     }
 
     // MARK: - Cursor Handling
 
     public func cursorForPoint(_ point: NSPoint) -> NSCursor? {
         guard let tv = targetTextView, tv.isTabularDocument else { return nil }
-        return VimMDTextView.downwardArrowCursor
+        if isResizingColumn {
+            return NSCursor.resizeLeftRight
+        }
+        if dividerColumnIndex(at: point) != nil {
+            return NSCursor.resizeLeftRight
+        }
+        if columnIndex(at: point) != nil {
+            return VimMDTextView.downwardArrowCursor
+        }
+        return nil
     }
 
     override open func updateTrackingAreas() {
@@ -183,8 +252,28 @@ open class ColumnLetterRulerView: NSRulerView {
 
     override open func resetCursorRects() {
         super.resetCursorRects()
-        if let cursor = cursorForPoint(.zero) {
-            addCursorRect(bounds, cursor: cursor)
+        guard let tv = targetTextView, tv.isTabularDocument else { return }
+
+        let widths = tv.columnWidths()
+        guard !widths.isEmpty else {
+            if let cursor = cursorForPoint(.zero) {
+                addCursorRect(bounds, cursor: cursor)
+            }
+            return
+        }
+
+        var runningStartX = tv.textContainerInset.width
+        for (_, colWidth) in widths.enumerated() {
+            let colRectInTV = NSRect(x: runningStartX, y: 0, width: colWidth, height: bounds.height)
+            runningStartX += colWidth
+            let rectInRuler = convertRectFromTextView(colRectInTV)
+            let colBoundsInRuler = NSRect(x: rectInRuler.minX, y: 0, width: rectInRuler.width, height: bounds.height)
+
+            let divRect = NSRect(x: colBoundsInRuler.maxX - 4.0, y: 0, width: 8.0, height: bounds.height)
+            let colBodyRect = NSRect(x: colBoundsInRuler.minX, y: 0, width: max(0, colBoundsInRuler.width - 4.0), height: bounds.height)
+
+            addCursorRect(colBodyRect, cursor: VimMDTextView.downwardArrowCursor)
+            addCursorRect(divRect, cursor: NSCursor.resizeLeftRight)
         }
     }
 
@@ -202,6 +291,8 @@ open class ColumnLetterRulerView: NSRulerView {
         if let cursor = cursorForPoint(pt) {
             cursor.set()
             return
+        } else {
+            NSCursor.arrow.set()
         }
         super.mouseMoved(with: event)
     }
@@ -214,6 +305,45 @@ open class ColumnLetterRulerView: NSRulerView {
             return
         }
         let ptInRuler = convert(event.locationInWindow, from: nil)
+
+        if let divCol = dividerColumnIndex(at: ptInRuler) {
+            if event.clickCount == 2 {
+                tv.customColumnWidths.removeValue(forKey: divCol)
+                isResizingColumn = false
+                resizingColumnIndex = nil
+                tv.isResizingColumn = false
+                tv.resizingColumnIndex = nil
+                dragStartColIndex = nil
+                activeColDragRange = nil
+                tv.updateSyntaxStyling(force: true)
+                if !tv.wrapTableCells {
+                    tv.updateFrameForUnwrappedLines()
+                }
+                tv.needsDisplay = true
+                self.needsDisplay = true
+                self.window?.invalidateCursorRects(for: self)
+                return
+            } else {
+                let widths = tv.columnWidths()
+                let initialW = divCol < widths.count ? widths[divCol] : 60.0
+                isResizingColumn = true
+                resizingColumnIndex = divCol
+                resizeStartX = ptInRuler.x
+                initialColumnWidth = initialW
+
+                tv.isResizingColumn = true
+                tv.resizingColumnIndex = divCol
+                tv.resizeStartX = convertPointToTextView(ptInRuler).x
+                tv.initialColumnWidth = initialW
+
+                dragStartColIndex = nil
+                activeColDragRange = nil
+                self.needsDisplay = true
+                tv.needsDisplay = true
+                return
+            }
+        }
+
         if let col = columnIndex(at: ptInRuler) {
             dragStartColIndex = col
             activeColDragRange = col...col
@@ -226,12 +356,35 @@ open class ColumnLetterRulerView: NSRulerView {
     }
 
     override open func mouseDragged(with event: NSEvent) {
-        guard let tv = targetTextView, tv.isTabularDocument, let start = dragStartColIndex else {
+        guard let tv = targetTextView, tv.isTabularDocument else {
+            super.mouseDragged(with: event)
+            return
+        }
+
+        if isResizingColumn, let divCol = resizingColumnIndex {
+            let ptInRuler = convert(event.locationInWindow, from: nil)
+            let startInTV = convertPointToTextView(NSPoint(x: resizeStartX, y: 0)).x
+            let currentInTV = convertPointToTextView(ptInRuler).x
+            let deltaX = currentInTV - startInTV
+            let newWidth = max(30.0, initialColumnWidth + deltaX)
+            if newWidth.isFinite && !newWidth.isNaN {
+                tv.customColumnWidths[divCol] = newWidth
+                tv.updateSyntaxStyling(force: true)
+                if !tv.wrapTableCells {
+                    tv.updateFrameForUnwrappedLines()
+                }
+                tv.needsDisplay = true
+                self.needsDisplay = true
+            }
+            return
+        }
+
+        guard let start = dragStartColIndex else {
             super.mouseDragged(with: event)
             return
         }
         let ptInRuler = convert(event.locationInWindow, from: nil)
-        let ptInTV = tv.convert(ptInRuler, from: self)
+        let ptInTV = convertPointToTextView(ptInRuler)
         let current = tv.columnIndex(at: ptInTV, clamped: true) ?? start
         let minC = min(start, current)
         let maxC = max(start, current)
@@ -244,6 +397,18 @@ open class ColumnLetterRulerView: NSRulerView {
             super.mouseUp(with: event)
             return
         }
+
+        if isResizingColumn {
+            isResizingColumn = false
+            resizingColumnIndex = nil
+            tv.isResizingColumn = false
+            tv.resizingColumnIndex = nil
+            tv.needsDisplay = true
+            self.needsDisplay = true
+            self.window?.invalidateCursorRects(for: self)
+            return
+        }
+
         if let range = activeColDragRange, range.count > 1 {
             _ = tv.copyColumnRange(from: range.lowerBound, to: range.upperBound)
             tv.flashHighlight()
@@ -296,7 +461,7 @@ open class ColumnLetterRulerView: NSRulerView {
         for (colIndex, colWidth) in widths.enumerated() {
             let colRectInTV = NSRect(x: runningStartX, y: 0, width: colWidth, height: 20)
             runningStartX += colWidth
-            let rectInRuler = self.convert(colRectInTV, from: tv)
+            let rectInRuler = convertRectFromTextView(colRectInTV)
             let colBoundsInRuler = NSRect(x: rectInRuler.minX, y: 0, width: rectInRuler.width, height: bounds.height)
 
             guard colBoundsInRuler.intersects(rect) else { continue }

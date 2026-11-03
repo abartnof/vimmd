@@ -93,9 +93,31 @@ open class VimMDTextView: NSTextView {
     public let syntaxResolver = MarkdownSyntaxResolver()
     public let tabularResolver = TabularSyntaxResolver()
     private var cachedColumnWidths: [CGFloat]?
+    private var cachedRecordRanges: [NSRange]?
+    private var cachedRecordRangesLength: Int = -1
+
+    public func tabularRecordRanges() -> [NSRange] {
+        guard let storage = self.textStorage else { return [] }
+        let fullString = storage.string as NSString
+        let len = fullString.length
+        guard len > 0 else { return [] }
+        if let cached = cachedRecordRanges, cachedRecordRangesLength == len {
+            return cached
+        }
+        let parsed = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
+        cachedRecordRanges = parsed
+        cachedRecordRangesLength = len
+        return parsed
+    }
+
+    public func invalidateRecordRangesCache() {
+        cachedRecordRanges = nil
+        cachedRecordRangesLength = -1
+    }
 
     public func invalidateColumnWidthsCache() {
         cachedColumnWidths = nil
+        invalidateRecordRangesCache()
     }
 
     public enum DocumentSyntaxType: Equatable {
@@ -265,6 +287,33 @@ open class VimMDTextView: NSTextView {
         return -(sv.horizontalRulerView?.ruleThickness ?? 0)
     }
 
+    public var verticalRulerThickness: CGFloat {
+        guard let sv = enclosingScrollView, sv.hasVerticalRuler, sv.rulersVisible else { return 0 }
+        return sv.verticalRulerView?.ruleThickness ?? 0
+    }
+
+    public var horizontalRulerThickness: CGFloat {
+        guard let sv = enclosingScrollView, sv.hasHorizontalRuler, sv.rulersVisible else { return 0 }
+        return sv.horizontalRulerView?.ruleThickness ?? 0
+    }
+
+    public var clipBoundsOrigin: NSPoint {
+        if let cv = enclosingScrollView?.contentView {
+            return cv.bounds.origin
+        }
+        return self.visibleRect.origin
+    }
+
+    public var isFirstRowFrozenActive: Bool {
+        guard isTabularDocument && freezeFirstRow else { return false }
+        return clipBoundsOrigin.y > (horizontalRulerOffset + 0.5)
+    }
+
+    public var isFirstColumnFrozenActive: Bool {
+        guard isTabularDocument && freezeFirstColumn else { return false }
+        return clipBoundsOrigin.x > (verticalRulerOffset + 0.5)
+    }
+
     public func pinViewportToTopLeft() {
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
@@ -299,6 +348,7 @@ open class VimMDTextView: NSTextView {
         let clip = scrollView.contentView
         let yOffset = horizontalRulerOffset
         if isTabularDocument && line == 1 {
+            if freezeFirstRow { return }
             let caretBottom = insertionBaseRect(at: caretLocation).maxY
             if caretBottom <= clip.bounds.height {
                 if abs(clip.bounds.origin.y - yOffset) > 0.001 {
@@ -652,7 +702,7 @@ open class VimMDTextView: NSTextView {
             let clamped = max(0, min(docLength, offset))
             self.currentSelectedRange = NSRange(location: clamped, length: 0)
             self.setSelectedRange(self.currentSelectedRange)
-            if clamped == 0 || (session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1) {
+            if (clamped == 0 || (session.cursorPosition.line == 1 && session.cursorPosition.byteCol <= 1)) && !freezeFirstRow && !freezeFirstColumn {
                 resetScrollToTopLeft()
             } else {
                 self.scrollRangeToVisible(self.currentSelectedRange)
@@ -884,16 +934,6 @@ open class VimMDTextView: NSTextView {
     }
 
     public func dividerColumnIndex(at point: NSPoint, hitTolerance: CGFloat = 4.0) -> Int? {
-        guard isPointInHeaderRow(point) else { return nil }
-        let widths = columnWidths()
-        guard !widths.isEmpty else { return nil }
-        var currentX = textContainerInset.width
-        for (i, w) in widths.enumerated() {
-            currentX += w
-            if abs(point.x - currentX) <= hitTolerance {
-                return i
-            }
-        }
         return nil
     }
 
@@ -948,6 +988,15 @@ open class VimMDTextView: NSTextView {
         let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
         guard !recordRanges.isEmpty else { return clamped ? 0 : nil }
 
+        if let pinnedHeader = pinnedHeaderRect() {
+            if point.y >= pinnedHeader.minY && point.y <= pinnedHeader.maxY {
+                return 0
+            }
+            if clamped && point.y < pinnedHeader.minY {
+                return 0
+            }
+        }
+
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else {
             return clamped ? 0 : nil
         }
@@ -990,6 +1039,15 @@ open class VimMDTextView: NSTextView {
     public func columnIndex(at point: NSPoint, clamped: Bool = false) -> Int? {
         let widths = columnWidths()
         guard !widths.isEmpty else { return clamped ? 0 : nil }
+
+        if let pinnedCol = pinnedColumnRect() {
+            if point.x >= pinnedCol.minX && point.x <= pinnedCol.maxX {
+                return 0
+            }
+            if clamped && point.x < pinnedCol.minX {
+                return 0
+            }
+        }
 
         let startX = textContainerInset.width
         if point.x < startX {
@@ -1202,11 +1260,6 @@ open class VimMDTextView: NSTextView {
         if isResizingColumn {
             return NSCursor.resizeLeftRight
         }
-        if isPointInHeaderRow(point) {
-            if dividerColumnIndex(at: point) != nil {
-                return NSCursor.resizeLeftRight
-            }
-        }
         return nil
     }
 
@@ -1239,34 +1292,6 @@ open class VimMDTextView: NSTextView {
     public func handleTabularMouseDown(at point: NSPoint, clickCount: Int = 1) -> Bool {
         guard isTabularDocument else { return false }
         self.window?.makeFirstResponder(self)
-
-        if isPointInHeaderRow(point) {
-            if let divCol = dividerColumnIndex(at: point) {
-                if clickCount == 2 {
-                    customColumnWidths.removeValue(forKey: divCol)
-                    isResizingColumn = false
-                    resizingColumnIndex = nil
-                    isDraggingCol = false
-                    updateSyntaxStyling(force: true)
-                    if !wrapTableCells {
-                        updateFrameForUnwrappedLines()
-                    }
-                    needsDisplay = true
-                    return true
-                } else {
-                    let widths = columnWidths()
-                    let initialW = divCol < widths.count ? widths[divCol] : 60.0
-                    isResizingColumn = true
-                    resizingColumnIndex = divCol
-                    resizeStartX = point.x
-                    initialColumnWidth = initialW
-                    isDraggingCol = false
-                    needsDisplay = true
-                    return true
-                }
-            }
-            return false
-        }
         return false
     }
 
@@ -1570,44 +1595,304 @@ open class VimMDTextView: NSTextView {
     }
 
     public func drawFrozenPanes(in dirtyRect: NSRect) {
-        let vRect = self.visibleRect
+        guard isTabularDocument else { return }
+        guard let storage = self.textStorage else { return }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return }
 
-        if freezeFirstRow && vRect.origin.y > 0, let row0 = rowRect(for: 0) {
-            let pinnedHeaderRect = NSRect(x: vRect.origin.x, y: vRect.origin.y, width: vRect.width, height: row0.height)
-            NSColor.windowBackgroundColor.setFill()
-            pinnedHeaderRect.fill()
-            NSColor.quaternaryLabelColor.setFill()
-            pinnedHeaderRect.fill()
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return }
+        let col0Width = widths[0]
 
-            if let storage = self.textStorage {
-                let fullStr = storage.string as NSString
-                if fullStr.length > 0 {
-                    let lr = fullStr.lineRange(for: NSRange(location: 0, length: 0))
-                    let headerAttr = storage.attributedSubstring(from: lr)
-                    headerAttr.draw(in: NSRect(x: textContainerInset.width, y: vRect.origin.y, width: bounds.width, height: row0.height))
+        let recordRanges = tabularRecordRanges()
+        guard !recordRanges.isEmpty else { return }
+
+        let regularFont = NSFont.monospacedSystemFont(ofSize: self.font?.pointSize ?? 13.0, weight: .regular)
+        let boldFont = NSFont.monospacedSystemFont(ofSize: self.font?.pointSize ?? 13.0, weight: .bold)
+        let textAttrsRegular: [NSAttributedString.Key: Any] = [
+            .font: regularFont,
+            .foregroundColor: NSColor.labelColor
+        ]
+        let textAttrsBold: [NSAttributedString.Key: Any] = [
+            .font: boldFont,
+            .foregroundColor: NSColor.labelColor
+        ]
+
+        let headerRect = pinnedHeaderRect()
+        let colRect = pinnedColumnRect()
+        let cornerRect = pinnedCornerRect()
+
+        func extractCellText(row: Int, col: Int) -> String {
+            guard row >= 0 && row < recordRanges.count else { return "" }
+            let lr = recordRanges[row]
+            var len = lr.length
+            while len > 0 {
+                let c = fullString.character(at: lr.location + len - 1)
+                if c == 10 || c == 13 { len -= 1 } else { break }
+            }
+            let (fields, _) = tabularResolver.parseLine(in: fullString, range: NSRange(location: lr.location, length: len), isTSV: isTSV)
+            guard let field = fields.first(where: { $0.columnIndex == col }) else { return "" }
+            return fullString.substring(with: field.range)
+        }
+
+        // 1. Frozen First Column
+        if let pinnedCol = colRect {
+            var startRow = 0
+            var low = 0, high = recordRanges.count - 1
+            while low <= high {
+                let mid = (low + high) / 2
+                if let rRect = rowRect(for: mid, recordRanges: recordRanges) {
+                    if rRect.maxY < pinnedCol.minY {
+                        low = mid + 1
+                    } else {
+                        startRow = mid
+                        high = mid - 1
+                    }
+                } else {
+                    break
                 }
             }
 
+            var r = startRow
+            while r < recordRanges.count {
+                guard let rRect = rowRect(for: r, recordRanges: recordRanges) else { break }
+                if rRect.minY > pinnedCol.maxY { break }
+
+                let cellRect = NSRect(x: pinnedCol.origin.x, y: rRect.origin.y, width: col0Width, height: rRect.height)
+
+                // Draw cell background
+                NSColor.windowBackgroundColor.setFill()
+                cellRect.fill()
+                if r == 0 {
+                    TabularSyntaxResolver.headerBackgroundColor.setFill()
+                    cellRect.fill()
+                }
+
+                // Draw cell text
+                let text = extractCellText(row: r, col: 0)
+                if !text.isEmpty {
+                    NSGraphicsContext.saveGraphicsState()
+                    let clip = NSBezierPath(rect: cellRect)
+                    clip.addClip()
+                    let textRect = NSRect(
+                        x: cellRect.origin.x + textContainerInset.width,
+                        y: cellRect.origin.y,
+                        width: max(0, cellRect.width - textContainerInset.width),
+                        height: cellRect.height
+                    )
+                    (text as NSString).draw(
+                        with: textRect,
+                        options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                        attributes: r == 0 ? textAttrsBold : textAttrsRegular,
+                        context: nil
+                    )
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+
+                // Draw horizontal row gridline at bottom of cell
+                NSColor.separatorColor.setStroke()
+                let hLine = NSBezierPath()
+                hLine.lineWidth = 1.0
+                let lineY = floor(rRect.maxY) + 0.5
+                hLine.move(to: NSPoint(x: pinnedCol.origin.x, y: lineY))
+                hLine.line(to: NSPoint(x: pinnedCol.maxX, y: lineY))
+                hLine.stroke()
+
+                r += 1
+            }
+
+            // Stroke right vertical separator line at pinnedCol.maxX
             NSColor.separatorColor.setStroke()
-            let sep = NSBezierPath()
-            sep.lineWidth = 1.0
-            sep.move(to: NSPoint(x: vRect.origin.x, y: pinnedHeaderRect.maxY))
-            sep.line(to: NSPoint(x: pinnedHeaderRect.maxX, y: pinnedHeaderRect.maxY))
-            sep.stroke()
+            let vLine = NSBezierPath()
+            vLine.lineWidth = 1.0
+            let lineX = floor(pinnedCol.maxX) + 0.5
+            vLine.move(to: NSPoint(x: lineX, y: pinnedCol.minY))
+            vLine.line(to: NSPoint(x: lineX, y: pinnedCol.maxY))
+            vLine.stroke()
         }
 
-        if freezeFirstColumn && vRect.origin.x > 0, let col0 = columnRect(for: 0) {
-            let pinnedColRect = NSRect(x: vRect.origin.x, y: vRect.origin.y, width: col0.width, height: vRect.height)
+        // 2. Frozen Top Row
+        if let pinnedHeader = headerRect {
             NSColor.windowBackgroundColor.setFill()
-            pinnedColRect.fill()
+            pinnedHeader.fill()
+            TabularSyntaxResolver.headerBackgroundColor.setFill()
+            pinnedHeader.fill()
+
+            var currentX = textContainerInset.width
+            for (colIdx, colW) in widths.enumerated() {
+                let nextX = currentX + colW
+                if nextX >= pinnedHeader.minX && currentX <= pinnedHeader.maxX {
+                    let cellRect = NSRect(x: currentX, y: pinnedHeader.origin.y, width: colW, height: pinnedHeader.height)
+
+                    let text = extractCellText(row: 0, col: colIdx)
+                    if !text.isEmpty {
+                        NSGraphicsContext.saveGraphicsState()
+                        let clip = NSBezierPath(rect: cellRect)
+                        clip.addClip()
+                        let textRect = NSRect(
+                            x: cellRect.origin.x + (colIdx == 0 ? textContainerInset.width : 0),
+                            y: cellRect.origin.y,
+                            width: max(0, cellRect.width - (colIdx == 0 ? textContainerInset.width : 0)),
+                            height: cellRect.height
+                        )
+                        (text as NSString).draw(
+                            with: textRect,
+                            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                            attributes: textAttrsBold,
+                            context: nil
+                        )
+                        NSGraphicsContext.restoreGraphicsState()
+                    }
+
+                    NSColor.separatorColor.setStroke()
+                    let colSep = NSBezierPath()
+                    colSep.lineWidth = 1.0
+                    let dividerX = floor(nextX) + 0.5
+                    colSep.move(to: NSPoint(x: dividerX, y: pinnedHeader.minY))
+                    colSep.line(to: NSPoint(x: dividerX, y: pinnedHeader.maxY))
+                    colSep.stroke()
+                }
+                currentX = nextX
+            }
 
             NSColor.separatorColor.setStroke()
-            let sep = NSBezierPath()
-            sep.lineWidth = 1.0
-            sep.move(to: NSPoint(x: pinnedColRect.maxX, y: vRect.origin.y))
-            sep.line(to: NSPoint(x: pinnedColRect.maxX, y: pinnedColRect.maxY))
-            sep.stroke()
+            let bLine = NSBezierPath()
+            bLine.lineWidth = 1.0
+            let bottomY = floor(pinnedHeader.maxY) + 0.5
+            bLine.move(to: NSPoint(x: pinnedHeader.minX, y: bottomY))
+            bLine.line(to: NSPoint(x: pinnedHeader.maxX, y: bottomY))
+            bLine.stroke()
         }
+
+        // 3. Top-Left Corner Anchor (Both frozen)
+        if let pinnedCorner = cornerRect {
+            NSColor.windowBackgroundColor.setFill()
+            pinnedCorner.fill()
+            TabularSyntaxResolver.headerBackgroundColor.setFill()
+            pinnedCorner.fill()
+
+            let text = extractCellText(row: 0, col: 0)
+            if !text.isEmpty {
+                NSGraphicsContext.saveGraphicsState()
+                let clip = NSBezierPath(rect: pinnedCorner)
+                clip.addClip()
+                let textRect = NSRect(
+                    x: pinnedCorner.origin.x + textContainerInset.width,
+                    y: pinnedCorner.origin.y,
+                    width: max(0, pinnedCorner.width - textContainerInset.width),
+                    height: pinnedCorner.height
+                )
+                (text as NSString).draw(
+                    with: textRect,
+                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                    attributes: textAttrsBold,
+                    context: nil
+                )
+                NSGraphicsContext.restoreGraphicsState()
+            }
+
+            NSColor.separatorColor.setStroke()
+            let vLine = NSBezierPath()
+            vLine.lineWidth = 1.0
+            let lineX = floor(pinnedCorner.maxX) + 0.5
+            vLine.move(to: NSPoint(x: lineX, y: pinnedCorner.minY))
+            vLine.line(to: NSPoint(x: lineX, y: pinnedCorner.maxY))
+            vLine.stroke()
+
+            let hLine = NSBezierPath()
+            hLine.lineWidth = 1.0
+            let lineY = floor(pinnedCorner.maxY) + 0.5
+            hLine.move(to: NSPoint(x: pinnedCorner.minX, y: lineY))
+            hLine.line(to: NSPoint(x: pinnedCorner.maxX, y: lineY))
+            hLine.stroke()
+        }
+    }
+
+    public func pinnedHeaderRect() -> NSRect? {
+        guard isFirstRowFrozenActive else { return nil }
+        guard let row0 = rowRect(for: 0) else { return nil }
+        let origin = clipBoundsOrigin
+        let hThick = horizontalRulerThickness
+        let vThick = verticalRulerThickness
+        let x = origin.x + vThick
+        let y = origin.y + hThick
+        let w = max(0, (enclosingScrollView?.contentView.bounds.width ?? visibleRect.width) - vThick)
+        let h = row0.height
+        return NSRect(x: x, y: y, width: w, height: h)
+    }
+
+    public func pinnedColumnRect() -> NSRect? {
+        guard isFirstColumnFrozenActive else { return nil }
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return nil }
+        let col0Width = widths[0]
+        let origin = clipBoundsOrigin
+        let hThick = horizontalRulerThickness
+        let vThick = verticalRulerThickness
+        let x = origin.x + vThick
+        let y = origin.y + hThick
+        let w = col0Width
+        let h = max(0, (enclosingScrollView?.contentView.bounds.height ?? visibleRect.height) - hThick)
+        return NSRect(x: x, y: y, width: w, height: h)
+    }
+
+    public func pinnedCornerRect() -> NSRect? {
+        guard isFirstRowFrozenActive && isFirstColumnFrozenActive else { return nil }
+        guard let row0 = rowRect(for: 0) else { return nil }
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return nil }
+        let col0Width = widths[0]
+        let origin = clipBoundsOrigin
+        let hThick = horizontalRulerThickness
+        let vThick = verticalRulerThickness
+        let x = origin.x + vThick
+        let y = origin.y + hThick
+        return NSRect(x: x, y: y, width: col0Width, height: row0.height)
+    }
+
+    public func frozenColumnCellContent(row: Int) -> String? {
+        guard let storage = self.textStorage else { return nil }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return nil }
+        let records = tabularRecordRanges()
+        guard row >= 0 && row < records.count else { return nil }
+        let lr = records[row]
+        var len = lr.length
+        while len > 0 {
+            let c = fullString.character(at: lr.location + len - 1)
+            if c == 10 || c == 13 { len -= 1 } else { break }
+        }
+        let (fields, _) = tabularResolver.parseLine(in: fullString, range: NSRange(location: lr.location, length: len), isTSV: isTSV)
+        guard !fields.isEmpty else { return "" }
+        return fullString.substring(with: fields[0].range)
+    }
+
+    public func frozenHeaderCellContent(column: Int) -> String? {
+        guard let storage = self.textStorage else { return nil }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return nil }
+        let records = tabularRecordRanges()
+        guard !records.isEmpty else { return nil }
+        let lr = records[0]
+        var len = lr.length
+        while len > 0 {
+            let c = fullString.character(at: lr.location + len - 1)
+            if c == 10 || c == 13 { len -= 1 } else { break }
+        }
+        let (fields, _) = tabularResolver.parseLine(in: fullString, range: NSRange(location: lr.location, length: len), isTSV: isTSV)
+        guard let field = fields.first(where: { $0.columnIndex == column }) else { return "" }
+        return fullString.substring(with: field.range)
+    }
+
+    public func frozenCornerCellContent() -> String? {
+        return frozenHeaderCellContent(column: 0)
+    }
+
+    public func caretCellCoordinates() -> (row: Int, col: Int) {
+        if let details = currentTabularCellDetails() {
+            return (details.row, details.column)
+        }
+        return (0, 0)
     }
 
     // MARK: - Mouse & Keyboard Event Handling
@@ -1619,9 +1904,40 @@ open class VimMDTextView: NSTextView {
             if handleTabularMouseDown(at: pt, clickCount: event.clickCount) {
                 return
             }
-            let r = rowIndex(at: pt, clamped: true) ?? 0
-            let c = columnIndex(at: pt, clamped: true) ?? 0
+
+            let savedScrollOrigin = enclosingScrollView?.contentView.bounds.origin
+
+            let hitCorner = pinnedCornerRect()?.contains(pt) == true
+            let hitHeader = !hitCorner && (pinnedHeaderRect()?.contains(pt) == true)
+            let hitCol = !hitCorner && (pinnedColumnRect()?.contains(pt) == true)
+
+            var r = rowIndex(at: pt, clamped: true) ?? 0
+            var c = columnIndex(at: pt, clamped: true) ?? 0
+            if hitCorner {
+                r = 0
+                c = 0
+            } else if hitHeader {
+                r = 0
+            } else if hitCol {
+                c = 0
+            }
+
             positionCaret(atRow: r, column: c)
+
+            if let sv = enclosingScrollView, let saved = savedScrollOrigin {
+                if hitCorner {
+                    sv.contentView.scroll(to: saved)
+                    sv.reflectScrolledClipView(sv.contentView)
+                } else if hitHeader {
+                    let curX = sv.contentView.bounds.origin.x
+                    sv.contentView.scroll(to: NSPoint(x: curX, y: saved.y))
+                    sv.reflectScrolledClipView(sv.contentView)
+                } else if hitCol {
+                    let curY = sv.contentView.bounds.origin.y
+                    sv.contentView.scroll(to: NSPoint(x: saved.x, y: curY))
+                    sv.reflectScrolledClipView(sv.contentView)
+                }
+            }
             return
         }
 
