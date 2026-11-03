@@ -97,7 +97,7 @@ func testWrappedLongParagraphWordMotionCaretVisible() throws {
     guard ok else { throw fail(6, "caret \(caret) not within visible \(visible)") }
 }
 
-// 4. Visual selection in Row 1 of a sheet keeps y >= 0 and Row 1 visible
+// 4. Visual selection in Row 1 of a sheet keeps Row 1 visible below horizontal ruler
 func testVisualModeRow1Visible() throws {
     let ctx = SheetContext()
     ctx.tv.positionCaret(atRow: 0, column: 1)
@@ -105,8 +105,9 @@ func testVisualModeRow1Visible() throws {
     sendKey(ctx.tv, char: "v")
     for _ in 0..<50 { sendKey(ctx.tv, char: "k") }
     guard ctx.session.cursorPosition.line == 1 else { throw fail(7, "expected line 1, got \(ctx.session.cursorPosition.line)") }
+    let expectedY = -(ctx.scrollView.horizontalRulerView?.ruleThickness ?? 0)
     let y = ctx.scrollView.contentView.bounds.origin.y
-    guard abs(y) < 0.001 else { throw fail(8, "visual mode clip y = \(y), expected 0") }
+    guard abs(y - expectedY) < 0.001 else { throw fail(8, "visual mode clip y = \(y), expected \(expectedY)") }
 }
 
 final class SheetContext {

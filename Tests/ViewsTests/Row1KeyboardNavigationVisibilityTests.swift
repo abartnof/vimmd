@@ -79,7 +79,21 @@ final class SpreadsheetVisibilityTestContext {
     }
 }
 
-// 1. k navigation to Row 1 Column 0 (Col A) maintains y == 0.0
+func assertRow1Visible(ctx: SpreadsheetVisibilityTestContext, message: String) throws {
+    guard let row0Rect = ctx.tv.rowRect(for: 0) else {
+        throw NSError(domain: "VisibilityTests", code: 900, userInfo: [NSLocalizedDescriptionKey: "\(message): Failed to get row 0 rect"])
+    }
+    let row0InSV = ctx.tv.convert(row0Rect, to: ctx.scrollView)
+    let rulerFrame = ctx.colRuler.frame
+    if row0InSV.intersects(rulerFrame) {
+        throw NSError(domain: "VisibilityTests", code: 901, userInfo: [NSLocalizedDescriptionKey: "\(message): Row 1 rect \(row0InSV) intersects horizontal ruler \(rulerFrame)"])
+    }
+    if row0InSV.minY < rulerFrame.maxY - 0.001 {
+        throw NSError(domain: "VisibilityTests", code: 902, userInfo: [NSLocalizedDescriptionKey: "\(message): Row 1 minY \(row0InSV.minY) is above ruler maxY \(rulerFrame.maxY)"])
+    }
+}
+
+// 1. k navigation to Row 1 Column 0 (Col A) maintains horizontal ruler offset
 func testKNavigationToRow1Col0MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     ctx.tv.positionCaret(atRow: 1, column: 0) // Row 2 in display, line 2 col 1
@@ -92,13 +106,15 @@ func testKNavigationToRow1Col0MaintainsYZero() throws {
     guard ctx.session.cursorPosition.line == 1 else {
         throw NSError(domain: "VisibilityTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Expected line 1 after k, got \(ctx.session.cursorPosition.line)"])
     }
+    let expectedY = -ctx.colRuler.ruleThickness
     let clipY = ctx.scrollView.contentView.bounds.origin.y
-    guard abs(clipY) < 0.001 else {
-        throw NSError(domain: "VisibilityTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected 0.0 (Row 1 obscured behind ruler!)"])
+    guard abs(clipY - expectedY) < 0.001 else {
+        throw NSError(domain: "VisibilityTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected \(expectedY) (Row 1 obscured behind ruler!)"])
     }
+    try assertRow1Visible(ctx: ctx, message: "k to Col 0")
 }
 
-// 2. k navigation to Row 1 Column 1 (Col B) maintains y == 0.0
+// 2. k navigation to Row 1 Column 1 (Col B) maintains horizontal ruler offset
 func testKNavigationToRow1Col1MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     ctx.tv.positionCaret(atRow: 1, column: 1) // Row 2 in display, Col B
@@ -114,13 +130,15 @@ func testKNavigationToRow1Col1MaintainsYZero() throws {
     guard ctx.session.cursorPosition.byteCol > 1 else {
         throw NSError(domain: "VisibilityTests", code: 6, userInfo: [NSLocalizedDescriptionKey: "Expected byteCol > 1 for Col B, got \(ctx.session.cursorPosition.byteCol)"])
     }
+    let expectedY = -ctx.colRuler.ruleThickness
     let clipY = ctx.scrollView.contentView.bounds.origin.y
-    guard abs(clipY) < 0.001 else {
-        throw NSError(domain: "VisibilityTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected 0.0 (Row 1 pushed into negative Y!)"])
+    guard abs(clipY - expectedY) < 0.001 else {
+        throw NSError(domain: "VisibilityTests", code: 7, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected \(expectedY)"])
     }
+    try assertRow1Visible(ctx: ctx, message: "k to Col 1")
 }
 
-// 3. k navigation to Row 1 Column 2 (Col C) maintains y == 0.0
+// 3. k navigation to Row 1 Column 2 (Col C) maintains horizontal ruler offset
 func testKNavigationToRow1Col2MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     ctx.tv.positionCaret(atRow: 1, column: 2)
@@ -133,13 +151,15 @@ func testKNavigationToRow1Col2MaintainsYZero() throws {
     guard ctx.session.cursorPosition.line == 1 else {
         throw NSError(domain: "VisibilityTests", code: 9, userInfo: [NSLocalizedDescriptionKey: "Expected line 1 after k, got \(ctx.session.cursorPosition.line)"])
     }
+    let expectedY = -ctx.colRuler.ruleThickness
     let clipY = ctx.scrollView.contentView.bounds.origin.y
-    guard abs(clipY) < 0.001 else {
-        throw NSError(domain: "VisibilityTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected 0.0"])
+    guard abs(clipY - expectedY) < 0.001 else {
+        throw NSError(domain: "VisibilityTests", code: 10, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected \(expectedY)"])
     }
+    try assertRow1Visible(ctx: ctx, message: "k to Col 2")
 }
 
-// 4. k navigation to Row 1 Column 3 (Col D) maintains y == 0.0
+// 4. k navigation to Row 1 Column 3 (Col D) maintains horizontal ruler offset
 func testKNavigationToRow1Col3MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     ctx.tv.positionCaret(atRow: 1, column: 3)
@@ -152,13 +172,15 @@ func testKNavigationToRow1Col3MaintainsYZero() throws {
     guard ctx.session.cursorPosition.line == 1 else {
         throw NSError(domain: "VisibilityTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected line 1 after k, got \(ctx.session.cursorPosition.line)"])
     }
+    let expectedY = -ctx.colRuler.ruleThickness
     let clipY = ctx.scrollView.contentView.bounds.origin.y
-    guard abs(clipY) < 0.001 else {
-        throw NSError(domain: "VisibilityTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected 0.0"])
+    guard abs(clipY - expectedY) < 0.001 else {
+        throw NSError(domain: "VisibilityTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Clip view origin y is \(clipY), expected \(expectedY)"])
     }
+    try assertRow1Visible(ctx: ctx, message: "k to Col 3")
 }
 
-// 5. Up Arrow navigation maintains y == 0.0 across all columns
+// 5. Up Arrow navigation maintains horizontal ruler offset across all columns
 func testUpArrowNavigationToRow1MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     for col in 0...3 {
@@ -168,24 +190,28 @@ func testUpArrowNavigationToRow1MaintainsYZero() throws {
         guard ctx.session.cursorPosition.line == 1 else {
             throw NSError(domain: "VisibilityTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Up arrow failed to reach line 1 from col \(col)"])
         }
+        let expectedY = -ctx.colRuler.ruleThickness
         let clipY = ctx.scrollView.contentView.bounds.origin.y
-        guard abs(clipY) < 0.001 else {
-            throw NSError(domain: "VisibilityTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "Up arrow to col \(col) resulted in clipY = \(clipY), expected 0.0"])
+        guard abs(clipY - expectedY) < 0.001 else {
+            throw NSError(domain: "VisibilityTests", code: 15, userInfo: [NSLocalizedDescriptionKey: "Up arrow to col \(col) resulted in clipY = \(clipY), expected \(expectedY)"])
         }
+        try assertRow1Visible(ctx: ctx, message: "Up arrow to Col \(col)")
     }
 }
 
-// 6. positionCaret(atRow: 0, column: ...) maintains y == 0.0
+// 6. positionCaret(atRow: 0, column: ...) maintains horizontal ruler offset
 func testPositionCaretRow0MaintainsYZero() throws {
     let ctx = SpreadsheetVisibilityTestContext()
     for col in 0...3 {
         // First move down so positionCaret has to adjust
         ctx.tv.positionCaret(atRow: 2, column: col)
         ctx.tv.positionCaret(atRow: 0, column: col)
+        let expectedY = -ctx.colRuler.ruleThickness
         let clipY = ctx.scrollView.contentView.bounds.origin.y
-        guard abs(clipY) < 0.001 else {
-            throw NSError(domain: "VisibilityTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "positionCaret row 0 col \(col) clipY = \(clipY), expected 0.0"])
+        guard abs(clipY - expectedY) < 0.001 else {
+            throw NSError(domain: "VisibilityTests", code: 16, userInfo: [NSLocalizedDescriptionKey: "positionCaret row 0 col \(col) clipY = \(clipY), expected \(expectedY)"])
         }
+        try assertRow1Visible(ctx: ctx, message: "positionCaret row 0 col \(col)")
     }
 }
 
@@ -204,16 +230,18 @@ func testDownThirtyThenUpToRow1AllColumns() throws {
         guard midY > 0 else { throw fail(21, "col \(col): expected mid-document scroll (y > 0), got \(midY)") }
         for _ in 0..<50 { sendKey(ctx.tv, char: "k") }
         guard ctx.session.cursorPosition.line == 1 else { throw fail(22, "col \(col): expected line 1, got \(ctx.session.cursorPosition.line)") }
+        let expectedY = -ctx.colRuler.ruleThickness
         let clipY = ctx.scrollView.contentView.bounds.origin.y
-        guard abs(clipY) < 0.001 else { throw fail(23, "col \(col): clip y = \(clipY), expected 0") }
+        guard abs(clipY - expectedY) < 0.001 else { throw fail(23, "col \(col): clip y = \(clipY), expected \(expectedY)") }
         let loc = ctx.tv.selectedRange().location
         guard let lm = ctx.tv.layoutManager, let tc = ctx.tv.textContainer else { throw fail(24, "no layout manager") }
         let glyph = lm.glyphIndexForCharacter(at: 0)
         let rowRect = lm.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: tc)
             .offsetBy(dx: ctx.tv.textContainerOrigin.x, dy: ctx.tv.textContainerOrigin.y)
-        guard ctx.tv.visibleRect.intersects(rowRect), ctx.tv.visibleRect.minY <= rowRect.minY + 0.001 else {
+        guard ctx.tv.visibleRect.intersects(rowRect) else {
             throw fail(25, "col \(col): Row 1 rect \(rowRect) not within visibleRect \(ctx.tv.visibleRect) (caret loc \(loc))")
         }
+        try assertRow1Visible(ctx: ctx, message: "Down 50 then Up 50 to Col \(col)")
     }
 }
 

@@ -255,6 +255,16 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    public var verticalRulerOffset: CGFloat {
+        guard let sv = enclosingScrollView, sv.hasVerticalRuler, sv.rulersVisible else { return 0 }
+        return -(sv.verticalRulerView?.ruleThickness ?? 0)
+    }
+
+    public var horizontalRulerOffset: CGFloat {
+        guard let sv = enclosingScrollView, sv.hasHorizontalRuler, sv.rulersVisible else { return 0 }
+        return -(sv.horizontalRulerView?.ruleThickness ?? 0)
+    }
+
     public func pinViewportToTopLeft() {
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
@@ -267,38 +277,39 @@ open class VimMDTextView: NSTextView {
             onCursorMoved?()
         }
         if let scrollView = self.enclosingScrollView {
-            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
-            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
+            let xOffset = verticalRulerOffset
+            let yOffset = horizontalRulerOffset
+            scrollView.contentView.scroll(to: NSPoint(x: xOffset, y: yOffset))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
-    /// After `scrollRangeToVisible`, repairs the clip view's vertical origin.
+    /// After `scrollRangeToVisible`, repairs the clip view's vertical origin so Row 1 is not occluded.
     ///
-    /// NOTE: the negative-y behavior (clip `bounds.origin.y` of about -35 / -29.5 after keyboard
-    /// navigation to Row 1 in a spreadsheet with the attached `ColumnLetterRulerView`) was
-    /// established empirically, verified by the reproducing tests in
-    /// `Row1KeyboardNavigationVisibilityTests`; it is not derived from AppKit documentation.
+    /// When rulers are visible in a spreadsheet, AppKit places the horizontal ruler at the top of
+    /// the scroll view. To position the document text view below the horizontal ruler,
+    /// `clip.bounds.origin.y` must align to `horizontalRulerOffset` (`-horizontalRulerThickness`).
     ///
-    /// - Tabular documents on line 1: pin y to 0 (x preserved) so Row 1 is never hidden, but only
-    ///   when the caret remains visible at y == 0 (a tall wrapped first row must not lose the caret).
-    /// - Everything else: only clamp a negative y back to 0, so wrapped prose with a long first
-    ///   line keeps the caret on-screen.
+    /// - Tabular documents on line 1: pin y to `horizontalRulerOffset` (x preserved) so Row 1 is
+    ///   never occluded behind the horizontal ruler, but only when the caret remains visible within
+    ///   the viewport.
+    /// - Everything else: only clamp a negative y back to `horizontalRulerOffset`.
     private func keepTopRowVisibleIfNeeded(line: Int, caretLocation: Int) {
         guard let scrollView = self.enclosingScrollView else { return }
         let clip = scrollView.contentView
+        let yOffset = horizontalRulerOffset
         if isTabularDocument && line == 1 {
             let caretBottom = insertionBaseRect(at: caretLocation).maxY
             if caretBottom <= clip.bounds.height {
-                if abs(clip.bounds.origin.y) > 0.001 {
-                    clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+                if abs(clip.bounds.origin.y - yOffset) > 0.001 {
+                    clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: yOffset))
                 }
                 scrollView.reflectScrolledClipView(clip)
                 return
             }
         }
-        if clip.bounds.origin.y < 0 {
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+        if clip.bounds.origin.y < yOffset {
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: yOffset))
             scrollView.reflectScrolledClipView(clip)
         }
     }
@@ -309,8 +320,9 @@ open class VimMDTextView: NSTextView {
         }
         self.scrollToBeginningOfDocument(nil)
         if let scrollView = self.enclosingScrollView {
-            let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
-            scrollView.contentView.scroll(to: NSPoint(x: rulerOffset, y: 0))
+            let xOffset = verticalRulerOffset
+            let yOffset = horizontalRulerOffset
+            scrollView.contentView.scroll(to: NSPoint(x: xOffset, y: yOffset))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }

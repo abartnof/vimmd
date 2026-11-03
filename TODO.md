@@ -335,6 +335,17 @@ This document tracks all active milestones, user requirements, and architectural
   - [x] **CI & Test Suite Integration**:
     - [x] Integrate stress test suite into `scripts/test.sh` (Suite #11) and provide standalone benchmark script `scripts/stress_test.sh`.
 
+- [x] **Milestone AK: Spreadsheet Horizontal Ruler Height Normalization & Row 1/2 Viewport Occlusion Fix**
+  - [x] **Column Letter Header Height Normalization**:
+    - [x] In `ColumnLetterRulerView`: set `reservedThicknessForMarkers = 0.0` to eliminate 15.0pt of dead marker space that unnecessarily inflated header height to 35.0pt.
+    - [x] Set `ruleThickness = 20.0 * uiScale` with tight, centered vertical alignment so header column variables (`A, B, C...`) are compact and proportional.
+  - [x] **Row 1 & Row 2 Viewport Occlusion Fix**:
+    - [x] In `VimMDTextView`: compute vertical ruler offset $Y$: when `hasHorizontalRuler && rulersVisible`, the clip view origin $y$ must be `-horizRulerThickness` (just as $x$ is `-vertRulerThickness`), positioning Row 1 immediately below the horizontal ruler rather than behind it.
+    - [x] Update `resetScrollToTopLeft()`, `pinViewportToTopLeft()`, and `keepTopRowVisibleIfNeeded()` to respect `-horizRulerThickness` instead of forcing `y = 0.0`.
+  - [x] **TDD & Visual Parity Verification**:
+    - [x] Added regression tests in `Tests/ViewsTests/SpreadsheetHeaderRulerOcclusionTests.swift` asserting Row 1 and Row 2 bounding rects in the window/scroll view do NOT intersect `ColumnLetterRulerView.frame`.
+    - [x] Ensured all 11 automated test suites in `scripts/test.sh` and 12 stress benchmarks in `scripts/stress_test.sh` compile and pass 100% green.
+
 ---
 
 ## 3. Function & Schema Verification Matrix

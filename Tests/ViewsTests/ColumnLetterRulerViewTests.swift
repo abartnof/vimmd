@@ -53,6 +53,12 @@ func testRulerInitializationAndOrientation() throws {
     guard ruler.ruleThickness >= 18.0 && ruler.ruleThickness <= 30.0 else {
         throw NSError(domain: "ViewsTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Ruler thickness should be between 18 and 30 pt, got \(ruler.ruleThickness)"])
     }
+    guard ruler.reservedThicknessForMarkers == 0.0 else {
+        throw NSError(domain: "ViewsTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "reservedThicknessForMarkers should be 0.0, got \(ruler.reservedThicknessForMarkers)"])
+    }
+    guard abs(ruler.requiredThickness - ruler.ruleThickness) < 0.001 else {
+        throw NSError(domain: "ViewsTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "requiredThickness (\(ruler.requiredThickness)) should equal ruleThickness (\(ruler.ruleThickness))"])
+    }
 }
 
 func testRulerVisibilityForTabularDocuments() throws {

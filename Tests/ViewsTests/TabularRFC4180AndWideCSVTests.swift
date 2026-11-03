@@ -234,7 +234,6 @@ func testViewportTopLeftPinningCell11Visible() throws {
     // Verify viewport is pinned at top-left
     tv.pinViewportToTopLeft()
 
-    let visibleOrigin = scrollView.documentVisibleRect.origin
     let rulerOffset: CGFloat = (scrollView.hasVerticalRuler && scrollView.rulersVisible) ? -(scrollView.verticalRulerView?.ruleThickness ?? 0) : 0
     let clipOriginX = scrollView.contentView.bounds.origin.x
 
@@ -246,11 +245,14 @@ func testViewportTopLeftPinningCell11Visible() throws {
         )
     }
 
-    guard abs(visibleOrigin.y) < 0.5 else {
+    let yRulerOffset: CGFloat = (scrollView.hasHorizontalRuler && scrollView.rulersVisible) ? -(scrollView.horizontalRulerView?.ruleThickness ?? 0) : 0
+    let clipOriginY = scrollView.contentView.bounds.origin.y
+
+    guard abs(clipOriginY - yRulerOffset) < 0.5 else {
         throw NSError(
             domain: "TabularRFC4180Tests",
             code: 43,
-            userInfo: [NSLocalizedDescriptionKey: "Expected visible origin y at 0, got \(visibleOrigin.y)"]
+            userInfo: [NSLocalizedDescriptionKey: "Expected clip origin y at ruler offset \(yRulerOffset), got \(clipOriginY)"]
         )
     }
 

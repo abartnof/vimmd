@@ -18,6 +18,7 @@ open class ColumnLetterRulerView: NSRulerView {
         }
         set {
             _customUiScale = newValue
+            self.reservedThicknessForMarkers = 0.0
             self.ruleThickness = 20.0 * newValue
             self.needsDisplay = true
         }
@@ -95,6 +96,7 @@ open class ColumnLetterRulerView: NSRulerView {
     }
 
     private func setupRuler() {
+        self.reservedThicknessForMarkers = 0.0
         self.ruleThickness = 20.0 * self.uiScale
         super.accessoryView = nil
         super.markers = nil
@@ -136,6 +138,7 @@ open class ColumnLetterRulerView: NSRulerView {
     }
 
     @objc private func rulerNeedsRedraw(_ notification: Notification) {
+        self.reservedThicknessForMarkers = 0.0
         if let sv = self.scrollView, _customUiScale == nil, abs(self.uiScale - sv.magnification) > 0.001 {
             self.ruleThickness = 20.0 * sv.magnification
         }
