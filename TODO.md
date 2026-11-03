@@ -346,6 +346,36 @@ This document tracks all active milestones, user requirements, and architectural
     - [x] Added regression tests in `Tests/ViewsTests/SpreadsheetHeaderRulerOcclusionTests.swift` asserting Row 1 and Row 2 bounding rects in the window/scroll view do NOT intersect `ColumnLetterRulerView.frame`.
     - [x] Ensured all 11 automated test suites in `scripts/test.sh` and 12 stress benchmarks in `scripts/stress_test.sh` compile and pass 100% green.
 
+- [x] **Milestone AL: Spreadsheet Freeze Panes Fix (First Column & Top Row)**
+  - [x] **Freeze First Column Fix (cf. Image Report)**:
+    - [x] Root cause: `drawFrozenPanes` in `VimMDTextView` painted an opaque `windowBackgroundColor` over Column 0 (`col0`) without drawing cell texts, attributes, or horizontal gridlines, blanking out Column A completely during horizontal scrolling.
+    - [x] Correctly render frozen Column A cell contents across visible rows with proper background fill, syntax styling, cell bounds clipping, and separating border.
+    - [x] Coordinate with horizontal scrolling so Column A remains pinned at viewport $x = 0$ while subsequent columns scroll smoothly beneath it.
+  - [x] **Freeze Top Row Fix**:
+    - [x] Root cause: `drawFrozenPanes` drew Row 0 at a fixed vertical offset without properly handling horizontal scroll offsets, ruler thickness, and multi-column clipping.
+    - [x] Correctly render frozen Row 1 / Header row pinned beneath `ColumnLetterRulerView` during vertical scrolling with full text, cell borders, and synchronized horizontal offset.
+    - [x] Properly composite the top-left intersection cell (Row 1, Column A) when both Freeze First Row and Freeze First Column are active simultaneously.
+  - [x] **Mouse Click & Hit-Testing Resolution**:
+    - [x] In `rowIndex(at:)` / `columnIndex(at:)` / `mouseDown(with:)`, clicks within pinned header and pinned column correctly resolve to Row 0 / Col 0 cells.
+    - [x] Added unit tests in `Tests/ViewsTests/SpreadsheetFreezePanesTests.swift`.
+
+- [x] **Milestone AM: Column Resizing via Column Letter Ruler Bar (`ColumnLetterRulerView`)**
+  - [x] **Relocate Divider Hit-Testing & Dragging**:
+    - [x] Move column resizing handle and divider detection from the document body / first row of `VimMDTextView` up to `ColumnLetterRulerView`.
+    - [x] Display horizontal resize cursor (`NSCursor.resizeLeftRight`) when hovering over column partition boundaries in `ColumnLetterRulerView`.
+    - [x] Support click-and-drag resizing from the column letter bar to interactively adjust column width in real-time.
+    - [x] Support double-clicking column divider in `ColumnLetterRulerView` to reset custom width to auto-fit.
+    - [x] Eliminate column resize mouse tracking on `VimMDTextView`'s first row, ensuring clicking anywhere on header cells exclusively places the Vim caret or initiates text selection.
+
+- [x] **Milestone AN: Window Title Simplification (Clean Document File Name)**
+  - [x] **Remove Mode String Suffix from Window Title**:
+    - [x] In `VimMDDocument.swift` (`makeWindowControllers` and `updateStatusDisplay`): set `window.title` directly to `self.displayName ?? "Untitled"`.
+    - [x] Completely remove mode string suffix (` — [NORMAL]`, ` — [INSERT]`, ` — [VISUAL]`, etc.) from the window title bar.
+    - [x] Rely on the status bar mode pill badge (`modeBadgeView`) and gutter line indicator as the primary visual mode indicators.
+  - [x] **Test-Driven Verification**:
+    - [x] Update `Tests/AppTests/VimMDDocumentTests.swift` to verify `window.title == doc.displayName ?? "Untitled"` throughout mode transitions (`NORMAL` -> `INSERT` -> `NORMAL`), asserting no mode suffix is appended.
+    - [x] Verify full suite passes with clean compilation and zero regressions.
+
 ---
 
 ## 3. Function & Schema Verification Matrix
@@ -370,7 +400,9 @@ Tracks live verification status of all capabilities across each supported docume
 | **Search Pipeline** | `/pattern<CR>`, `n`, `N`, `p` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Lifecycle & Safety** | `:w`, `ZZ`, `:q` (E37 block), `:q!` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
 | **Zoom Controls** | `Cmd+=`, `Cmd+-`, `Cmd+0` | Verified (M-P) | Verified (M-P) | Verified (M-P) |
-| **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (M-P) | N/A (Disabled) | N/A (Disabled) |
+| **Freeze Panes** | `Freeze First Row`, `Freeze Col` | Verified (M-AL) | N/A (Disabled) | N/A (Disabled) |
+| **Column Resizing** | Drag divider in Column Letter Bar | Verified (M-AM) | N/A | N/A |
+| **Window Title Bar** | Clean file name without mode suffix | Verified (M-AN) | Verified (M-AN) | Verified (M-AN) |
 | **Table Formatting** | Neutral gridlines, text wrap (default ON) | Verified (M-X) | N/A (GFM Tables) | N/A (Monospace) |
 | **Cell Caret Positioning** | Click cell -> Caret inside cell (inc. Row 1 / Col A) | Verified (M-X) | N/A (Standard Caret) | N/A (Standard Caret) |
 | **Copy Gestures** | Ruler Row & Column Header Drag-to-Copy | Verified (M-X) | N/A | N/A |
@@ -400,4 +432,7 @@ Tracks live verification status of all capabilities across each supported docume
 - [x] Live In-Place Tabular Syntax Rendering for CSV & TSV (Milestone C)
 - [x] Excel-Style Spreadsheet View for CSV & TSV: Gridlines, Neutral Palette, Dynamic Sizing, Wrap, Freeze Panes, and Copy Gestures (Milestone M)
 - [x] Default Spreadsheet Cell Wrapping & Ruler-Based Row/Column Copy (Milestone X)
+- [x] Spreadsheet Freeze Panes Fix for Top Row & First Column (Milestone AL)
+- [x] Spreadsheet Column Resizing via Column Letter Ruler Bar (Milestone AM)
+- [x] Window Title Mode Indicator Removal & Clean File Name Display (Milestone AN)
 
