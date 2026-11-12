@@ -404,9 +404,13 @@ open class VimMDTextView: NSTextView {
 
     public func availableContentWidth() -> CGFloat {
         guard let sv = enclosingScrollView else { return self.frame.width }
-        var width = sv.contentSize.width
+        let mag = max(0.001, sv.magnification)
+        var width = sv.contentView.bounds.width
+        if width <= 0 {
+            width = sv.contentSize.width / mag
+        }
         if sv.rulersVisible && sv.hasVerticalRuler, let ruler = sv.verticalRulerView {
-            width = max(0, width - ruler.ruleThickness)
+            width = max(0, width - (ruler.ruleThickness / mag))
         }
         return width
     }
@@ -420,7 +424,7 @@ open class VimMDTextView: NSTextView {
             textContainer.containerSize = NSSize(width: containerWidth, height: CGFloat.greatestFiniteMagnitude)
             self.isHorizontallyResizable = false
             self.autoresizingMask = [.width]
-            self.maxSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+            self.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             if let scrollView = self.enclosingScrollView {
                 scrollView.hasHorizontalScroller = false
                 if abs(self.frame.width - contentWidth) > 0.5 {
@@ -444,21 +448,38 @@ open class VimMDTextView: NSTextView {
         }
     }
 
+    private func availableViewportHeight() -> CGFloat {
+        return enclosingScrollView?.contentView.bounds.height
+            ?? enclosingScrollView?.contentSize.height
+            ?? minSize.height
+    }
+
+    private func estimatedLineBasedHeight() -> CGFloat {
+        let linesCount = session?.lineCount ?? (textStorage?.string as NSString?)?.components(separatedBy: "\n").count ?? 1
+        return CGFloat(linesCount) * 18.0 + self.textContainerInset.height * 2
+    }
+
     public func updateFrameForUnwrappedLines() {
         let viewportWidth = availableContentWidth()
-        let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
+        let viewportHeight = availableViewportHeight()
 
         var tableWidth: CGFloat = 0.0
+        let contentHeight: CGFloat
         if isTabularDocument {
             tableWidth = columnWidths().reduce(0, +)
-        } else if let used = layoutManager?.usedRect(for: textContainer ?? NSTextContainer()) {
+            contentHeight = estimatedLineBasedHeight()
+        } else if let layoutManager = self.layoutManager, let textContainer = self.textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let used = layoutManager.usedRect(for: textContainer)
             tableWidth = used.size.width
+            let textHeight = used.size.height > 0 ? used.size.height : 18.0
+            contentHeight = textHeight + self.textContainerInset.height * 2
+        } else {
+            contentHeight = estimatedLineBasedHeight()
         }
 
-        let linesCount = session?.lineCount ?? (textStorage?.string as NSString?)?.components(separatedBy: "\n").count ?? 1
-        let estimatedHeight = CGFloat(linesCount) * 18.0 + self.textContainerInset.height * 2
         let targetWidth = max(viewportWidth, tableWidth + self.textContainerInset.width * 2 + 50.0)
-        let targetHeight = max(viewportHeight, ceil(estimatedHeight))
+        let targetHeight = max(viewportHeight, ceil(contentHeight))
         self.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
         if self.frame.origin != .zero {
             self.setFrameOrigin(.zero)
@@ -500,7 +521,7 @@ open class VimMDTextView: NSTextView {
         }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
-        let viewportHeight = enclosingScrollView?.contentSize.height ?? minSize.height
+        let viewportHeight = availableViewportHeight()
         let targetHeight = max(viewportHeight, ceil(usedRect.size.height + self.textContainerInset.height * 2))
         if abs(self.frame.size.height - targetHeight) > 1.0 {
             self.setFrameSize(NSSize(width: self.frame.size.width, height: targetHeight))

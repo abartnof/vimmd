@@ -447,6 +447,10 @@ open class VimMDDocument: NSDocument {
             scrollView.frame = NSRect(x: 0, y: statusHeight, width: contentBounds.width, height: max(0, contentBounds.height - statusHeight))
         }
 
+        if let tv = self.textView, tv.wrapLines && !tv.isTabularDocument {
+            tv.applyWrapLinesSetting()
+        }
+
         // 3. Status bar accessories scaling
         let chipHeight = ceil(18.0 * clamped)
         let chipWidth = ceil(78.0 * clamped)
