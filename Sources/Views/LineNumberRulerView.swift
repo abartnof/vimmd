@@ -213,6 +213,15 @@ open class LineNumberRulerView: NSRulerView {
         drawHashMarksAndLabels(in: dirtyRect)
     }
 
+    public func tabularRowRect(for rowIndex: Int) -> NSRect? {
+        guard let tv = (self.clientView as? VimMDTextView) ?? (self.scrollView?.documentView as? VimMDTextView),
+              tv.isTabularDocument,
+              let rRect = tv.rowRect(for: rowIndex) else {
+            return nil
+        }
+        return self.convert(rRect, from: tv)
+    }
+
     override open func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = (self.clientView as? NSTextView) ?? (self.scrollView?.documentView as? NSTextView),
               let layoutManager = textView.layoutManager,
@@ -246,8 +255,45 @@ open class LineNumberRulerView: NSRulerView {
             return
         }
 
-        // Visible glyphs in text view
         let visibleRect = textView.visibleRect
+
+        if let vimTV = textView as? VimMDTextView, vimTV.isTabularDocument {
+            let recordRanges = vimTV.tabularRecordRanges()
+            guard !recordRanges.isEmpty else {
+                drawLineNumber(1, y: textView.textContainerInset.height * uiScale, rowHeight: 18.0 * uiScale, isActive: (activeLine == 1))
+                return
+            }
+
+            let startRow = max(0, vimTV.rowIndex(at: NSPoint(x: 0, y: visibleRect.minY), clamped: true) ?? 0)
+            var r = startRow
+            var lastRowRect: NSRect?
+            while r < recordRanges.count {
+                guard let rRect = vimTV.rowRect(for: r, recordRanges: recordRanges) else { break }
+                if rRect.minY > visibleRect.maxY { break }
+                lastRowRect = rRect
+                let rectInRuler = self.convert(rRect, from: vimTV)
+                let lineNumber = r + 1
+                self.drawLineNumber(lineNumber, y: rectInRuler.minY, rowHeight: rectInRuler.height, isActive: (lineNumber == activeLine))
+                r += 1
+            }
+
+            // Trailing empty line if document ends with newline
+            let lastChar = contentString.character(at: docLength - 1)
+            if (lastChar == 10 || lastChar == 13), r == recordRanges.count {
+                if let prevRect = lastRowRect ?? vimTV.rowRect(for: recordRanges.count - 1, recordRanges: recordRanges) {
+                    let baseHeight = TabularCellLayout.singleLineHeight(for: vimTV.font?.pointSize ?? 13.0)
+                    let extraRect = NSRect(x: prevRect.minX, y: prevRect.maxY, width: prevRect.width, height: baseHeight)
+                    if extraRect.minY <= visibleRect.maxY {
+                        let extraRectInRuler = self.convert(extraRect, from: vimTV)
+                        let extraLineNumber = recordRanges.count + 1
+                        self.drawLineNumber(extraLineNumber, y: extraRectInRuler.minY, rowHeight: extraRectInRuler.height, isActive: (extraLineNumber == activeLine))
+                    }
+                }
+            }
+            return
+        }
+
+        // Visible glyphs in text view
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
         guard glyphRange.length > 0 else {
             drawLineNumber(1, y: textView.textContainerInset.height * uiScale, rowHeight: 18.0 * uiScale, isActive: (activeLine == 1))

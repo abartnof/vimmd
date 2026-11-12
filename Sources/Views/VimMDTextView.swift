@@ -60,9 +60,7 @@ open class VimMDTextView: NSTextView {
     public var wrapTableCells: Bool = false {
         didSet {
             updateSyntaxStyling(force: true)
-            if !wrapTableCells {
-                updateFrameForUnwrappedLines()
-            }
+            updateFrameForUnwrappedLines()
             needsDisplay = true
         }
     }
@@ -90,11 +88,16 @@ open class VimMDTextView: NSTextView {
     public var currentSelectedRange: NSRange = NSRange(location: 0, length: 0)
     public var activeMarkedRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
+    public var usesCustomTabularCellRendering: Bool {
+        return isTabularDocument
+    }
+
     public let syntaxResolver = MarkdownSyntaxResolver()
     public let tabularResolver = TabularSyntaxResolver()
     private var cachedColumnWidths: [CGFloat]?
     private var cachedRecordRanges: [NSRange]?
     private var cachedRecordRangesLength: Int = -1
+    private var cachedRowMetrics: TabularCellLayout.RowMetrics?
 
     public func tabularRecordRanges() -> [NSRange] {
         guard let storage = self.textStorage else { return [] }
@@ -113,11 +116,34 @@ open class VimMDTextView: NSTextView {
     public func invalidateRecordRangesCache() {
         cachedRecordRanges = nil
         cachedRecordRangesLength = -1
+        cachedRowMetrics = nil
     }
 
     public func invalidateColumnWidthsCache() {
         cachedColumnWidths = nil
         invalidateRecordRangesCache()
+    }
+
+    public func rowMetrics() -> TabularCellLayout.RowMetrics {
+        guard let storage = self.textStorage else { return .empty }
+        let fullString = storage.string as NSString
+        let records = tabularRecordRanges()
+        if let cached = cachedRowMetrics, cached.rowHeights.count == records.count {
+            return cached
+        }
+        let widths = columnWidths()
+        let fontSize = self.font?.pointSize ?? 13.0
+        let metrics = TabularCellLayout.computeRowMetrics(
+            in: fullString,
+            recordRanges: records,
+            colWidths: widths,
+            isTSV: isTSV,
+            wrapTableCells: wrapTableCells,
+            fontSize: fontSize,
+            resolver: tabularResolver
+        )
+        cachedRowMetrics = metrics
+        return metrics
     }
 
     public enum DocumentSyntaxType: Equatable {
@@ -195,6 +221,9 @@ open class VimMDTextView: NSTextView {
 
     private func setupDefaults() {
         super.usesRuler = false
+        if !(self.layoutManager is TabularLayoutManager), let container = self.textContainer {
+            container.replaceLayoutManager(TabularLayoutManager())
+        }
         self.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         self.textColor = NSColor.textColor
         self.typingAttributes = [
@@ -467,7 +496,7 @@ open class VimMDTextView: NSTextView {
         let contentHeight: CGFloat
         if isTabularDocument {
             tableWidth = columnWidths().reduce(0, +)
-            contentHeight = estimatedLineBasedHeight()
+            contentHeight = rowMetrics().totalHeight + self.textContainerInset.height * 2
         } else if let layoutManager = self.layoutManager, let textContainer = self.textContainer {
             layoutManager.ensureLayout(for: textContainer)
             let used = layoutManager.usedRect(for: textContainer)
@@ -749,6 +778,7 @@ open class VimMDTextView: NSTextView {
     }
 
     public var lastDrawnCursorRect: NSRect?
+    private let tabularCellStack = TabularCellLayout.CellTextKitStack()
 
     public func fontAt(characterIndex: Int) -> NSFont {
         let fallbackFont = self.font ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -782,6 +812,13 @@ open class VimMDTextView: NSTextView {
         if sub.contains("\n") || sub.contains("\r") {
             return defaultWidth
         }
+        if isTabularDocument {
+            if sub == "," || sub == "\t" {
+                return defaultWidth
+            }
+            let measured = (sub as NSString).size(withAttributes: [.font: effectiveFont]).width
+            return (measured > 0 && measured < 200) ? measured : defaultWidth
+        }
         let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
         guard glyphRange.location != NSNotFound && glyphRange.location + glyphRange.length <= layoutManager.numberOfGlyphs else {
             return defaultWidth
@@ -791,6 +828,26 @@ open class VimMDTextView: NSTextView {
     }
 
     public func insertionBaseRect(at charIndex: Int) -> NSRect {
+        if isTabularDocument, let storage = self.textStorage {
+            let fullString = storage.string as NSString
+            let records = tabularRecordRanges()
+            let metrics = rowMetrics()
+            let widths = columnWidths()
+            return TabularCellLayout.insertionBaseRect(
+                at: charIndex,
+                in: fullString,
+                recordRanges: records,
+                rowOriginsY: metrics.rowOriginsY,
+                rowHeights: metrics.rowHeights,
+                colWidths: widths,
+                textContainerInset: self.textContainerInset,
+                isTSV: isTSV,
+                wrapTableCells: wrapTableCells,
+                fontSize: self.font?.pointSize ?? 13.0,
+                resolver: tabularResolver,
+                stack: tabularCellStack
+            )
+        }
         let effectiveFont = fontAt(characterIndex: charIndex)
         let defaultHeight = effectiveFont.pointSize + 3.0
 
@@ -872,51 +929,63 @@ open class VimMDTextView: NSTextView {
         let modeColor = VimModeTheme.color(for: mode)
         let charIndex = selectedRange().location
         let cellWidth = glyphCellWidth(at: charIndex)
-        let cursorRect = VimModeTheme.calculateCursorRect(for: morph, proposedRect: rect, cellWidth: cellWidth)
+        let proposedRect = isTabularDocument ? insertionBaseRect(at: charIndex) : rect
+        let cursorRect = VimModeTheme.calculateCursorRect(for: morph, proposedRect: proposedRect, cellWidth: cellWidth)
 
         let nsStr = self.string as NSString
         let hasValidChar = charIndex >= 0 && charIndex < nsStr.length
 
-        if flag {
-            modeColor.setFill()
-            cursorRect.fill()
-
-            if morph == .block && hasValidChar {
-                let charRange = nsStr.rangeOfComposedCharacterSequence(at: charIndex)
-                let sub = nsStr.substring(with: charRange)
-                if !sub.contains("\n") && !sub.contains("\r") && !sub.trimmingCharacters(in: .whitespaces).isEmpty {
-                    let effectiveFont = fontAt(characterIndex: charIndex)
-                    let invColor = NSColor.textBackgroundColor
-                    let attr: [NSAttributedString.Key: Any] = [
-                        .font: effectiveFont,
-                        .foregroundColor: invColor
-                    ]
-                    let strSize = (sub as NSString).size(withAttributes: attr)
-                    let textY = cursorRect.origin.y + max(0, (cursorRect.height - strSize.height) / 2.0)
-                    (sub as NSString).draw(at: NSPoint(x: cursorRect.origin.x, y: textY), withAttributes: attr)
-                }
-            }
-        } else {
-            self.backgroundColor.setFill()
-            cursorRect.fill()
-
-            // Only redraw character when restoring from a block cursor.
-            // Never draw characters inside the 2pt vertical bar or underline!
-            if morph == .block && hasValidChar {
-                let charRange = nsStr.rangeOfComposedCharacterSequence(at: charIndex)
-                let sub = nsStr.substring(with: charRange)
-                if !sub.contains("\n") && !sub.contains("\r") && !sub.trimmingCharacters(in: .whitespaces).isEmpty {
-                    let effectiveFont = fontAt(characterIndex: charIndex)
-                    let attr: [NSAttributedString.Key: Any] = [
-                        .font: effectiveFont,
-                        .foregroundColor: self.textColor ?? NSColor.textColor
-                    ]
-                    let strSize = (sub as NSString).size(withAttributes: attr)
-                    let textY = cursorRect.origin.y + max(0, (cursorRect.height - strSize.height) / 2.0)
-                    (sub as NSString).draw(at: NSPoint(x: cursorRect.origin.x, y: textY), withAttributes: attr)
+        var isHeaderRow = false
+        var clipCellRect: NSRect?
+        if isTabularDocument {
+            let probe = NSPoint(x: cursorRect.midX, y: cursorRect.midY)
+            if let rIdx = rowIndex(at: probe, clamped: true),
+               let rRect = rowRect(for: rIdx) {
+                isHeaderRow = (rIdx == 0)
+                if let cIdx = columnIndex(at: probe, clamped: true),
+                   let cRect = columnRect(for: cIdx) {
+                    clipCellRect = NSRect(x: cRect.minX, y: rRect.minY, width: cRect.width, height: rRect.height)
                 }
             }
         }
+
+        NSGraphicsContext.saveGraphicsState()
+        if let cellClip = clipCellRect {
+            NSBezierPath(rect: cellClip).addClip()
+        }
+
+        if flag {
+            modeColor.setFill()
+            cursorRect.fill()
+        } else {
+            self.backgroundColor.setFill()
+            cursorRect.fill()
+            if isHeaderRow {
+                TabularSyntaxResolver.headerBackgroundColor.setFill()
+                cursorRect.fill()
+            }
+        }
+
+        // Only draw character inside a block cursor (inverted when on, restored when off).
+        // Never draw characters inside the 2pt vertical bar or underline, or for hidden tabular delimiters.
+        if morph == .block && hasValidChar {
+            let charRange = nsStr.rangeOfComposedCharacterSequence(at: charIndex)
+            let sub = nsStr.substring(with: charRange)
+            let isHiddenDelim = isTabularDocument && (sub == (isTSV ? "\t" : ","))
+            if !isHiddenDelim && !sub.contains("\n") && !sub.contains("\r") && !sub.trimmingCharacters(in: .whitespaces).isEmpty {
+                let effectiveFont = fontAt(characterIndex: charIndex)
+                let fgColor = flag ? NSColor.textBackgroundColor : (self.textColor ?? NSColor.textColor)
+                let attr: [NSAttributedString.Key: Any] = [
+                    .font: effectiveFont,
+                    .foregroundColor: fgColor
+                ]
+                let strSize = (sub as NSString).size(withAttributes: attr)
+                let textY = cursorRect.origin.y + max(0, (cursorRect.height - strSize.height) / 2.0)
+                (sub as NSString).draw(at: NSPoint(x: cursorRect.origin.x, y: textY), withAttributes: attr)
+            }
+        }
+
+        NSGraphicsContext.restoreGraphicsState()
         lastDrawnCursorRect = cursorRect
     }
 
@@ -965,6 +1034,24 @@ open class VimMDTextView: NSTextView {
             return NSRect(x: textContainerInset.width, y: textContainerInset.height, width: bounds.width, height: 18.0)
         }
 
+        if isTabularDocument {
+            let metrics = rowMetrics()
+            let widths = columnWidths()
+            let tableWidth = max(bounds.width, widths.reduce(0, +) + textContainerInset.width * 2)
+            let baseHeight = TabularCellLayout.singleLineHeight(for: self.font?.pointSize ?? 13.0)
+            if rowIndex >= 0 && rowIndex < metrics.rowHeights.count {
+                return NSRect(
+                    x: textContainerInset.width,
+                    y: textContainerInset.height + metrics.rowOriginsY[rowIndex],
+                    width: tableWidth,
+                    height: metrics.rowHeights[rowIndex]
+                )
+            } else {
+                let y = textContainerInset.height + metrics.totalHeight + CGFloat(max(0, rowIndex - metrics.rowHeights.count)) * baseHeight
+                return NSRect(x: textContainerInset.width, y: y, width: tableWidth, height: baseHeight)
+            }
+        }
+
         guard let layoutManager = self.layoutManager, let textContainer = self.textContainer else { return nil }
         layoutManager.ensureLayout(for: textContainer)
 
@@ -996,7 +1083,12 @@ open class VimMDTextView: NSTextView {
             startX += widths[i]
         }
         let colWidth = widths[colIndex]
-        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        let totalHeight: CGFloat
+        if isTabularDocument {
+            totalHeight = max(bounds.height, rowMetrics().totalHeight + textContainerInset.height * 2)
+        } else {
+            totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        }
         return NSRect(x: startX, y: textContainerInset.height, width: colWidth, height: totalHeight)
     }
 
@@ -1527,10 +1619,84 @@ open class VimMDTextView: NSTextView {
     override open func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if isTabularDocument {
+            drawTabularCells(in: dirtyRect)
             drawGridlines(in: dirtyRect)
             drawSelectionAndFlash(in: dirtyRect)
             drawFrozenPanes(in: dirtyRect)
             drawResizeGuide(in: dirtyRect)
+        }
+    }
+
+    public func drawTabularCells(in dirtyRect: NSRect) {
+        guard isTabularDocument, let storage = self.textStorage else { return }
+        let fullString = storage.string as NSString
+        guard fullString.length > 0 else { return }
+
+        let widths = columnWidths()
+        guard !widths.isEmpty else { return }
+        let recordRanges = tabularRecordRanges()
+        guard !recordRanges.isEmpty else { return }
+
+        let fontSize = self.font?.pointSize ?? 13.0
+        let regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+        let selection = selectedRange()
+
+        // Precompute column X offsets
+        var colXOffsets = [CGFloat]()
+        colXOffsets.reserveCapacity(widths.count)
+        var runningX = textContainerInset.width
+        for w in widths {
+            colXOffsets.append(runningX)
+            runningX += w
+        }
+
+        let startRow = max(0, rowIndex(at: NSPoint(x: 0, y: dirtyRect.minY), clamped: true) ?? 0)
+        var r = startRow
+        while r < recordRanges.count {
+            guard let rRect = rowRect(for: r, recordRanges: recordRanges) else { break }
+            if rRect.minY > dirtyRect.maxY { break }
+
+            if r == 0 && rRect.intersects(dirtyRect) {
+                TabularSyntaxResolver.headerBackgroundColor.setFill()
+                NSRect(x: 0, y: rRect.minY, width: max(bounds.width, runningX), height: rRect.height).fill()
+            }
+
+            let lr = recordRanges[r]
+            var contentLen = lr.length
+            while contentLen > 0 {
+                let c = fullString.character(at: lr.location + contentLen - 1)
+                if c == 10 || c == 13 { contentLen -= 1 } else { break }
+            }
+
+            if contentLen > 0 {
+                let contentRange = NSRange(location: lr.location, length: contentLen)
+                let (fields, _) = tabularResolver.parseLine(in: fullString, range: contentRange, isTSV: isTSV)
+                let font = (r == 0) ? boldFont : regularFont
+
+                for field in fields {
+                    let col = field.columnIndex
+                    guard col < widths.count, field.range.length > 0 else { continue }
+                    let colX = colXOffsets[col]
+                    let colW = widths[col]
+                    if colX + colW < dirtyRect.minX || colX > dirtyRect.maxX {
+                        continue
+                    }
+                    let cellRect = NSRect(x: colX, y: rRect.minY, width: colW, height: rRect.height)
+                    let cellText = fullString.substring(with: field.range)
+                    TabularCellLayout.drawCell(
+                        text: cellText,
+                        font: font,
+                        color: NSColor.labelColor,
+                        cellRect: cellRect,
+                        wrap: wrapTableCells,
+                        selectedRange: TabularCellLayout.localSelectionRange(selection: selection, fieldRange: field.range),
+                        stack: tabularCellStack
+                    )
+                }
+            }
+
+            r += 1
         }
     }
 
@@ -1545,7 +1711,7 @@ open class VimMDTextView: NSTextView {
 
         // Vertical column dividers
         var x = textContainerInset.width
-        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        let totalHeight = max(bounds.height, rowMetrics().totalHeight + textContainerInset.height * 2)
         for w in widths {
             x += w
             if x >= dirtyRect.minX - 5 && x <= dirtyRect.maxX + 5 {
@@ -1554,20 +1720,20 @@ open class VimMDTextView: NSTextView {
             }
         }
 
-        // Horizontal row dividers
-        guard let storage = self.textStorage else {
-            NSGraphicsContext.restoreGraphicsState()
-            return
-        }
-        let fullString = storage.string as NSString
-        let recordRanges = tabularResolver.parseRecordRanges(in: fullString, isTSV: isTSV)
-        for (lineIdx, _) in recordRanges.enumerated() {
-            if let rect = rowRect(for: lineIdx) {
+        // Horizontal row dividers (only iterate rows intersecting dirtyRect)
+        let recordRanges = tabularRecordRanges()
+        if !recordRanges.isEmpty {
+            let startRow = max(0, rowIndex(at: NSPoint(x: 0, y: dirtyRect.minY - 5), clamped: true) ?? 0)
+            var r = startRow
+            while r < recordRanges.count {
+                guard let rect = rowRect(for: r, recordRanges: recordRanges) else { break }
+                if rect.minY > dirtyRect.maxY + 5 { break }
                 let y = rect.maxY
                 if y >= dirtyRect.minY - 5 && y <= dirtyRect.maxY + 5 {
                     path.move(to: NSPoint(x: 0, y: floor(y) + 0.5))
                     path.line(to: NSPoint(x: bounds.width, y: floor(y) + 0.5))
                 }
+                r += 1
             }
         }
 
@@ -1608,7 +1774,7 @@ open class VimMDTextView: NSTextView {
         NSColor.controlAccentColor.setStroke()
         let guidePath = NSBezierPath()
         guidePath.lineWidth = 2.0
-        let totalHeight = max(bounds.height, layoutManager?.usedRect(for: textContainer ?? NSTextContainer()).height ?? bounds.height)
+        let totalHeight = max(bounds.height, rowMetrics().totalHeight + textContainerInset.height * 2)
         guidePath.move(to: NSPoint(x: floor(x), y: 0))
         guidePath.line(to: NSPoint(x: floor(x), y: totalHeight))
         guidePath.stroke()
@@ -1630,21 +1796,14 @@ open class VimMDTextView: NSTextView {
 
         let regularFont = NSFont.monospacedSystemFont(ofSize: self.font?.pointSize ?? 13.0, weight: .regular)
         let boldFont = NSFont.monospacedSystemFont(ofSize: self.font?.pointSize ?? 13.0, weight: .bold)
-        let textAttrsRegular: [NSAttributedString.Key: Any] = [
-            .font: regularFont,
-            .foregroundColor: NSColor.labelColor
-        ]
-        let textAttrsBold: [NSAttributedString.Key: Any] = [
-            .font: boldFont,
-            .foregroundColor: NSColor.labelColor
-        ]
 
         let headerRect = pinnedHeaderRect()
         let colRect = pinnedColumnRect()
         let cornerRect = pinnedCornerRect()
+        let selection = selectedRange()
 
-        func extractCellText(row: Int, col: Int) -> String {
-            guard row >= 0 && row < recordRanges.count else { return "" }
+        func extractCellField(row: Int, col: Int) -> (text: String, range: NSRange)? {
+            guard row >= 0 && row < recordRanges.count else { return nil }
             let lr = recordRanges[row]
             var len = lr.length
             while len > 0 {
@@ -1652,8 +1811,12 @@ open class VimMDTextView: NSTextView {
                 if c == 10 || c == 13 { len -= 1 } else { break }
             }
             let (fields, _) = tabularResolver.parseLine(in: fullString, range: NSRange(location: lr.location, length: len), isTSV: isTSV)
-            guard let field = fields.first(where: { $0.columnIndex == col }) else { return "" }
-            return fullString.substring(with: field.range)
+            guard let field = fields.first(where: { $0.columnIndex == col }), field.range.length > 0 else { return nil }
+            return (fullString.substring(with: field.range), field.range)
+        }
+
+        func localSelection(for fieldRange: NSRange) -> NSRange? {
+            return TabularCellLayout.localSelectionRange(selection: selection, fieldRange: fieldRange)
         }
 
         // 1. Frozen First Column
@@ -1690,24 +1853,16 @@ open class VimMDTextView: NSTextView {
                 }
 
                 // Draw cell text
-                let text = extractCellText(row: r, col: 0)
-                if !text.isEmpty {
-                    NSGraphicsContext.saveGraphicsState()
-                    let clip = NSBezierPath(rect: cellRect)
-                    clip.addClip()
-                    let textRect = NSRect(
-                        x: cellRect.origin.x + textContainerInset.width,
-                        y: cellRect.origin.y,
-                        width: max(0, cellRect.width - textContainerInset.width),
-                        height: cellRect.height
+                if let cell = extractCellField(row: r, col: 0) {
+                    TabularCellLayout.drawCell(
+                        text: cell.text,
+                        font: r == 0 ? boldFont : regularFont,
+                        color: NSColor.labelColor,
+                        cellRect: cellRect,
+                        wrap: wrapTableCells,
+                        selectedRange: localSelection(for: cell.range),
+                        stack: tabularCellStack
                     )
-                    (text as NSString).draw(
-                        with: textRect,
-                        options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                        attributes: r == 0 ? textAttrsBold : textAttrsRegular,
-                        context: nil
-                    )
-                    NSGraphicsContext.restoreGraphicsState()
                 }
 
                 // Draw horizontal row gridline at bottom of cell
@@ -1745,24 +1900,16 @@ open class VimMDTextView: NSTextView {
                 if nextX >= pinnedHeader.minX && currentX <= pinnedHeader.maxX {
                     let cellRect = NSRect(x: currentX, y: pinnedHeader.origin.y, width: colW, height: pinnedHeader.height)
 
-                    let text = extractCellText(row: 0, col: colIdx)
-                    if !text.isEmpty {
-                        NSGraphicsContext.saveGraphicsState()
-                        let clip = NSBezierPath(rect: cellRect)
-                        clip.addClip()
-                        let textRect = NSRect(
-                            x: cellRect.origin.x + (colIdx == 0 ? textContainerInset.width : 0),
-                            y: cellRect.origin.y,
-                            width: max(0, cellRect.width - (colIdx == 0 ? textContainerInset.width : 0)),
-                            height: cellRect.height
+                    if let cell = extractCellField(row: 0, col: colIdx) {
+                        TabularCellLayout.drawCell(
+                            text: cell.text,
+                            font: boldFont,
+                            color: NSColor.labelColor,
+                            cellRect: cellRect,
+                            wrap: wrapTableCells,
+                            selectedRange: localSelection(for: cell.range),
+                            stack: tabularCellStack
                         )
-                        (text as NSString).draw(
-                            with: textRect,
-                            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                            attributes: textAttrsBold,
-                            context: nil
-                        )
-                        NSGraphicsContext.restoreGraphicsState()
                     }
 
                     NSColor.separatorColor.setStroke()
@@ -1792,24 +1939,16 @@ open class VimMDTextView: NSTextView {
             TabularSyntaxResolver.headerBackgroundColor.setFill()
             pinnedCorner.fill()
 
-            let text = extractCellText(row: 0, col: 0)
-            if !text.isEmpty {
-                NSGraphicsContext.saveGraphicsState()
-                let clip = NSBezierPath(rect: pinnedCorner)
-                clip.addClip()
-                let textRect = NSRect(
-                    x: pinnedCorner.origin.x + textContainerInset.width,
-                    y: pinnedCorner.origin.y,
-                    width: max(0, pinnedCorner.width - textContainerInset.width),
-                    height: pinnedCorner.height
+            if let cell = extractCellField(row: 0, col: 0) {
+                TabularCellLayout.drawCell(
+                    text: cell.text,
+                    font: boldFont,
+                    color: NSColor.labelColor,
+                    cellRect: pinnedCorner,
+                    wrap: wrapTableCells,
+                    selectedRange: localSelection(for: cell.range),
+                    stack: tabularCellStack
                 )
-                (text as NSString).draw(
-                    with: textRect,
-                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                    attributes: textAttrsBold,
-                    context: nil
-                )
-                NSGraphicsContext.restoreGraphicsState()
             }
 
             NSColor.separatorColor.setStroke()

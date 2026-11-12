@@ -75,22 +75,19 @@ func testColumnWidthCalculationWrapOnVsOff() throws {
         throw NSError(domain: "SpreadsheetGridTests", code: 11, userInfo: [NSLocalizedDescriptionKey: "Wrap OFF should expand column 1 width to fit longest cell: \(widthsWrapOff[1])"])
     }
 
-    // Wrap ON: column width starts at defaultWrapWidth (240.0) and expands to fit longer cells
+    // Wrap ON: column widths stay at defaultWrapWidth (240.0) so long cells wrap inside the column
     let widthsWrapOn = resolver.calculateColumnWidths(in: storage, isTSV: true, wrapTableCells: true, defaultWrapWidth: 240.0)
     guard widthsWrapOn.count == 3 else {
         throw NSError(domain: "SpreadsheetGridTests", code: 12, userInfo: [NSLocalizedDescriptionKey: "Expected 3 columns for wrap on"])
     }
-    // Short columns stay at defaultWrapWidth
-    guard abs(widthsWrapOn[0] - 240.0) < 0.01 && abs(widthsWrapOn[2] - 240.0) < 0.01 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Short columns should remain defaultWrapWidth 240.0, got \(widthsWrapOn)"])
-    }
-    // Long column expands to accommodate content to prevent spilling across column boundaries
-    guard widthsWrapOn[1] >= 320.0 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 14, userInfo: [NSLocalizedDescriptionKey: "Expected long column 1 to expand to at least 320.0, got \(widthsWrapOn[1])"])
+    for (idx, w) in widthsWrapOn.enumerated() {
+        guard abs(w - 240.0) < 0.01 else {
+            throw NSError(domain: "SpreadsheetGridTests", code: 13, userInfo: [NSLocalizedDescriptionKey: "Wrap ON should keep column \(idx) at defaultWrapWidth 240.0, got \(widthsWrapOn)"])
+        }
     }
 }
 
-// 2b. Long Cell Text Accommodation and Column Boundary Alignment (e.g. flight_comparison.csv line 15)
+// 2b. Long Cell Text Wraps Inside Column Boundary and Expands Row Height
 func testLongCellDoesNotSpillAndPreservesColumnAlignment() throws {
     let csv = "ColA,ColB,ColC\n\"Avoids as much CO2e as 2,192 trees absorb in a day\",$357,$420\nShort,ValB,ValC\n"
     let storage = NSTextStorage(string: csv)
@@ -101,38 +98,37 @@ func testLongCellDoesNotSpillAndPreservesColumnAlignment() throws {
         throw NSError(domain: "SpreadsheetGridTests", code: 25, userInfo: [NSLocalizedDescriptionKey: "Expected 3 columns, got \(widths.count)"])
     }
 
-    // Column 0 must expand beyond 240.0 to fit the 335.5pt text + 20pt padding (~356pt)
-    guard widths[0] >= 350.0 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 26, userInfo: [NSLocalizedDescriptionKey: "Column 0 must expand to accommodate long cell: got \(widths[0])"])
-    }
-    // Short columns (ColB, ColC) remain at defaultWrapWidth 240.0
-    guard abs(widths[1] - 240.0) < 0.01 && abs(widths[2] - 240.0) < 0.01 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 27, userInfo: [NSLocalizedDescriptionKey: "Short columns should remain defaultWrapWidth 240.0, got \(widths)"])
+    // All columns stay at defaultWrapWidth 240.0 when wrapTableCells == true
+    for (idx, w) in widths.enumerated() {
+        guard abs(w - 240.0) < 0.01 else {
+            throw NSError(domain: "SpreadsheetGridTests", code: 26, userInfo: [NSLocalizedDescriptionKey: "Column \(idx) should stay at defaultWrapWidth 240.0, got \(widths)"])
+        }
     }
 
-    // Render tabular syntax and verify comma delimiter has positive kern to preserve ColB alignment
-    resolver.renderTabularSyntax(in: storage, isTSV: false, wrapTableCells: true)
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    textView.wrapTableCells = true
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    textView.updateSyntaxStyling(force: true)
 
-    let fullStr = storage.string as NSString
-    let line1Range = fullStr.lineRange(for: fullStr.range(of: "Avoids as much CO2e"))
-    let (_, delims1) = resolver.parseLine(in: fullStr, range: line1Range, isTSV: false)
-    guard !delims1.isEmpty else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 28, userInfo: [NSLocalizedDescriptionKey: "Line 1 should have delimiters"])
-    }
-    let comma1Kern = storage.attribute(.kern, at: delims1[0].location, effectiveRange: nil) as? CGFloat ?? 0.0
-    guard comma1Kern > 0 else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 29, userInfo: [NSLocalizedDescriptionKey: "Line 1 comma after long cell must have positive kern to align ColB: got \(comma1Kern)"])
+    guard let row0 = textView.rowRect(for: 0),
+          let row1 = textView.rowRect(for: 1),
+          let row2 = textView.rowRect(for: 2),
+          let col0 = textView.columnRect(for: 0),
+          let col1 = textView.columnRect(for: 1) else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 27, userInfo: [NSLocalizedDescriptionKey: "Missing row or column rects"])
     }
 
-    // Line 2 (short cell "Short") comma delimiter must also have positive kern aligning to the same ColB start
-    let line2Range = fullStr.lineRange(for: fullStr.range(of: "Short,ValB"))
-    let (_, delims2) = resolver.parseLine(in: fullStr, range: line2Range, isTSV: false)
-    guard !delims2.isEmpty else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 30, userInfo: [NSLocalizedDescriptionKey: "Line 2 should have delimiters"])
+    guard abs(col0.width - 240.0) < 0.01 && abs(col1.minX - col0.maxX) < 0.01 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 28, userInfo: [NSLocalizedDescriptionKey: "Column alignment broken: col0=\(col0), col1=\(col1)"])
     }
-    let comma2Kern = storage.attribute(.kern, at: delims2[0].location, effectiveRange: nil) as? CGFloat ?? 0.0
-    guard comma2Kern > comma1Kern else {
-        throw NSError(domain: "SpreadsheetGridTests", code: 31, userInfo: [NSLocalizedDescriptionKey: "Line 2 comma kern (\(comma2Kern)) should be larger than line 1 kern (\(comma1Kern)) to align ColB"])
+    guard row1.height > 24.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 29, userInfo: [NSLocalizedDescriptionKey: "Long wrapped cell in row 1 must expand row height > 24.0, got \(row1.height)"])
+    }
+    guard row0.height <= 22.0 && abs(row2.minY - row1.maxY) < 0.5 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 30, userInfo: [NSLocalizedDescriptionKey: "Unexpected row heights/positions: row0=\(row0), row1=\(row1), row2=\(row2)"])
     }
 }
 
@@ -480,6 +476,180 @@ func testMultiColumnDraggingOverColumnLetterRuler() throws {
     }
 }
 
+// 9. Narrow customColumnWidths with wrapTableCells == true wraps text and increases rowRect.height
+func testNarrowCustomColumnWidthWrapsAndIncreasesRowHeight() throws {
+    let csv = "ColA,ColB\nHello world this is a long cell,Short\nRow2A,Row2B\n"
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    textView.wrapTableCells = true
+    textView.customColumnWidths = [0: 80.0]
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    textView.updateSyntaxStyling(force: true)
+
+    guard let col0 = textView.columnRect(for: 0),
+          let row0 = textView.rowRect(for: 0),
+          let row1 = textView.rowRect(for: 1),
+          let row2 = textView.rowRect(for: 2) else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 80, userInfo: [NSLocalizedDescriptionKey: "Missing rects"])
+    }
+
+    guard abs(col0.width - 80.0) < 0.01 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 81, userInfo: [NSLocalizedDescriptionKey: "Expected col 0 width 80.0, got \(col0.width)"])
+    }
+    guard row0.height <= 22.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 82, userInfo: [NSLocalizedDescriptionKey: "Header row should stay single-line, got \(row0.height)"])
+    }
+    guard row1.height > 30.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 83, userInfo: [NSLocalizedDescriptionKey: "Narrow col 0 should wrap row 1 and increase height > 30.0, got \(row1.height)"])
+    }
+    guard abs(row2.minY - row1.maxY) < 0.5 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 84, userInfo: [NSLocalizedDescriptionKey: "Row 2 should start at row1.maxY (\(row1.maxY)), got \(row2.minY)"])
+    }
+}
+
+// 10. Caret insertionBaseRect on wrapped cell's second visual line
+func testCaretInsertionBaseRectOnWrappedCellSecondLine() throws {
+    let csv = "Alpha Beta Gamma Delta,ColB\n"
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    textView.wrapTableCells = true
+    textView.customColumnWidths = [0: 80.0]
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    textView.updateSyntaxStyling(force: true)
+
+    guard let col0 = textView.columnRect(for: 0) else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 90, userInfo: [NSLocalizedDescriptionKey: "Missing col0"])
+    }
+
+    let firstLineRect = textView.insertionBaseRect(at: 0) // 'A' in "Alpha"
+    let secondLineRect = textView.insertionBaseRect(at: 18) // 'e' in "Delta" (wrapped line)
+
+    guard secondLineRect.minY > firstLineRect.minY else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 91, userInfo: [NSLocalizedDescriptionKey: "Wrapped caret minY (\(secondLineRect.minY)) must be > firstLineRect.minY (\(firstLineRect.minY))"])
+    }
+    guard secondLineRect.minX >= col0.minX && secondLineRect.minX < col0.maxX else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 92, userInfo: [NSLocalizedDescriptionKey: "Wrapped caret minX (\(secondLineRect.minX)) must stay inside col0 (\(col0.minX)...\(col0.maxX))"])
+    }
+}
+
+// 11. LineNumberRulerView aligns row 2's y-position with rowRect(for: 1).minY when row 1 is wrapped
+func testLineNumberRulerAlignsWithWrappedRowRects() throws {
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    let textView = VimMDTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+    textView.documentSyntaxType = .csv
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    textView.wrapTableCells = true
+    textView.customColumnWidths = [0: 80.0]
+
+    let csv = "Long wrapped header text here,B\nRow2,C\n"
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    scrollView.documentView = textView
+    textView.updateSyntaxStyling(force: true)
+
+    let ruler = LineNumberRulerView(scrollView: scrollView, orientation: .verticalRuler)
+    ruler.clientView = textView
+    scrollView.hasVerticalRuler = true
+    scrollView.verticalRulerView = ruler
+
+    guard let row0 = textView.rowRect(for: 0),
+          let row1 = textView.rowRect(for: 1) else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 100, userInfo: [NSLocalizedDescriptionKey: "Missing row rects"])
+    }
+    guard row0.height > 30.0 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 101, userInfo: [NSLocalizedDescriptionKey: "Expected row 0 to wrap and have height > 30.0, got \(row0.height)"])
+    }
+
+    guard let rulerRow1 = ruler.tabularRowRect(for: 1) else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 102, userInfo: [NSLocalizedDescriptionKey: "LineNumberRulerView must return tabularRowRect for row 1"])
+    }
+    let expectedInRuler = ruler.convert(row1, from: textView)
+    guard abs(rulerRow1.minY - expectedInRuler.minY) < 0.5 && abs(rulerRow1.height - expectedInRuler.height) < 0.5 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 103, userInfo: [NSLocalizedDescriptionKey: "Ruler row 1 rect (\(rulerRow1)) must match converted rowRect(for: 1) (\(expectedInRuler))"])
+    }
+}
+
+// 12. drawInsertionPoint in tabular mode uses insertionBaseRect(at:) instead of AppKit's unwrapped rect
+func testDrawInsertionPointUsesTabularInsertionBaseRect() throws {
+    let csv = "Alpha Beta Gamma Delta,ColB\n"
+    let textView = VimMDTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    textView.isTabularDocument = true
+    textView.isTSV = false
+    textView.wrapTableCells = true
+    textView.customColumnWidths = [0: 80.0]
+    let session = VimSession(initialText: csv)
+    textView.session = session
+    textView.updateSyntaxStyling(force: true)
+    textView.setSelectedRange(NSRange(location: 18, length: 0))
+
+    let expectedRect = textView.currentCaretRect
+    let unwrappedAppKitRect = NSRect(x: 999, y: 0, width: 2, height: 18)
+
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: 800,
+        pixelsHigh: 600,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    textView.drawInsertionPoint(in: unwrappedAppKitRect, color: .labelColor, turnedOn: true)
+    let drawnOn = textView.lastDrawnCursorRect
+    textView.drawInsertionPoint(in: unwrappedAppKitRect, color: .labelColor, turnedOn: false)
+    let drawnOff = textView.lastDrawnCursorRect
+    NSGraphicsContext.restoreGraphicsState()
+
+    guard let onRect = drawnOn,
+          abs(onRect.minX - expectedRect.minX) < 0.5,
+          abs(onRect.minY - expectedRect.minY) < 0.5 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 110, userInfo: [NSLocalizedDescriptionKey: "drawInsertionPoint(turnedOn: true) drew at \(String(describing: drawnOn)), expected \(expectedRect)"])
+    }
+    guard let offRect = drawnOff,
+          abs(offRect.minX - expectedRect.minX) < 0.5,
+          abs(offRect.minY - expectedRect.minY) < 0.5 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 111, userInfo: [NSLocalizedDescriptionKey: "drawInsertionPoint(turnedOn: false) drew at \(String(describing: drawnOff)), expected \(expectedRect)"])
+    }
+}
+
+// 13. Visual selection highlighting in tabular mode computes rects inside wrapped cell bounds
+func testTabularSelectionRectsInsideWrappedCell() throws {
+    let text = "Alpha Beta Gamma Delta"
+    let cellRect = NSRect(x: 10, y: 20, width: 80, height: 60)
+    let font = NSFont.monospacedSystemFont(ofSize: 13.0, weight: .regular)
+    let stack = TabularCellLayout.CellTextKitStack()
+    let rects = TabularCellLayout.selectionRects(
+        text: text,
+        selectedRange: NSRange(location: 0, length: text.count),
+        font: font,
+        cellRect: cellRect,
+        wrap: true,
+        stack: stack
+    )
+
+    guard rects.count >= 2 else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 120, userInfo: [NSLocalizedDescriptionKey: "Expected >= 2 wrapped selection line rects, got \(rects.count)"])
+    }
+    for r in rects {
+        guard cellRect.contains(r) else {
+            throw NSError(domain: "SpreadsheetGridTests", code: 121, userInfo: [NSLocalizedDescriptionKey: "Selection rect \(r) escaped cellRect \(cellRect)"])
+        }
+    }
+    guard rects[1].minY > rects[0].minY else {
+        throw NSError(domain: "SpreadsheetGridTests", code: 122, userInfo: [NSLocalizedDescriptionKey: "Expected second line selection rect below first: \(rects)"])
+    }
+}
+
 print("=== SpreadsheetGrid Unit Tests ===")
 var total = 0
 var passed = 0
@@ -493,7 +663,12 @@ let tests: [(String, () throws -> Void)] = [
     ("testHoverCursors", testHoverCursors),
     ("testClickToCopyColumnAndRow", testClickToCopyColumnAndRow),
     ("testMultiRowDraggingOverLineNumberRuler", testMultiRowDraggingOverLineNumberRuler),
-    ("testMultiColumnDraggingOverColumnLetterRuler", testMultiColumnDraggingOverColumnLetterRuler)
+    ("testMultiColumnDraggingOverColumnLetterRuler", testMultiColumnDraggingOverColumnLetterRuler),
+    ("testNarrowCustomColumnWidthWrapsAndIncreasesRowHeight", testNarrowCustomColumnWidthWrapsAndIncreasesRowHeight),
+    ("testCaretInsertionBaseRectOnWrappedCellSecondLine", testCaretInsertionBaseRectOnWrappedCellSecondLine),
+    ("testLineNumberRulerAlignsWithWrappedRowRects", testLineNumberRulerAlignsWithWrappedRowRects),
+    ("testDrawInsertionPointUsesTabularInsertionBaseRect", testDrawInsertionPointUsesTabularInsertionBaseRect),
+    ("testTabularSelectionRectsInsideWrappedCell", testTabularSelectionRectsInsideWrappedCell)
 ]
 
 for (name, test) in tests {

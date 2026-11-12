@@ -818,13 +818,10 @@ do {
         assert(doc.wrapTableCells && tv.wrapTableCells, "Initial wrapTableCells should default to true")
         let widthsWrapped = tv.columnWidths()
         assert(!widthsWrapped.isEmpty, "Column widths should be computed")
-        for (idx, w) in widthsWrapped.enumerated() {
-            if idx == 5 {
-                assert(w > 300.0, "Long column should expand to fit content without spilling, got \(w)")
-            } else {
-                assert(abs(w - 240.0) < 0.1, "Wrapped column width should be 240.0, got \(w)")
-            }
+        for (_, w) in widthsWrapped.enumerated() {
+            assert(abs(w - 240.0) < 0.1, "Wrapped column width should be 240.0, got \(w)")
         }
+        assert((tv.rowRect(for: 3)?.height ?? 0) > 20.0, "Wrapped row 3 should expand vertically")
         
         // Toggle Wrap Table Cells OFF -> Auto-fit width calculation
         doc.toggleWrapTableCells(nil)
@@ -833,17 +830,14 @@ do {
         // In real euro leagues data, Col 5 ("How to Watch in the USA") has long strings (> 40 chars)
         // Auto-fit expands width to fit longest string
         assert(widthsAutoFit[5] > 300.0, "Auto-fit should expand Col 5 width to fit longest entry (was \(widthsAutoFit[5]))")
+        assert((tv.rowRect(for: 3)?.height ?? 0) <= 22.0, "Unwrapped row 3 should stay single-line")
         
         // Toggle back ON -> Restored wrapped 240pt grid
         doc.toggleWrapTableCells(nil)
         assert(doc.wrapTableCells && tv.wrapTableCells, "wrapTableCells should be true after toggle")
         let widthsRestored = tv.columnWidths()
-        for (idx, w) in widthsRestored.enumerated() {
-            if idx == 5 {
-                assert(w > 300.0, "Long column should expand to fit content without spilling, got \(w)")
-            } else {
-                assert(abs(w - 240.0) < 0.1, "Restored wrapped column width should be 240.0, got \(w)")
-            }
+        for (_, w) in widthsRestored.enumerated() {
+            assert(abs(w - 240.0) < 0.1, "Restored wrapped column width should be 240.0, got \(w)")
         }
     }
     
